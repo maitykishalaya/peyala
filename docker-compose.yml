@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: peyala-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: peyala_business
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: peyala-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/peyala_business
+      JWT_SECRET: peyala_docker_secret_change_me
+      NODE_ENV: production
+    depends_on:
+      - mongodb
+    volumes:
+      - ./uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: peyala-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:5000/api
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:
