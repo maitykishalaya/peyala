@@ -166,8 +166,32 @@ router.post('/', async (req, res) => {
 // ── PUT /api/accounts/:id ─────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const account = await Account.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    await log({ user: req.user, action: 'UPDATE', module: 'Accounts', description: `${req.user.name} updated account: ${account.name}` });
+    const existing = await Account.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: 'Account not found' });
+
+    const updateData = { ...req.body };
+
+    // If openingBalance is being changed, adjust currentBalance by the same difference.
+    // e.g. old opening = ₹0, new opening = ₹50,000
+    //      currentBalance increases by ₹50,000 (the difference)
+    // This preserves all transactions that have already moved the balance.
+    if (req.body.openingBalance !== undefined) {
+      const oldOpening = existing.openingBalance || 0;
+      const newOpening = Number(req.body.openingBalance);
+      const difference = newOpening - oldOpening;
+      updateData.currentBalance = (existing.currentBalance || 0) + difference;
+    }
+
+    const account = await Account.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+    await log({
+      user: req.user, action: 'UPDATE', module: 'Accounts',
+      description: `${req.user.name} updated account: ${account.name}` +
+        (req.body.openingBalance !== undefined ? ` (opening balance changed to ₹${req.body.openingBalance})` : ''),
+    });
     res.json(account);
   } catch (err) { res.status(400).json({ message: err.message }); }
 });
