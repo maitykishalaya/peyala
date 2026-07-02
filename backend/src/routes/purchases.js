@@ -157,9 +157,9 @@ router.post('/', async (req, res) => {
       });
     } else {
       // PAID: deduct account, update supplier paid, create payment record
-      if (paidFrom) {
-        await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -totalAmount } });
-      }
+      // if (paidFrom) {
+      //   await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -totalAmount } });
+      // }
       await Supplier.findByIdAndUpdate(supplier, {
         $inc: { totalPurchased: totalAmount, totalPaid: totalAmount }
       });
@@ -211,17 +211,17 @@ router.post('/:id/clear-due', async (req, res) => {
 
     // Deduct from the correct account based on payment mode
     // Cash → cash-type account; others → specified account
-    if (paymentMode === 'cash') {
-      // If paidFrom specified and it's cash type, use it
-      // Otherwise find the first cash account
-      const account = await Account.findById(paidFrom);
-      const targetAccount = (account?.type === 'cash') ? paidFrom :
-        (await Account.findOne({ type: 'cash', isActive: true }))._id;
-      await Account.findByIdAndUpdate(targetAccount, { $inc: { currentBalance: -purchase.totalAmount } });
-    } else {
-      // UPI, card, cheque, bank transfer → use specified account
-      await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -purchase.totalAmount } });
-    }
+    // if (paymentMode === 'cash') {
+    //   // If paidFrom specified and it's cash type, use it
+    //   // Otherwise find the first cash account
+    //   const account = await Account.findById(paidFrom);
+    //   const targetAccount = (account?.type === 'cash') ? paidFrom :
+    //     (await Account.findOne({ type: 'cash', isActive: true }))._id;
+    //   // await Account.findByIdAndUpdate(targetAccount, { $inc: { currentBalance: -purchase.totalAmount } });
+    // } else {
+    //   // UPI, card, cheque, bank transfer → use specified account
+    //   await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -purchase.totalAmount } });
+    // }
 
     // Update supplier: due is now cleared
     await Supplier.findByIdAndUpdate(purchase.supplier._id, {
@@ -261,9 +261,9 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Reverse account if paid
-    if (purchase.isPaid && purchase.paidFrom) {
-      await Account.findByIdAndUpdate(purchase.paidFrom, { $inc: { currentBalance: purchase.totalAmount } });
-    }
+    // if (purchase.isPaid && purchase.paidFrom) {
+    //   await Account.findByIdAndUpdate(purchase.paidFrom, { $inc: { currentBalance: purchase.totalAmount } });
+    // }
 
     // Reverse supplier totals
     await Supplier.findByIdAndUpdate(purchase.supplier, { $inc: { totalPurchased: -purchase.totalAmount } });
