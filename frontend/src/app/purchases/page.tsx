@@ -26,7 +26,7 @@ import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, UNITS } from '@/lib/utils';
-import { Plus, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle } from 'lucide-react';
 
 // ── Inline Item Search + Quick Add ───────────────────────────────
 // This sub-component renders per line item.
@@ -149,13 +149,19 @@ export default function PurchasesPage() {
 
   // ── Clear due form ──────────────────────────────────────────────
   const [clearDueForm, setClearDueForm] = useState({ paidFrom: '', paymentMode: 'cash', date: today() });
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [errorModalOpen, setErrorModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<any>(null);
 
-  // ── Form state ──────────────────────────────────────────────────
-  const [form, setForm] = useState<any>({
+  const blankPurchaseForm = () => ({
     date: today(), supplier: '', paidFrom: '', paymentMode: 'cash',
     isPaid: true, notes: '', referenceNumber: '',
     lines: [{ item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, totalPrice: 0 }]
   });
+
+  // ── Form state ──────────────────────────────────────────────────
+  const [form, setForm] = useState<any>(blankPurchaseForm());
 
   const load = async () => {
     setLoading(true);
@@ -243,26 +249,123 @@ export default function PurchasesPage() {
     }
   };
 
+  const openNewPurchase = () => {
+    setEditingPurchase(null);
+    setForm(blankPurchaseForm());
+    setAllowedModes(modesWithDue);
+    setModal(true);
+  };
+
+  const openEditPurchase = async (purchase: any) => {
+    setEditingPurchase(purchase);
+    const prefilled = {
+      date: new Date(purchase.date).toISOString().slice(0, 10),
+      supplier: purchase.supplier?._id || '',
+      paidFrom: purchase.paidFrom?._id || '',
+      paymentMode: purchase.paymentMode || 'cash',
+      isPaid: purchase.isPaid,
+      notes: purchase.notes || '',
+      referenceNumber: purchase.referenceNumber || '',
+      lines: purchase.items.map((item: any) => ({
+        item: item.item?._id || item.item,
+        quantity: item.quantity,
+        unit: item.unit,
+        pricePerUnit: item.pricePerUnit,
+        totalPrice: item.totalPrice,
+      })),
+    };
+    setForm(prefilled);
+
+    if (prefilled.paidFrom) {
+      const { modes } = await getModesForAccount(prefilled.paidFrom);
+      setAllowedModes([...modes, { value: 'due', label: '⏳ Due (Pay Later)' }]);
+    } else {
+      setAllowedModes(modesWithDue);
+    }
+
+    setModal(true);
+  };
+
   const addLine = () => setForm({ ...form, lines: [...form.lines, { item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, totalPrice: 0 }] });
   const removeLine = (idx: number) => setForm({ ...form, lines: form.lines.filter((_: any, i: number) => i !== idx) });
   const grandTotal = form.lines.reduce((s: number, l: any) => s + l.totalPrice, 0);
 
-  const submit = async () => {
+  const getInventoryUnit = (itemId: string) => {
+    return items.find((i: any) => i._id === itemId)?.unit || '';
+  };
+
+  const validatePurchaseForm = () => {
+    const errors: string[] = [];
+    if (!form.supplier) errors.push('Choose a supplier before saving.');
     const isDue = form.paymentMode === 'due';
-    const payload = {
-      ...form,
-      isPaid: !isDue,
-      paidFrom: isDue ? null : form.paidFrom,
-      items: form.lines.map((l: any) => ({
-        item: l.item, quantity: l.quantity, unit: l.unit,
-        pricePerUnit: l.pricePerUnit, totalPrice: l.totalPrice
-      }))
-    };
-    await purchasesApi.create(payload);
-    setModal(false);
-    setForm({ date: today(), supplier: '', paidFrom: '', paymentMode: 'cash', isPaid: true, notes: '', referenceNumber: '', lines: [{ item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, totalPrice: 0 }] });
-    setAllowedModes([]);
-    load();
+    if (!isDue && !form.paidFrom) {
+      errors.push('Select an account or switch payment mode to Due.');
+    }
+
+    if (!Array.isArray(form.lines) || form.lines.length === 0) {
+      errors.push('Add at least one purchase line item.');
+    } else {
+      form.lines.forEach((line: any, idx: number) => {
+        const lineNumber = idx + 1;
+        if (!line.item) errors.push(`Line ${lineNumber}: select or add an item.`);
+        if (line.quantity === undefined || line.quantity === null || line.quantity <= 0) {
+          errors.push(`Line ${lineNumber}: quantity must be greater than 0.`);
+        }
+        if (line.pricePerUnit === undefined || line.pricePerUnit === null || line.pricePerUnit < 0) {
+          errors.push(`Line ${lineNumber}: rate must be 0 or higher.`);
+        }
+        if (line.totalPrice === undefined || line.totalPrice === null || line.totalPrice <= 0) {
+          errors.push(`Line ${lineNumber}: total must be greater than 0.`);
+        }
+        if (line.item) {
+          const expectedUnit = getInventoryUnit(line.item);
+          if (expectedUnit && line.unit !== expectedUnit) {
+            errors.push(`Line ${lineNumber}: unit must match saved inventory unit '${expectedUnit}'.`);
+          }
+        }
+      });
+    }
+
+    return errors;
+  };
+
+  const submit = async () => {
+    const errors = validatePurchaseForm();
+    if (errors.length > 0) {
+      setFormErrors(errors);
+      setErrorModalOpen(true);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const isDue = form.paymentMode === 'due';
+      const payload = {
+        ...form,
+        isPaid: !isDue,
+        paidFrom: isDue ? null : form.paidFrom,
+        items: form.lines.map((l: any) => ({
+          item: l.item, quantity: l.quantity, unit: l.unit,
+          pricePerUnit: l.pricePerUnit, totalPrice: l.totalPrice
+        }))
+      };
+      if (editingPurchase) {
+        await purchasesApi.update(editingPurchase._id, payload);
+      } else {
+        await purchasesApi.create(payload);
+      }
+      setModal(false);
+      setEditingPurchase(null);
+      setForm(blankPurchaseForm());
+      setAllowedModes([]);
+      load();
+    } catch (err: any) {
+      const message = err.response?.data?.message || 'Purchase could not be saved. Please check the form.';
+      setFormErrors([message]);
+      setErrorModalOpen(true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const del = async (id: string) => {
@@ -292,7 +395,7 @@ export default function PurchasesPage() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Raw Material Purchases</h1>
             <p className="text-sm text-gray-500">{total} entries · inventory auto-updated</p>
           </div>
-          <button onClick={() => setModal(true)} className="btn-primary flex items-center gap-2">
+          <button onClick={openNewPurchase} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> New Purchase
           </button>
         </div>
@@ -361,7 +464,13 @@ export default function PurchasesPage() {
                           Clear Due
                         </button>
                       )}
-                      <button onClick={() => del(p._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEditPurchase(p); }}
+                        className="p-1.5 text-gray-400 hover:text-brand-500 rounded"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); del(p._id); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -383,7 +492,7 @@ export default function PurchasesPage() {
       </div>
 
       {/* ── New Purchase Modal ───────────────────────────────────────── */}
-      <Modal open={modal} onClose={() => setModal(false)} title="New Purchase Entry" size="xl">
+      <Modal open={modal} onClose={() => { setModal(false); setEditingPurchase(null); }} title={editingPurchase ? 'Edit Purchase Entry' : 'New Purchase Entry'} size="xl">
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div><label className="label">Date *</label><input type="date" className="input" value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
@@ -425,9 +534,17 @@ export default function PurchasesPage() {
                   <input type="number" step="0.1" className="input text-xs py-1.5" value={line.quantity || ''} onChange={e => updateLine(idx, 'quantity', +e.target.value)} placeholder="Qty" />
                 </div>
                 <div className="col-span-1">
-                  <select className="input text-xs py-1.5" value={line.unit} onChange={e => updateLine(idx, 'unit', e.target.value)}>
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                  {line.item ? (
+                    <input
+                      className="input text-xs py-1.5 bg-gray-100 dark:bg-gray-900"
+                      value={getInventoryUnit(line.item)}
+                      disabled
+                    />
+                  ) : (
+                    <select className="input text-xs py-1.5" value={line.unit} onChange={e => updateLine(idx, 'unit', e.target.value)}>
+                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  )}
                 </div>
                 <div className="col-span-2">
                   <input type="number" className="input text-xs py-1.5" value={line.pricePerUnit || ''} onChange={e => updateLine(idx, 'pricePerUnit', +e.target.value)} placeholder="₹/unit" />
@@ -476,11 +593,26 @@ export default function PurchasesPage() {
           <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
 
           <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={submit} className="btn-primary flex-1 py-2.5">
-              Save Purchase · {formatCurrency(grandTotal)}
-              {form.paymentMode === 'due' && ' (Due)'}
+            <button onClick={submit} disabled={saving} className="btn-primary flex-1 py-2.5 disabled:opacity-60">
+              {saving ? 'Saving...' : editingPurchase ? `Save Changes · ${formatCurrency(grandTotal)}` : `Save Purchase · ${formatCurrency(grandTotal)}`}
+              {form.paymentMode === 'due' && !saving && ' (Due)'}
             </button>
-            <button onClick={() => setModal(false)} className="btn-secondary">Cancel</button>
+            <button onClick={() => { setModal(false); setEditingPurchase(null); }} className="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Validation Error Modal ─────────────────────────────────── */}
+      <Modal open={errorModalOpen} onClose={() => setErrorModalOpen(false)} title="Please fix purchase details" size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">The purchase could not be saved because of the following issue(s):</p>
+          <ul className="list-disc list-inside text-sm text-red-600 dark:text-red-400 space-y-1">
+            {formErrors.map((error, idx) => (
+              <li key={idx}>{error}</li>
+            ))}
+          </ul>
+          <div className="text-right">
+            <button onClick={() => setErrorModalOpen(false)} className="btn-primary">Okay</button>
           </div>
         </div>
       </Modal>

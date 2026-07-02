@@ -84,6 +84,7 @@ export const purchasesApi = {
   list: (params?: any) => api.get('/purchases', { params }),
   get: (id: string) => api.get(`/purchases/${id}`),
   create: (data: any) => api.post('/purchases', data),
+  update: (id: string, data: any) => api.put(`/purchases/${id}`, data),
   delete: (id: string) => api.delete(`/purchases/${id}`),
   // Clear a previously due purchase — debits account
   clearDue: (id: string, data: any) => api.post(`/purchases/${id}/clear-due`, data),
@@ -178,4 +179,10 @@ export const backupApi = {
   // Restores from an uploaded JSON backup. mode: 'merge' | 'replace'
   import: (data: any, mode: string, confirmation: string) =>
     api.post('/backup/import', { data, mode, confirmation }),
+};
+
+// Owner Note — admin editable notice for staff/manager
+export const ownerNoteApi = {
+  get: () => api.get('/owner-note'),
+  update: (data: any) => api.put('/owner-note', data),
 };

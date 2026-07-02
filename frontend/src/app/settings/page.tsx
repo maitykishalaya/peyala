@@ -1,9 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/lib/auth';
-import { authApi } from '@/lib/api';
+import { authApi, ownerNoteApi } from '@/lib/api';
 import { Settings, User, Shield, Database, Users, Activity, Tag } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -11,6 +11,8 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<'profile' | 'security' | 'system'>('profile');
   const [profileForm, setProfileForm] = useState({ name: user?.name || '' });
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [ownerNote, setOwnerNote] = useState('');
+  const [ownerNoteMsg, setOwnerNoteMsg] = useState('');
   const [msg, setMsg] = useState('');
 
   const tabs = [
@@ -25,6 +27,23 @@ export default function SettingsPage() {
       setTimeout(() => setMsg(''), 2000);
     } catch { setMsg('Error saving'); }
   };
+
+  const saveOwnerNote = async () => {
+    try {
+      await ownerNoteApi.update({ note: ownerNote });
+      setOwnerNoteMsg('Owner notice saved ✓');
+      setTimeout(() => setOwnerNoteMsg(''), 2000);
+    } catch {
+      setOwnerNoteMsg('Failed to save owner notice');
+      setTimeout(() => setOwnerNoteMsg(''), 2000);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
+    }
+  }, [user?.role]);
 
   return (
     <AppLayout>
@@ -155,6 +174,23 @@ export default function SettingsPage() {
                 ))}
               </div>
             </div>
+
+            {user?.role === 'admin' && (
+              <div className="card p-6">
+                <h3 className="font-medium text-gray-900 dark:text-white mb-2">Owner Notice</h3>
+                <p className="text-sm text-gray-500 mb-3">Write a message for managers and staff. Only admins can update this notice.</p>
+                <textarea
+                  className="input h-32 min-h-[8rem] resize-none"
+                  value={ownerNote}
+                  onChange={e => setOwnerNote(e.target.value)}
+                  placeholder="Enter owner notice for managers and staff..."
+                />
+                <div className="mt-3 flex items-center justify-between gap-4">
+                  <button onClick={saveOwnerNote} className="btn-primary">Save Notice</button>
+                  {ownerNoteMsg && <p className="text-sm text-green-600 dark:text-green-300">{ownerNoteMsg}</p>}
+                </div>
+              </div>
+            )}
 
             <div className="card p-6">
               <h3 className="font-medium text-gray-900 dark:text-white mb-2">API Health</h3>

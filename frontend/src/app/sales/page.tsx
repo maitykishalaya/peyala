@@ -22,7 +22,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
-import { salesApi } from '@/lib/api';
+import { salesApi, accountsApi } from '@/lib/api';
 import { formatCurrency, formatDate, today } from '@/lib/utils';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info } from 'lucide-react';
 
@@ -57,6 +57,7 @@ export default function SalesPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ startDate: '', endDate: '' });
+  const [accounts, setAccounts] = useState<any[]>([]);
 
   // ── Modal state ─────────────────────────────────────────────────
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
@@ -72,10 +73,11 @@ export default function SalesPage() {
     // Outlet payment breakdown — user fills these individually
     paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0 },
     // Platform sections — only filled after payout received
-    zomato: { ...emptyPlatform },
-    fatafat: { ...emptyPlatform },
+    zomato: { ...emptyPlatform, receivedIn: '' },
+    fatafat: { ...emptyPlatform, receivedIn: '' },
     // Other sales (catering, corporate, etc.)
     otherSales: 0,
+    otherSalesReceivedIn: '',
     otherSalesDescription: '',
     notes: '',
   });
@@ -110,15 +112,24 @@ export default function SalesPage() {
 
   useEffect(() => { load(); }, [page, filters]);
 
+  useEffect(() => {
+    const loadAccounts = async () => {
+      const res = await accountsApi.list();
+      setAccounts(res.data);
+    };
+    loadAccounts();
+  }, []);
+
   // ── Open edit modal — populate form from existing entry ──────────
   const openEdit = (s: any) => {
     setSelected(s);
     setForm({
       date: s.date?.split('T')[0] || today(),
       paymentBreakdown: s.paymentBreakdown || { cash: 0, upi: 0, card: 0, bankTransfer: 0 },
-      zomato: s.zomato || { ...emptyPlatform },
-      fatafat: s.fatafat || { ...emptyPlatform },
+      zomato: { ...(s.zomato || { ...emptyPlatform }), receivedIn: s.zomato?.receivedIn?._id || s.zomato?.receivedIn || '' },
+      fatafat: { ...(s.fatafat || { ...emptyPlatform }), receivedIn: s.fatafat?.receivedIn?._id || s.fatafat?.receivedIn || '' },
       otherSales: s.otherSales || 0,
+      otherSalesReceivedIn: s.otherSalesReceivedIn?._id || s.otherSalesReceivedIn || '',
       otherSalesDescription: s.otherSalesDescription || '',
       notes: s.notes || '',
     });
@@ -136,12 +147,21 @@ export default function SalesPage() {
     setForm({ ...form, [platform]: updated });
   };
 
+  const normalizeSaleFormPayload = (payload: any) => {
+    const normalized = { ...payload };
+    normalized.zomato = { ...(normalized.zomato || {}), receivedIn: normalized.zomato?.receivedIn || undefined };
+    normalized.fatafat = { ...(normalized.fatafat || {}), receivedIn: normalized.fatafat?.receivedIn || undefined };
+    normalized.otherSalesReceivedIn = normalized.otherSalesReceivedIn || undefined;
+    return normalized;
+  };
+
   // ── Submit form ─────────────────────────────────────────────────
   const submit = async () => {
+    const payload = normalizeSaleFormPayload(form);
     if (modal === 'edit') {
-      await salesApi.update(selected._id, form);
+      await salesApi.update(selected._id, payload);
     } else {
-      await salesApi.create(form);
+      await salesApi.create(payload);
     }
     setModal(null);
     setForm(blank());
@@ -254,6 +274,20 @@ export default function SalesPage() {
                   {formatCurrency(d.netSettlement)}
                 </div>
               </div>
+            </div>
+
+            {/* Received in account */}
+            <div>
+              <label className="label">Received in Account</label>
+              <select className="input"
+                value={d.receivedIn || ''}
+                onChange={e => setForm({ ...form, [platform]: { ...d, receivedIn: e.target.value } })}
+              >
+                <option value="">Select account (optional)</option>
+                {accounts.map(a => (
+                  <option key={a._id} value={a._id}>{a.name} ({a.type})</option>
+                ))}
+              </select>
             </div>
 
             {/* Settlement status */}
@@ -499,6 +533,18 @@ export default function SalesPage() {
                   placeholder="e.g. Corporate order"
                 />
               </div>
+            </div>
+            <div>
+              <label className="label">Received in Account</label>
+              <select className="input"
+                value={form.otherSalesReceivedIn || ''}
+                onChange={e => setForm({ ...form, otherSalesReceivedIn: e.target.value })}
+              >
+                <option value="">Select account (optional)</option>
+                {accounts.map(a => (
+                  <option key={a._id} value={a._id}>{a.name} ({a.type})</option>
+                ))}
+              </select>
             </div>
           </div>
 

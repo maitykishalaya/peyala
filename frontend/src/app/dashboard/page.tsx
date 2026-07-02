@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import StatCard from '@/components/dashboard/StatCard';
-import { dashboardApi } from '@/lib/api';
+import { dashboardApi, ownerNoteApi } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown } from 'lucide-react';
 import {
@@ -15,10 +15,12 @@ const COLORS = ['#e26411', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [ownerNote, setOwnerNote] = useState<string>('');
 
   useEffect(() => {
     dashboardApi.summary().then(r => { setData(r.data); setLoading(false); })
       .catch(() => setLoading(false));
+    ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
   }, []);
 
   if (loading) return (
@@ -68,6 +70,13 @@ export default function DashboardPage() {
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300">1:00 PM – 11:00 PM</p>
           </div>
         </div>
+
+        {ownerNote ? (
+          <div className="card border-l-4 border-brand-500 bg-brand-50 dark:bg-brand-900/20 p-4">
+            <p className="text-sm font-semibold text-brand-700 dark:text-brand-200">Owner Notice</p>
+            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{ownerNote}</p>
+          </div>
+        ) : null}
 
         {/* Yesterday's Summary Banner */}
         <div className="card p-5 bg-gradient-to-r from-brand-500 to-brand-600 text-white border-0">
@@ -184,6 +193,10 @@ export default function DashboardPage() {
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">Supplier Dues</span>
                 <span className="text-sm font-semibold text-red-500">{formatCurrency(data?.supplierDues || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-500">This Month Outlet</span>
+                <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">{formatCurrency(month.outlet || 0)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">This Month Zomato</span>

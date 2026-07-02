@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { suppliersApi } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { Plus, Pencil, Phone, MapPin, TrendingUp, CreditCard } from 'lucide-react';
+import { Plus, Pencil, Trash2, Phone, MapPin } from 'lucide-react';
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -18,6 +18,13 @@ export default function SuppliersPage() {
 
   const openEdit = (s: any) => { setSelected(s); setForm({ name: s.name, phone: s.phone || '', address: s.address || '', category: s.category || '', notes: s.notes || '', openingBalance: s.openingBalance || 0 }); setModal('edit'); };
   const openDetail = async (s: any) => { const r = await suppliersApi.get(s._id); setDetail(r.data); };
+
+  const remove = async (s: any) => {
+    if (!confirm(`Deactivate supplier ${s.name}? Existing history will remain.`)) return;
+    await suppliersApi.delete(s._id);
+    if (detail?.supplier?._id === s._id) setDetail(null);
+    load();
+  };
 
   const save = async () => {
     if (modal === 'edit') await suppliersApi.update(selected._id, form);
@@ -46,7 +53,10 @@ export default function SuppliersPage() {
                   <h3 className="font-semibold text-gray-900 dark:text-white">{sup.name}</h3>
                   {sup.category && <p className="text-xs text-gray-400 mt-0.5">{sup.category}</p>}
                 </div>
-                <button onClick={e => { e.stopPropagation(); openEdit(sup); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                <div className="flex gap-2">
+                  <button onClick={e => { e.stopPropagation(); openEdit(sup); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={e => { e.stopPropagation(); remove(sup); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
               </div>
               {sup.phone && <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-1"><Phone className="w-3.5 h-3.5" /> {sup.phone}</p>}
               {sup.address && <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-3"><MapPin className="w-3.5 h-3.5" /> {sup.address}</p>}
@@ -96,6 +106,9 @@ export default function SuppliersPage() {
                   <p className={`text-lg font-bold ${color}`}>{value}</p>
                 </div>
               ))}
+            </div>
+            <div className="pt-4">
+              <button onClick={() => remove(detail.supplier)} className="btn-secondary text-red-600 hover:text-white hover:bg-red-600">Delete Supplier</button>
             </div>
             <h4 className="font-medium text-gray-800 dark:text-gray-200">Recent Purchases</h4>
             {detail.purchases?.length === 0 ? <p className="text-sm text-gray-400">No purchases yet</p> : (

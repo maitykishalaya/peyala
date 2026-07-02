@@ -88,16 +88,26 @@ router.get('/:id/ledger', async (req, res) => {
     const account = await Account.findById(accountId);
     let salesCredits = [];
     if (account) {
-      const allSales = await SalesEntry.find(dateQ).select('date paymentBreakdown outletSales totalRevenue');
+      const allSales = await SalesEntry.find(dateQ).select('date paymentBreakdown zomato fatafat otherSales otherSalesReceivedIn');
       allSales.forEach(s => {
         const pb = s.paymentBreakdown || {};
         if (account.type === 'cash' && (pb).cash > 0) {
-          salesCredits.push({ _id: s._id, date: s.date, amount: (pb).cash, description: 'Outlet Sales (Cash)', type: 'sale_credit' });
+          salesCredits.push({ _id: s._id, date: s.date, amount: (pb).cash, description: 'Outlet Sales (Cash)', type: 'sale_credit', paymentMode: 'cash' });
         } else if (['bank', 'digital'].includes(account.type)) {
           const digital = ((pb).upi || 0) + ((pb).card || 0) + ((pb).bankTransfer || 0);
           if (digital > 0) {
-            salesCredits.push({ _id: s._id, date: s.date, amount: digital, description: 'Outlet Sales (UPI/Card/Bank)', type: 'sale_credit' });
+            salesCredits.push({ _id: s._id, date: s.date, amount: digital, description: 'Outlet Sales (UPI/Card/Bank)', type: 'sale_credit', paymentMode: 'upi/card/bank' });
           }
+        }
+
+        if (s.zomato?.netSettlement > 0 && s.zomato?.receivedIn?.toString() === accountId) {
+          salesCredits.push({ _id: s._id, date: s.date, amount: s.zomato.netSettlement, description: 'Zomato Net Settlement', type: 'sale_credit', paymentMode: 'platform' });
+        }
+        if (s.fatafat?.netSettlement > 0 && s.fatafat?.receivedIn?.toString() === accountId) {
+          salesCredits.push({ _id: s._id, date: s.date, amount: s.fatafat.netSettlement, description: 'Fatafat Net Settlement', type: 'sale_credit', paymentMode: 'platform' });
+        }
+        if ((s.otherSales || 0) > 0 && s.otherSalesReceivedIn?.toString() === accountId) {
+          salesCredits.push({ _id: s._id, date: s.date, amount: s.otherSales, description: 'Other Sales', type: 'sale_credit', paymentMode: 'platform' });
         }
       });
     }
@@ -157,19 +167,37 @@ router.get('/:id/ledger', async (req, res) => {
 // ── POST /api/accounts ────────────────────────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const account = await Account.create({ ...req.body, currentBalance: req.body.openingBalance || 0 });
+    const account = await Account.create({
+      ...req.body,
+      currentBalance: req.body.currentBalance !== undefined ? req.body.currentBalance : (req.body.openingBalance || 0),
+    });
     await log({ user: req.user, action: 'CREATE', module: 'Accounts', description: `${req.user.name} created account: ${account.name}` });
     res.status(201).json(account);
-  } catch (err) { res.status(400).json({ message: err.message }); }
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
 });
 
 // ── PUT /api/accounts/:id ─────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const account = await Account.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const existing = await Account.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: 'Account not found' });
+
+    const update = { ...req.body };
+    if (req.body.openingBalance !== undefined && req.body.currentBalance === undefined) {
+      const openingDelta = Number(req.body.openingBalance) - (existing.openingBalance || 0);
+      if (!Number.isNaN(openingDelta) && openingDelta !== 0) {
+        update.currentBalance = (existing.currentBalance || 0) + openingDelta;
+      }
+    }
+
+    const account = await Account.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     await log({ user: req.user, action: 'UPDATE', module: 'Accounts', description: `${req.user.name} updated account: ${account.name}` });
     res.json(account);
-  } catch (err) { res.status(400).json({ message: err.message }); }
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
 });
 
 // ── DELETE /api/accounts/:id ──────────────────────────────────────

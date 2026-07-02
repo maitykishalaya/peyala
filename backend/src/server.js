@@ -32,6 +32,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/transfers', require('./routes/transfers'));
 app.use('/api/auditlog', require('./routes/auditlog'));
 app.use('/api/balancesheet', require('./routes/balancesheet'));
+app.use('/api/owner-note', require('./routes/ownerNote'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/backup', require('./routes/backup'));
 

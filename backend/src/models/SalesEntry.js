@@ -24,8 +24,9 @@ const platformSalesSchema = new mongoose.Schema({
   commission: { type: Number, default: 0 },          // platform commission %
   gst: { type: Number, default: 0 },                 // GST deducted by platform
   netSettlement: { type: Number, default: 0 },       // what actually gets paid to you
-  settlementDate: { type: Date },                     // when payment hits your account
-  isSettled: { type: Boolean, default: false },       // has payout been received?
+  settlementDate: { type: Date },                    // when payment hits your account
+  isSettled: { type: Boolean, default: false },      // has payout been received?
+  receivedIn: { type: mongoose.Schema.Types.ObjectId, ref: 'Account' }, // account where net settlement arrives
 }, { _id: false });
 
 // ── Main Sales Entry Schema ───────────────────────────────────────
@@ -54,6 +55,7 @@ const salesEntrySchema = new mongoose.Schema({
 
   // ── OTHER SALES ──────────────────────────────────────────────
   otherSales: { type: Number, default: 0 },             // catering, corporate, etc.
+  otherSalesReceivedIn: { type: mongoose.Schema.Types.ObjectId, ref: 'Account' },
   otherSalesDescription: { type: String },
 
   // ── TOTAL ────────────────────────────────────────────────────

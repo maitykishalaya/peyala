@@ -74,9 +74,9 @@ router.get('/summary', async (req, res) => {
     const inventoryValue = inventoryItems.reduce((sum, i) => sum + (i.currentStock * i.averageCost), 0);
     const lowStockCount = inventoryItems.filter(i => i.currentStock <= i.minimumStock).length;
 
-    // Supplier outstanding dues
+    // Supplier outstanding dues (including opening balance)
     const supplierDues = await Supplier.aggregate([
-      { $group: { _id: null, total: { $sum: { $subtract: ['$totalPurchased', '$totalPaid'] } } } }
+      { $group: { _id: null, total: { $sum: { $add: ['$openingBalance', { $subtract: ['$totalPurchased', '$totalPaid'] }] } } } }
     ]);
 
     // 30-day sales trend

@@ -32,28 +32,47 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [dark, setDark] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
   }, [user, loading, router]);
 
   useEffect(() => {
+    setMounted(true);
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setSidebarOpen(false);
+      } else {
+        setSidebarOpen(true);
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
   }, [dark]);
 
-  if (loading || !user) return (
+  if (loading || !user || !mounted) return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <div className="flex min-h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {showWalkthrough && <Walkthrough onComplete={dismissWalkthrough} />}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-10 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
       {/* Sidebar */}
       <aside className={cn(
-        'flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 flex-shrink-0 z-20',
-        sidebarOpen ? 'w-60' : 'w-16'
+        'fixed inset-y-0 left-0 z-30 flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 flex-shrink-0 h-full md:relative md:translate-x-0',
+        sidebarOpen ? 'translate-x-0 w-60 md:w-60' : '-translate-x-full w-0 md:w-16'
       )}>
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100 dark:border-gray-800">

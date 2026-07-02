@@ -81,6 +81,47 @@ async function applyAccountCredits(paymentBreakdown, multiplier) {
 }
 
 
+// ── Helper: credit Zomato/Fatafat/other sales to chosen accounts ───
+async function applyNonOutletCredits(sale, multiplier) {
+  if (!sale) return;
+
+  const platformCredits = [
+    { amount: sale.zomato?.netSettlement || 0, accountId: sale.zomato?.receivedIn },
+    { amount: sale.fatafat?.netSettlement || 0, accountId: sale.fatafat?.receivedIn },
+  ];
+
+  for (const credit of platformCredits) {
+    if (credit.amount !== 0 && credit.accountId) {
+      await Account.findByIdAndUpdate(credit.accountId, {
+        $inc: { currentBalance: credit.amount * multiplier }
+      });
+    }
+  }
+
+  if ((sale.otherSales || 0) !== 0 && sale.otherSalesReceivedIn) {
+    await Account.findByIdAndUpdate(sale.otherSalesReceivedIn, {
+      $inc: { currentBalance: (sale.otherSales || 0) * multiplier }
+    });
+  }
+}
+
+function normalizeSaleAccountIds(data) {
+  if (!data) return data;
+
+  const normalized = { ...data };
+  if (normalized.zomato) {
+    normalized.zomato = { ...normalized.zomato };
+    if (!normalized.zomato.receivedIn) normalized.zomato.receivedIn = undefined;
+  }
+  if (normalized.fatafat) {
+    normalized.fatafat = { ...normalized.fatafat };
+    if (!normalized.fatafat.receivedIn) normalized.fatafat.receivedIn = undefined;
+  }
+  if (!normalized.otherSalesReceivedIn) normalized.otherSalesReceivedIn = undefined;
+  return normalized;
+}
+
+
 // ── GET /api/sales ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -94,6 +135,9 @@ router.get('/', async (req, res) => {
     const total = await SalesEntry.countDocuments(filter);
     const sales = await SalesEntry.find(filter)
       .populate('createdBy', 'name')
+      .populate({ path: 'zomato.receivedIn', select: 'name' })
+      .populate({ path: 'fatafat.receivedIn', select: 'name' })
+      .populate({ path: 'otherSalesReceivedIn', select: 'name' })
       .sort('-date')
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -111,7 +155,11 @@ router.get('/today', async (req, res) => {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const sales = await SalesEntry.findOne({ date: { $gte: today, $lt: tomorrow } });
+    const sales = await SalesEntry.findOne({ date: { $gte: today, $lt: tomorrow } })
+      .populate('createdBy', 'name')
+      .populate({ path: 'zomato.receivedIn', select: 'name' })
+      .populate({ path: 'fatafat.receivedIn', select: 'name' })
+      .populate({ path: 'otherSalesReceivedIn', select: 'name' });
     res.json(sales || null);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -126,11 +174,12 @@ router.get('/today', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     // STEP 1: Calculate outletSales and totalRevenue from the submitted data
-    const { outletSales, totalRevenue } = SalesEntry.calcTotals(req.body);
+    const payload = normalizeSaleAccountIds(req.body);
+    const { outletSales, totalRevenue } = SalesEntry.calcTotals(payload);
 
     // STEP 2: Save with calculated totals overriding whatever was sent
     const sale = await SalesEntry.create({
-      ...req.body,
+      ...payload,
       outletSales,      // auto-calculated from payment breakdown
       totalRevenue,     // auto-calculated from all channels
       createdBy: req.user._id,
@@ -140,7 +189,15 @@ router.post('/', async (req, res) => {
     // cash → Cash Counter, upi/card/bank → Current Account
     await applyAccountCredits(req.body.paymentBreakdown, +1);
 
-    // STEP 4: Add 4.77% GST on outlet sales to balance sheet
+    // STEP 4: Credit Zomato/Fatafat/Other sales into chosen accounts
+    await applyNonOutletCredits({
+      zomato: req.body.zomato,
+      fatafat: req.body.fatafat,
+      otherSales: req.body.otherSales,
+      otherSalesReceivedIn: req.body.otherSalesReceivedIn,
+    }, +1);
+
+    // STEP 5: Add 4.77% GST on outlet sales to balance sheet
     if (outletSales > 0) {
       const gstToAdd = Math.round(outletSales * 0.0477 * 100) / 100;
       await applyGstDelta(gstToAdd, sale._id, req.body.date, req.user.name,
@@ -174,19 +231,27 @@ router.put('/:id', async (req, res) => {
     if (oldSale?.paymentBreakdown) {
       await applyAccountCredits(oldSale.paymentBreakdown, -1);
     }
+    await applyNonOutletCredits(oldSale, -1);
 
     // STEP 2: Calculate new totals
-    const { outletSales, totalRevenue } = SalesEntry.calcTotals(req.body);
+    const payload = normalizeSaleAccountIds(req.body);
+    const { outletSales, totalRevenue } = SalesEntry.calcTotals(payload);
 
     // STEP 3: Save updated entry with recalculated totals
     const sale = await SalesEntry.findByIdAndUpdate(
       req.params.id,
-      { ...req.body, outletSales, totalRevenue },
+      { ...payload, outletSales, totalRevenue },
       { new: true, runValidators: true }
     );
 
     // STEP 4: Apply NEW account credits
     await applyAccountCredits(req.body.paymentBreakdown, +1);
+    await applyNonOutletCredits({
+      zomato: req.body.zomato,
+      fatafat: req.body.fatafat,
+      otherSales: req.body.otherSales,
+      otherSalesReceivedIn: req.body.otherSalesReceivedIn,
+    }, +1);
 
     // STEP 5: Adjust GST for difference in outlet sales
     const oldGst = Math.round(oldOutletSales * 0.0477 * 100) / 100;
@@ -223,6 +288,7 @@ router.delete('/:id', async (req, res) => {
     if (sale?.paymentBreakdown) {
       await applyAccountCredits(sale.paymentBreakdown, -1);
     }
+    await applyNonOutletCredits(sale, -1);
 
     await SalesEntry.findByIdAndDelete(req.params.id);
 

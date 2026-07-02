@@ -5,18 +5,45 @@ const Supplier = require('../models/Supplier');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
+const parseDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const normalizePagination = (query) => {
+  const page = Math.max(1, Number(query.page) || 1);
+  const limit = Math.max(1, Number(query.limit) || 20);
+  return { page, limit };
+};
+
+const getPaymentAmount = (value) => {
+  const amount = Number(value);
+  return Number.isNaN(amount) ? null : amount;
+};
+
 router.use(auth);
 
 router.get('/', async (req, res) => {
   try {
-    const { startDate, endDate, category, page = 1, limit = 20 } = req.query;
+    const { startDate, endDate, category } = req.query;
+    const { page, limit } = normalizePagination(req.query);
     const filter = {};
-    if (startDate || endDate) {
+
+    const gte = parseDate(startDate);
+    const lte = parseDate(endDate);
+    if (gte || lte) {
       filter.date = {};
-      if (startDate) filter.date.$gte = new Date(startDate);
-      if (endDate) filter.date.$lte = new Date(endDate + 'T23:59:59');
+      if (gte) filter.date.$gte = gte;
+      if (lte) {
+        const end = new Date(lte);
+        end.setHours(23, 59, 59, 999);
+        filter.date.$lte = end;
+      }
     }
+
     if (category) filter.category = category;
+
     const total = await Payment.countDocuments(filter);
     const payments = await Payment.find(filter)
       .populate('paidFrom', 'name type')
@@ -25,92 +52,208 @@ router.get('/', async (req, res) => {
       .populate('staff', 'name position')
       .sort('-date')
       .skip((page - 1) * limit)
-      .limit(Number(limit));
-    res.json({ payments, total, page: Number(page), pages: Math.ceil(total / limit) });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+      .limit(limit);
+
+    res.json({ payments, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 router.post('/', async (req, res) => {
+  const session = await Payment.startSession();
+  session.startTransaction();
+
   try {
-    const payment = await Payment.create({ ...req.body, createdBy: req.user._id });
-    // Deduct from account
-    await Account.findByIdAndUpdate(req.body.paidFrom, { $inc: { currentBalance: -req.body.amount } });
-    // If supplier payment, update their paid total
-    if (req.body.supplier) {
-      await Supplier.findByIdAndUpdate(req.body.supplier, { $inc: { totalPaid: req.body.amount } });
+    const amount = getPaymentAmount(req.body.amount);
+    if (amount === null || amount <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Amount must be a positive number' });
     }
-    const populated = await Payment.findById(payment._id).populate('paidFrom', 'name')
-    .populate('createdBy', 'name').populate('supplier', 'name');
-    await log({ user: req.user, action: 'CREATE', module: 'Payments', description: req.user.name + ' recorded payment to ' + req.body.payee + ' — ₹' + req.body.amount + ' [' + req.body.category + ']' });
+
+    const paymentData = {
+      ...req.body,
+      amount,
+      createdBy: req.user._id,
+    };
+
+    const isDue = paymentData.paymentMode === 'due' || !paymentData.paidFrom;
+    if (isDue) {
+      paymentData.paidFrom = null;
+      paymentData.isPending = true;
+    } else if (!paymentData.paidFrom) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'paidFrom is required for non-due payments' });
+    }
+
+    const [payment] = await Payment.create([paymentData], { session });
+
+    if (payment.paidFrom) {
+      await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: -payment.amount } }, { session });
+    }
+
+    if (payment.supplier) {
+      await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: payment.amount } }, { session });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    const populated = await Payment.findById(payment._id)
+      .populate('paidFrom', 'name')
+      .populate('createdBy', 'name')
+      .populate('supplier', 'name')
+      .populate('staff', 'name position');
+
+    log({
+      user: req.user,
+      action: 'CREATE',
+      module: 'Payments',
+      description: `${req.user.name} recorded payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
+    }).catch(() => {});
+
     res.status(201).json(populated);
-  } catch (err) { res.status(400).json({ message: err.message }); }
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    res.status(400).json({ message: err.message });
+  }
 });
 
 router.put('/:id', async (req, res) => {
-  try {
-    const old = await Payment.findById(req.params.id);
-    // Reverse old amount, apply new
-    await Account.findByIdAndUpdate(old.paidFrom, { $inc: { currentBalance: old.amount } });
-    await Account.findByIdAndUpdate(req.body.paidFrom, { $inc: { currentBalance: -req.body.amount } });
-    const payment = await Payment.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('paidFrom', 'name')
-    .populate('createdBy', 'name');
-    res.json(payment);
-  } catch (err) { res.status(400).json({ message: err.message }); }
-});
+  const session = await Payment.startSession();
+  session.startTransaction();
 
-// router.delete('/:id', async (req, res) => {
-//   try {
-//     const payment = await Payment.findById(req.params.id);
-//     await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } });
-//     if (payment.supplier) {
-//       await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } });
-//     }
-//     await Payment.findByIdAndDelete(req.params.id);
-//     await log({ user: req.user, action: 'DELETE', module: 'Payments', description: req.user.name + ' deleted payment of ₹' + payment.amount });
-//     res.json({ message: 'Payment deleted' });
-//   } catch (err) { res.status(500).json({ message: err.message }); }
-// });
-router.delete('/:id', async (req, res) => {
   try {
-    const payment = await Payment.findById(req.params.id);
-
-    if (!payment) {
+    const oldPayment = await Payment.findById(req.params.id).session(session);
+    if (!oldPayment) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'Payment not found' });
     }
 
-    // If this payment is linked to a purchase, don't allow deletion here
+    const oldAmount = oldPayment.amount;
+    const oldPaidFrom = oldPayment.paidFrom ? oldPayment.paidFrom.toString() : null;
+    const oldSupplier = oldPayment.supplier ? oldPayment.supplier.toString() : null;
+    const oldMode = oldPayment.paymentMode;
+
+    const amount = req.body.amount !== undefined ? getPaymentAmount(req.body.amount) : oldAmount;
+    if (amount === null || amount <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Amount must be a positive number' });
+    }
+
+    const updatedPayment = {
+      ...req.body,
+      amount,
+    };
+
+    const newMode = req.body.paymentMode || oldMode;
+    const shouldBeDue = newMode === 'due' || updatedPayment.paidFrom === null || (updatedPayment.paidFrom === undefined && oldPaidFrom === null);
+    if (shouldBeDue) {
+      updatedPayment.paidFrom = null;
+      updatedPayment.isPending = true;
+    } else if (!updatedPayment.paidFrom) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'paidFrom is required for non-due payments' });
+    }
+
+    const newPaidFrom = updatedPayment.paidFrom ? updatedPayment.paidFrom.toString() : null;
+    const newSupplier = updatedPayment.supplier ? updatedPayment.supplier.toString() : null;
+
+    if (oldPaidFrom && oldMode !== 'due') {
+      await Account.findByIdAndUpdate(oldPaidFrom, { $inc: { currentBalance: oldAmount } }, { session });
+    }
+
+    if (newPaidFrom && newMode !== 'due') {
+      await Account.findByIdAndUpdate(newPaidFrom, { $inc: { currentBalance: -amount } }, { session });
+    }
+
+    if (oldSupplier && oldSupplier !== newSupplier) {
+      await Supplier.findByIdAndUpdate(oldSupplier, { $inc: { totalPaid: -oldAmount } }, { session });
+    }
+
+    if (newSupplier) {
+      const supplierDelta = oldSupplier === newSupplier ? amount - oldAmount : amount;
+      if (supplierDelta !== 0) {
+        await Supplier.findByIdAndUpdate(newSupplier, { $inc: { totalPaid: supplierDelta } }, { session });
+      }
+    }
+
+    const payment = await Payment.findByIdAndUpdate(req.params.id, updatedPayment, {
+      new: true,
+      runValidators: true,
+      session,
+    })
+      .populate('paidFrom', 'name type')
+      .populate('createdBy', 'name')
+      .populate('supplier', 'name')
+      .populate('staff', 'name position');
+
+    await session.commitTransaction();
+    session.endSession();
+
+    log({
+      user: req.user,
+      action: 'UPDATE',
+      module: 'Payments',
+      description: `${req.user.name} updated payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
+    }).catch(() => {});
+
+    res.json(payment);
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    res.status(400).json({ message: err.message });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  const session = await Payment.startSession();
+  session.startTransaction();
+
+  try {
+    const payment = await Payment.findById(req.params.id).session(session);
+    if (!payment) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+
     if (payment.relatedPurchase) {
-      return res.status(400).json({
-        message: 'Delete this from Purchase Section'
-      });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Delete this from Purchase Section' });
     }
 
-    // Reverse account balance
     if (payment.paidFrom) {
-      await Account.findByIdAndUpdate(payment.paidFrom, {
-        $inc: { currentBalance: payment.amount }
-      });
+      await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } }, { session });
     }
 
-    // Reverse supplier payment
     if (payment.supplier) {
-      await Supplier.findByIdAndUpdate(payment.supplier, {
-        $inc: { totalPaid: -payment.amount }
-      });
+      await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } }, { session });
     }
 
-    await Payment.findByIdAndDelete(req.params.id);
+    await Payment.findByIdAndDelete(req.params.id, { session });
 
-    await log({
+    await session.commitTransaction();
+    session.endSession();
+
+    log({
       user: req.user,
       action: 'DELETE',
       module: 'Payments',
-      description: req.user.name + ' deleted payment of ₹' + payment.amount
-    });
+      description: `${req.user.name} deleted payment of ₹${payment.amount}`,
+    }).catch(() => {});
 
     res.json({ message: 'Payment deleted' });
-
   } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: err.message });
   }
 });
