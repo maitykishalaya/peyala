@@ -8,7 +8,6 @@
 
 const router = require('express').Router();
 const Account = require('../models/Account');
-const PurchaseEntry = require('../models/PurchaseEntry');
 const Payment = require('../models/Payment');
 const Receipt = require('../models/Receipt');
 const Transfer = require('../models/Transfer');
@@ -55,30 +54,36 @@ router.get('/:id/ledger', async (req, res) => {
 
     const dateQ = Object.keys(dateFilter).length ? { date: dateFilter } : {};
 
-    // 1. Purchases paid FROM this account (money OUT)
-    const purchases = await PurchaseEntry.find({ paidFrom: accountId, isPaid: true, ...dateQ })
-      .populate('supplier', 'name')
-      .select('date totalAmount supplier items paymentMode isPaid');
+    // NOTE: We intentionally do NOT query PurchaseEntry here.
+    // Every paid purchase (and every cleared due) already creates a matching
+    // Payment record (see purchases.js), which is what actually moves the
+    // account balance. Querying PurchaseEntry as well would show the same
+    // cash movement twice — once as a "purchase" line and once as a
+    // "payment" line. Payments is the single source of truth for money
+    // leaving an account.
 
-    // 2. Payments made FROM this account (money OUT)
+    // 1. Payments made FROM this account (money OUT) — includes purchase
+    //    payments and cleared dues, since those create Payment records too.
+    //    Pending (due) payments have paidFrom = null so they're naturally
+    //    excluded until the due is actually cleared.
     const payments = await Payment.find({ paidFrom: accountId, ...dateQ })
-      .select('date amount payee category subcategory description paymentMode');
+      .select('date amount payee category subcategory description paymentMode relatedPurchase');
 
-    // 3. Receipts INTO this account (money IN)
+    // 2. Receipts INTO this account (money IN)
     const receipts = await Receipt.find({ receivedIn: accountId, ...dateQ })
       .select('date amount source category description');
 
-    // 4. Transfers FROM this account (money OUT)
+    // 3. Transfers FROM this account (money OUT)
     const transfersOut = await Transfer.find({ fromAccount: accountId, ...dateQ })
       .populate('toAccount', 'name')
       .select('date amount toAccount description');
 
-    // 5. Transfers INTO this account (money IN)
+    // 4. Transfers INTO this account (money IN)
     const transfersIn = await Transfer.find({ toAccount: accountId, ...dateQ })
       .populate('fromAccount', 'name')
       .select('date amount fromAccount description');
 
-    // 6. Sales credited to this account
+    // 5. Sales credited to this account
     // Cash sales → cash-type accounts; digital sales → bank/digital accounts
     const account = await Account.findById(accountId);
     let salesCredits = [];
@@ -99,14 +104,9 @@ router.get('/:id/ledger', async (req, res) => {
 
     // Normalise all into a unified ledger format
     const ledger = [
-      ...purchases.map((p) => ({
-        id: p._id, date: p.date, type: 'purchase', direction: 'out',
-        description: `Purchase from ${p.supplier?.name || 'Supplier'}`,
-        amount: p.totalAmount, paymentMode: p.paymentMode,
-        meta: `${p.items?.length || 0} items`,
-      })),
       ...payments.map((p) => ({
-        id: p._id, date: p.date, type: 'payment', direction: 'out',
+        id: p._id, date: p.date,
+        type: p.relatedPurchase ? 'purchase' : 'payment', direction: 'out',
         description: p.description || `Payment to ${p.payee}`,
         amount: p.amount, paymentMode: p.paymentMode,
         meta: `${p.category}${p.subcategory ? ' › ' + p.subcategory : ''}`,
@@ -166,32 +166,8 @@ router.post('/', async (req, res) => {
 // ── PUT /api/accounts/:id ─────────────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await Account.findById(req.params.id);
-    if (!existing) return res.status(404).json({ message: 'Account not found' });
-
-    const updateData = { ...req.body };
-
-    // If openingBalance is being changed, adjust currentBalance by the same difference.
-    // e.g. old opening = ₹0, new opening = ₹50,000
-    //      currentBalance increases by ₹50,000 (the difference)
-    // This preserves all transactions that have already moved the balance.
-    if (req.body.openingBalance !== undefined) {
-      const oldOpening = existing.openingBalance || 0;
-      const newOpening = Number(req.body.openingBalance);
-      const difference = newOpening - oldOpening;
-      updateData.currentBalance = (existing.currentBalance || 0) + difference;
-    }
-
-    const account = await Account.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-    await log({
-      user: req.user, action: 'UPDATE', module: 'Accounts',
-      description: `${req.user.name} updated account: ${account.name}` +
-        (req.body.openingBalance !== undefined ? ` (opening balance changed to ₹${req.body.openingBalance})` : ''),
-    });
+    const account = await Account.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    await log({ user: req.user, action: 'UPDATE', module: 'Accounts', description: `${req.user.name} updated account: ${account.name}` });
     res.json(account);
   } catch (err) { res.status(400).json({ message: err.message }); }
 });

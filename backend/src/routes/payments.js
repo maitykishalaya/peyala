@@ -58,17 +58,61 @@ router.put('/:id', async (req, res) => {
   } catch (err) { res.status(400).json({ message: err.message }); }
 });
 
+// router.delete('/:id', async (req, res) => {
+//   try {
+//     const payment = await Payment.findById(req.params.id);
+//     await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } });
+//     if (payment.supplier) {
+//       await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } });
+//     }
+//     await Payment.findByIdAndDelete(req.params.id);
+//     await log({ user: req.user, action: 'DELETE', module: 'Payments', description: req.user.name + ' deleted payment of ₹' + payment.amount });
+//     res.json({ message: 'Payment deleted' });
+//   } catch (err) { res.status(500).json({ message: err.message }); }
+// });
 router.delete('/:id', async (req, res) => {
   try {
     const payment = await Payment.findById(req.params.id);
-    await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } });
-    if (payment.supplier) {
-      await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } });
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment not found' });
     }
+
+    // If this payment is linked to a purchase, don't allow deletion here
+    if (payment.relatedPurchase) {
+      return res.status(400).json({
+        message: 'Delete this from Purchase Section'
+      });
+    }
+
+    // Reverse account balance
+    if (payment.paidFrom) {
+      await Account.findByIdAndUpdate(payment.paidFrom, {
+        $inc: { currentBalance: payment.amount }
+      });
+    }
+
+    // Reverse supplier payment
+    if (payment.supplier) {
+      await Supplier.findByIdAndUpdate(payment.supplier, {
+        $inc: { totalPaid: -payment.amount }
+      });
+    }
+
     await Payment.findByIdAndDelete(req.params.id);
-    await log({ user: req.user, action: 'DELETE', module: 'Payments', description: req.user.name + ' deleted payment of ₹' + payment.amount });
+
+    await log({
+      user: req.user,
+      action: 'DELETE',
+      module: 'Payments',
+      description: req.user.name + ' deleted payment of ₹' + payment.amount
+    });
+
     res.json({ message: 'Payment deleted' });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;
