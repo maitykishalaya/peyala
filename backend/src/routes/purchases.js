@@ -165,14 +165,27 @@ router.post('/', async (req, res) => {
       });
 
       // Create payment record so it shows in Payments section
-      await Payment.create({
-        date, paidFrom, payee: supplierName,
-        category: 'Raw Materials', subcategory: supplierName,
-        description: `Purchase from ${supplierName} — ${items.length} item(s)`,
-        amount: totalAmount, paymentMode,
-        isPending: false, relatedPurchase: purchase._id,
-        notes, createdBy: req.user._id,
-      });
+const payment = await Payment.create({
+  date,
+  paidFrom,
+  payee: supplierName,
+  category: 'Raw Materials',
+  subcategory: supplierName,
+  description: `Purchase from ${supplierName} — ${items.length} item(s)`,
+  amount: totalAmount,
+  paymentMode,
+  isPending: false,
+  relatedPurchase: purchase._id,
+  notes,
+  createdBy: req.user._id,
+});
+
+// Deduct account ONCE
+if (payment.paidFrom && !payment.isPending) {
+  await Account.findByIdAndUpdate(payment.paidFrom, {
+    $inc: { currentBalance: -payment.amount }
+  });
+}
     }
 
     const populated = await PurchaseEntry.findById(purchase._id)
@@ -239,6 +252,10 @@ router.post('/:id/clear-due', async (req, res) => {
         date: date ? new Date(date) : new Date(),
       }
     );
+    // Deduct account ONCE after clearing due
+await Account.findByIdAndUpdate(paidFrom, {
+  $inc: { currentBalance: -purchase.totalAmount }
+});
 
     await log({
       user: req.user, action: 'UPDATE', module: 'Purchases',
