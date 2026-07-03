@@ -13,6 +13,7 @@ const router = require('express').Router();
 const BalanceSheet = require('../models/BalanceSheet');
 const Account = require('../models/Account');
 const Supplier = require('../models/Supplier');
+const PurchaseEntry = require('../models/PurchaseEntry');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
@@ -65,6 +66,12 @@ router.get('/', async (req, res) => {
     // Total liabilities = GST + supplier dues + custom
     const totalLiabilities = gstLiability + supplierDuesTotal + customTotal;
 
+    const gstPaidAggregate = await PurchaseEntry.aggregate([
+      { $unwind: { path: '$items', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: null, totalGstPaid: { $sum: { $ifNull: ['$items.gstAmount', 0] } } } }
+    ]);
+    const purchaseGstPaidTotal = gstPaidAggregate[0]?.totalGstPaid || 0;
+
     // ── EQUITY: auto-calculated ──────────────────────────────────
     // Equity = Total Assets − Total Liabilities
     // Positive = business is solvent
@@ -93,6 +100,8 @@ router.get('/', async (req, res) => {
         custom: bs.customLiabilities,
         total: totalLiabilities,
       },
+      purchaseGstPaidTotal,
+      showPurchaseGstPaid: bs.showPurchaseGstPaid,
       equity: {
         value: equity,                              // Assets - Liabilities
         isPositive: equity >= 0,
@@ -122,6 +131,7 @@ router.put('/', async (req, res) => {
       gstLiability,
       includeSupplierDues,
       customLiabilities,
+      showPurchaseGstPaid,
     } = req.body;
 
     const mongoose = require('mongoose');
@@ -134,6 +144,7 @@ router.put('/', async (req, res) => {
     }
     if (gstLiability !== undefined) bs.gstLiability = Number(gstLiability);
     if (includeSupplierDues !== undefined) bs.includeSupplierDues = includeSupplierDues;
+    if (showPurchaseGstPaid !== undefined) bs.showPurchaseGstPaid = !!showPurchaseGstPaid;
     if (customLiabilities !== undefined) bs.customLiabilities = customLiabilities;
 
     bs.lastUpdated = new Date();

@@ -291,28 +291,30 @@ export default function AccountsPage() {
             <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
               <h3 className="font-semibold text-gray-900 dark:text-white">Recent Transfers</h3>
             </div>
-            <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-gray-800/50">
-                <tr>
-                  <th className="table-th">Date</th>
-                  <th className="table-th">From</th>
-                  <th className="table-th">To</th>
-                  <th className="table-th">Amount</th>
-                  <th className="table-th">Note</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                {transfers.slice(0, 10).map((t: any) => (
-                  <tr key={t._id}>
-                    <td className="table-td">{formatDate(t.date)}</td>
-                    <td className="table-td">{t.fromAccount?.name}</td>
-                    <td className="table-td">{t.toAccount?.name}</td>
-                    <td className="table-td font-medium text-brand-600">{formatCurrency(t.amount)}</td>
-                    <td className="table-td text-gray-400">{t.description || '-'}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-max">
+                <thead className="bg-gray-50 dark:bg-gray-800/50">
+                  <tr>
+                    <th className="table-th whitespace-nowrap">Date</th>
+                    <th className="table-th whitespace-nowrap">From</th>
+                    <th className="table-th whitespace-nowrap">To</th>
+                    <th className="table-th whitespace-nowrap">Amount</th>
+                    <th className="table-th whitespace-nowrap">Note</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                  {transfers.slice(0, 10).map((t: any) => (
+                    <tr key={t._id}>
+                      <td className="table-td py-2 sm:py-3 text-xs sm:text-sm whitespace-nowrap">{formatDate(t.date)}</td>
+                      <td className="table-td py-2 sm:py-3 text-xs sm:text-sm whitespace-nowrap">{t.fromAccount?.name}</td>
+                      <td className="table-td py-2 sm:py-3 text-xs sm:text-sm whitespace-nowrap">{t.toAccount?.name}</td>
+                      <td className="table-td py-2 sm:py-3 text-xs sm:text-sm font-medium text-brand-600 whitespace-nowrap">{formatCurrency(t.amount)}</td>
+                      <td className="table-td py-2 sm:py-3 text-xs sm:text-sm text-gray-400 whitespace-nowrap">{t.description || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

@@ -5,6 +5,8 @@ const purchaseItemSchema = new mongoose.Schema({
   quantity: { type: Number, required: true },
   unit: { type: String, required: true },
   pricePerUnit: { type: Number, required: true },
+  gstPercent: { type: Number, default: 0 },
+  gstAmount: { type: Number, default: 0 },
   totalPrice: { type: Number, required: true },
 });
 

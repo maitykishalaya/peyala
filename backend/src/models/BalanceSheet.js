@@ -57,6 +57,7 @@ const balanceSheetSchema = new mongoose.Schema({
   // Whether supplier dues should be auto-included from Supplier collection
   // If true → sum of all supplier outstanding dues appears in liabilities
   includeSupplierDues: { type: Boolean, default: true },
+  showPurchaseGstPaid: { type: Boolean, default: true },
 
   // Any extra liabilities user wants to add manually
   // e.g. bank loans, rent arrears, etc.

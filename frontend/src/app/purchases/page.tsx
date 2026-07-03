@@ -157,7 +157,8 @@ export default function PurchasesPage() {
   const blankPurchaseForm = () => ({
     date: today(), supplier: '', paidFrom: '', paymentMode: 'cash',
     isPaid: true, notes: '', referenceNumber: '',
-    lines: [{ item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, totalPrice: 0 }]
+    isGstBill: false,
+    lines: [{ item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, gstPercent: 0, gstAmount: 0, totalPrice: 0 }]
   });
 
   // ── Form state ──────────────────────────────────────────────────
@@ -200,14 +201,25 @@ export default function PurchasesPage() {
     const lines = [...form.lines];
     lines[idx] = { ...lines[idx], [field]: val };
 
-    if (field === 'quantity' || field === 'pricePerUnit') {
-      // Rate × Qty entered → calculate Total
-      lines[idx].totalPrice = +(lines[idx].quantity * lines[idx].pricePerUnit).toFixed(2);
+    const recalcLine = (line: any) => {
+      const quantity = line.quantity || 0;
+      const pricePerUnit = line.pricePerUnit || 0;
+      const gstPercent = line.gstPercent || 0;
+      const baseAmount = quantity * pricePerUnit;
+      const gstAmount = +(baseAmount * (gstPercent / 100)).toFixed(2);
+      const totalPrice = +(baseAmount + gstAmount).toFixed(2);
+      return { ...line, gstAmount, totalPrice };
+    };
+
+    if (['quantity', 'pricePerUnit', 'gstPercent'].includes(field)) {
+      lines[idx] = recalcLine(lines[idx]);
     } else if (field === 'totalPrice') {
-      // Total entered directly → back-calculate Rate (Total ÷ Qty)
-      // e.g. Milk 6 pkt, Total ₹180 → Rate auto-becomes ₹30
       if (lines[idx].quantity > 0) {
-        lines[idx].pricePerUnit = +(val / lines[idx].quantity).toFixed(2);
+        const gstPercent = lines[idx].gstPercent || 0;
+        const baseAmount = +(val / (1 + gstPercent / 100)).toFixed(2);
+        lines[idx].pricePerUnit = +(baseAmount / lines[idx].quantity).toFixed(2);
+        lines[idx].gstAmount = +(val - baseAmount).toFixed(2);
+        lines[idx].totalPrice = +val;
       }
     }
 
@@ -264,6 +276,7 @@ export default function PurchasesPage() {
       paidFrom: purchase.paidFrom?._id || '',
       paymentMode: purchase.paymentMode || 'cash',
       isPaid: purchase.isPaid,
+      isGstBill: (purchase.items || []).some((it: any) => (it.gstPercent || 0) > 0),
       notes: purchase.notes || '',
       referenceNumber: purchase.referenceNumber || '',
       lines: purchase.items.map((item: any) => ({
@@ -271,6 +284,8 @@ export default function PurchasesPage() {
         quantity: item.quantity,
         unit: item.unit,
         pricePerUnit: item.pricePerUnit,
+        gstPercent: item.gstPercent || 0,
+        gstAmount: item.gstAmount || 0,
         totalPrice: item.totalPrice,
       })),
     };
@@ -286,8 +301,10 @@ export default function PurchasesPage() {
     setModal(true);
   };
 
-  const addLine = () => setForm({ ...form, lines: [...form.lines, { item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, totalPrice: 0 }] });
+  const addLine = () => setForm({ ...form, lines: [...form.lines, { item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, gstPercent: 0, gstAmount: 0, totalPrice: 0 }] });
   const removeLine = (idx: number) => setForm({ ...form, lines: form.lines.filter((_: any, i: number) => i !== idx) });
+  const subTotal = form.lines.reduce((s: number, l: any) => s + ((l.quantity || 0) * (l.pricePerUnit || 0)), 0);
+  const purchaseGstTotal = form.lines.reduce((s: number, l: any) => s + (l.gstAmount || 0), 0);
   const grandTotal = form.lines.reduce((s: number, l: any) => s + l.totalPrice, 0);
 
   const getInventoryUnit = (itemId: string) => {
@@ -345,8 +362,13 @@ export default function PurchasesPage() {
         isPaid: !isDue,
         paidFrom: isDue ? null : form.paidFrom,
         items: form.lines.map((l: any) => ({
-          item: l.item, quantity: l.quantity, unit: l.unit,
-          pricePerUnit: l.pricePerUnit, totalPrice: l.totalPrice
+          item: l.item,
+          quantity: l.quantity,
+          unit: l.unit,
+          pricePerUnit: l.pricePerUnit,
+          gstPercent: l.gstPercent || 0,
+          gstAmount: l.gstAmount || 0,
+          totalPrice: l.totalPrice,
         }))
       };
       if (editingPurchase) {
@@ -504,6 +526,12 @@ export default function PurchasesPage() {
                 {suppliers.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
               </select>
             </div>
+            <div className="col-span-2">
+              <label className="inline-flex items-center text-sm">
+                <input type="checkbox" checked={!!form.isGstBill} onChange={e => setForm({...form, isGstBill: e.target.checked})} className="mr-2 h-4 w-4" />
+                Is this a GST bill?
+              </label>
+            </div>
           </div>
 
           {/* Line Items with quick-add search */}
@@ -513,17 +541,17 @@ export default function PurchasesPage() {
               <button onClick={addLine} className="text-xs text-brand-600 font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add Item</button>
             </div>
             <div className="grid grid-cols-12 gap-2 text-xs text-gray-400 font-medium px-1 mb-1">
-              <span className="col-span-3">Item (search or add new)</span>
-              <span className="col-span-2">Qty</span>
-              <span className="col-span-1">Unit</span>
-              <span className="col-span-2">Rate (₹)</span>
-              <span className="col-span-2">Total (₹)</span>
-              <span className="col-span-1"></span>
-              <span className="col-span-1"></span>
+              <span className="col-span-12 sm:col-span-3">Item (search or add new)</span>
+              <span className="col-span-6 sm:col-span-2">Qty</span>
+              <span className="col-span-6 sm:col-span-1">Unit</span>
+              <span className="col-span-6 sm:col-span-2">Rate (₹)</span>
+              {form.isGstBill && <span className="col-span-6 sm:col-span-1">GST %</span>}
+              <span className="col-span-6 sm:col-span-2">Total (₹)</span>
+              <span className="hidden sm:block sm:col-span-1"></span>
             </div>
             {form.lines.map((line: any, idx: number) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center mb-2">
-                <div className="col-span-3">
+                <div className="col-span-12 sm:col-span-3">
                   {/* Smart search input with quick-add */}
                   <ItemSearchCell
                     value={line.item}
@@ -532,39 +560,52 @@ export default function PurchasesPage() {
                     onQuickAdd={(name) => handleQuickAdd(idx, name)}
                   />
                 </div>
-                <div className="col-span-2">
-                  <input type="number" step="0.1" className="input text-xs py-1.5" value={line.quantity || ''} onChange={e => updateLine(idx, 'quantity', +e.target.value)} placeholder="Qty" />
+                <div className="col-span-6 sm:col-span-2">
+                  <input type="number" step="0.1" className="input text-xs py-1 sm:py-1.5" value={line.quantity || ''} onChange={e => updateLine(idx, 'quantity', +e.target.value)} placeholder="Qty" />
                 </div>
-                <div className="col-span-1">
+                <div className="col-span-6 sm:col-span-1">
                   {line.item ? (
                     <input
-                      className="input text-xs py-1.5 bg-gray-100 dark:bg-gray-900"
+                      className="input text-xs py-1 sm:py-1.5 bg-gray-100 dark:bg-gray-900"
                       value={getInventoryUnit(line.item)}
                       disabled
                     />
                   ) : (
-                    <select className="input text-xs py-1.5" value={line.unit} onChange={e => updateLine(idx, 'unit', e.target.value)}>
+                    <select className="input text-xs py-1 sm:py-1.5" value={line.unit} onChange={e => updateLine(idx, 'unit', e.target.value)}>
                       {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
                   )}
                 </div>
-                <div className="col-span-2">
-                  <input type="number" className="input text-xs py-1.5" value={line.pricePerUnit || ''} onChange={e => updateLine(idx, 'pricePerUnit', +e.target.value)} placeholder="₹/unit" />
+                <div className="col-span-6 sm:col-span-2">
+                  <input type="number" className="input text-xs py-1 sm:py-1.5" value={line.pricePerUnit || ''} onChange={e => updateLine(idx, 'pricePerUnit', +e.target.value)} placeholder="₹/unit" />
                 </div>
-                {/* Total — editable. Type total directly and rate auto-calculates
-                    e.g. Milk 6 pkt, type Total = 180 → Rate auto-fills as 30 */}
-                <div className="col-span-2">
-                  <input type="number" className="input text-xs py-1.5 font-medium" value={line.totalPrice || ''} onChange={e => updateLine(idx, 'totalPrice', +e.target.value)} placeholder="₹ total" />
+                {form.isGstBill && (
+                  <div className="col-span-6 sm:col-span-1">
+                    <input type="number" min={0} step="0.1" className="input text-xs py-1 sm:py-1.5" value={line.gstPercent || 0} onChange={e => updateLine(idx, 'gstPercent', +e.target.value)} placeholder="GST" />
+                  </div>
+                )}
+                <div className="col-span-6 sm:col-span-2">
+                  <input type="number" readOnly className="input text-xs py-1 sm:py-1.5 font-medium bg-gray-100 dark:bg-gray-900" value={line.totalPrice || ''} placeholder="₹ total" />
+                  <p className="text-[11px] text-gray-400 mt-1">GST ₹{formatCurrency(line.gstAmount || 0)}</p>
                 </div>
-                <div className="col-span-1"></div>
-                <div className="col-span-1">
+                <div className="col-span-12 sm:col-span-1 flex justify-end">
                   {form.lines.length > 1 && <button onClick={() => removeLine(idx)} className="p-1 text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
                 </div>
               </div>
             ))}
-            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex justify-between">
-              <span className="text-sm font-medium text-gray-500">Grand Total</span>
-              <span className="text-lg font-bold text-brand-600">{formatCurrency(grandTotal)}</span>
+            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-2">
+              <div className="flex items-center justify-between text-sm text-gray-500">
+                <span>Subtotal</span>
+                <span>{formatCurrency(subTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm text-gray-500">
+                <span>Purchase GST</span>
+                <span>{formatCurrency(purchaseGstTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-2 font-semibold text-gray-900 dark:text-gray-100">
+                <span>Total</span>
+                <span>{formatCurrency(grandTotal)}</span>
+              </div>
             </div>
           </div>
 
@@ -691,13 +732,13 @@ export default function PurchasesPage() {
               )}
             </div>
             <table className="w-full text-sm border border-gray-100 dark:border-gray-800 rounded-lg overflow-hidden">
-              <thead className="bg-gray-50 dark:bg-gray-800"><tr><th className="table-th">Item</th><th className="table-th">Qty</th><th className="table-th">Rate</th><th className="table-th">Total</th></tr></thead>
+              <thead className="bg-gray-50 dark:bg-gray-800"><tr><th className="table-th">Item</th><th className="table-th">Qty</th><th className="table-th">Rate</th><th className="table-th">GST</th><th className="table-th">Total</th></tr></thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {detail.items?.map((i: any, idx: number) => (
-                  <tr key={idx}><td className="table-td">{i.item?.name || 'Unknown'}</td><td className="table-td">{i.quantity} {i.unit}</td><td className="table-td">{formatCurrency(i.pricePerUnit)}</td><td className="table-td font-medium">{formatCurrency(i.totalPrice)}</td></tr>
+                  <tr key={idx}><td className="table-td">{i.item?.name || 'Unknown'}</td><td className="table-td">{i.quantity} {i.unit}</td><td className="table-td">{formatCurrency(i.pricePerUnit)}</td><td className="table-td">{formatCurrency(i.gstAmount || 0)}{i.gstPercent ? ` (${i.gstPercent}%)` : ''}</td><td className="table-td font-medium">{formatCurrency(i.totalPrice)}</td></tr>
                 ))}
               </tbody>
-              <tfoot className="bg-gray-50 dark:bg-gray-800"><tr><td colSpan={3} className="table-td font-semibold">Total</td><td className="table-td font-bold text-brand-600">{formatCurrency(detail.totalAmount)}</td></tr></tfoot>
+              <tfoot className="bg-gray-50 dark:bg-gray-800"><tr><td colSpan={4} className="table-td font-semibold">Purchase GST</td><td className="table-td font-semibold text-brand-600">{formatCurrency(detail.items?.reduce((s: number, i: any) => s + (i.gstAmount || 0), 0))}</td></tr><tr><td colSpan={4} className="table-td font-semibold">Total</td><td className="table-td font-bold text-brand-600">{formatCurrency(detail.totalAmount)}</td></tr></tfoot>
             </table>
           </div>
         )}

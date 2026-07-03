@@ -53,7 +53,14 @@ router.get('/', async (req, res) => {
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
-    res.json({ purchases, total, page: Number(page), pages: Math.ceil(total / limit) });
+    const gstAggregate = await PurchaseEntry.aggregate([
+      { $match: filter },
+      { $unwind: { path: '$items', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: null, totalGst: { $sum: { $ifNull: ['$items.gstAmount', 0] } } } }
+    ]);
+    const purchaseGstTotal = gstAggregate[0]?.totalGst || 0;
+
+    res.json({ purchases, total, page: Number(page), pages: Math.ceil(total / limit), purchaseGstTotal });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

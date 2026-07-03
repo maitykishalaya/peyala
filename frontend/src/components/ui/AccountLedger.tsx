@@ -119,15 +119,15 @@ export default function AccountLedger({ account, open, onClose }: AccountLedgerP
         </div>
 
         {/* ── Transaction Table ────────────────────────────────── */}
-        <div className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden">
-          <table className="w-full">
+        <div className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden overflow-x-auto">
+          <table className="w-full min-w-max">
             <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th className="table-th">Date</th>
-                <th className="table-th">Type</th>
-                <th className="table-th">Description</th>
-                <th className="table-th">Details</th>
-                <th className="table-th text-right">Amount</th>
+                <th className="table-th whitespace-nowrap">Date</th>
+                <th className="table-th whitespace-nowrap">Type</th>
+                <th className="table-th whitespace-nowrap">Description</th>
+                <th className="table-th whitespace-nowrap hidden sm:table-cell">Details</th>
+                <th className="table-th text-right whitespace-nowrap">Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -140,15 +140,15 @@ export default function AccountLedger({ account, open, onClose }: AccountLedgerP
                 const isIn = tx.direction === 'in';
                 return (
                   <tr key={`${tx.id}-${i}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                    <td className="table-td text-sm whitespace-nowrap">{formatDate(tx.date)}</td>
-                    <td className="table-td"><span className={cfg.color}>{cfg.label}</span></td>
-                    <td className="table-td text-sm max-w-xs">{tx.description}</td>
-                    <td className="table-td text-xs text-gray-400">{tx.meta || '-'}</td>
-                    <td className="table-td text-right">
-                      <div className={`flex items-center justify-end gap-1 font-semibold text-sm ${isIn ? 'text-green-600' : 'text-red-500'}`}>
+                    <td className="table-td py-1.5 sm:py-3 text-xs sm:text-sm whitespace-nowrap">{formatDate(tx.date)}</td>
+                    <td className="table-td py-1.5 sm:py-3"><span className={`${cfg.color} text-xs sm:text-sm`}>{cfg.label}</span></td>
+                    <td className="table-td py-1.5 sm:py-3 text-xs sm:text-sm max-w-xs">{tx.description}</td>
+                    <td className="table-td py-1.5 sm:py-3 text-xs text-gray-400 hidden sm:table-cell">{tx.meta || '-'}</td>
+                    <td className="table-td py-1.5 sm:py-3 text-right">
+                      <div className={`flex items-center justify-end gap-1 font-semibold text-xs sm:text-sm ${isIn ? 'text-green-600' : 'text-red-500'}`}>
                         {isIn
-                          ? <ArrowDownLeft className="w-3.5 h-3.5" />
-                          : <ArrowUpRight className="w-3.5 h-3.5" />
+                          ? <ArrowDownLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                          : <ArrowUpRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                         }
                         {formatCurrency(tx.amount)}
                       </div>

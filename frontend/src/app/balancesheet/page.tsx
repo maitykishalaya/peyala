@@ -235,17 +235,24 @@ export default function BalanceSheetPage() {
 
           {/* ══ ASSETS Column ══════════════════════════════════════ */}
           <div className="card p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-blue-500" /> Assets
               </h2>
-              {/* Button to open account picker */}
-              <button
-                onClick={() => setModal('accounts')}
-                className="text-xs text-brand-600 font-medium flex items-center gap-1 hover:underline"
-              >
-                <Pencil className="w-3 h-3" /> Edit
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setModal('accounts')}
+                  className="text-xs text-brand-600 font-medium flex items-center gap-1 hover:underline"
+                >
+                  <Pencil className="w-3 h-3" /> Edit
+                </button>
+                <button
+                  onClick={() => save({ showPurchaseGstPaid: !bs?.showPurchaseGstPaid })}
+                  className="text-xs text-gray-600 dark:text-gray-300 font-medium border border-gray-200 dark:border-gray-700 rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  {bs?.showPurchaseGstPaid ? 'Hide' : 'Show'} Purchase GST
+                </button>
+              </div>
             </div>
 
             {/* List of included accounts with live balances */}
@@ -276,6 +283,16 @@ export default function BalanceSheetPage() {
                   <span className="text-sm font-bold text-blue-700 dark:text-blue-300">Total Assets</span>
                   <span className="text-base font-bold text-blue-700 dark:text-blue-300">{formatCurrency(assets.total)}</span>
                 </div>
+
+                {bs?.showPurchaseGstPaid && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-800 mt-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-blue-700">Purchase GST Paid</span>
+                      <span className="text-base font-bold text-blue-700">{formatCurrency(bs.purchaseGstPaidTotal || 0)}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">GST paid to suppliers from purchase entries.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
