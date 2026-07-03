@@ -345,9 +345,10 @@ export default function SalesPage() {
         </div>
 
         {/* ── Sales Table ───────────────────────────────────────── */}
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-800/50">
+        <div className="card">
+          <div className="table-responsive">
+            <table className="w-full min-w-max">
+              <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
                 <th className="table-th">Date</th>
                 <th className="table-th">Outlet Sales</th>
@@ -398,7 +399,8 @@ export default function SalesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
 
           {/* Pagination */}
           {pages > 1 && (

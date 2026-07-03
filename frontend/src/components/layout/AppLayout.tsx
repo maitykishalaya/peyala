@@ -72,7 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className={cn(
         'fixed inset-y-0 left-0 z-30 flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 flex-shrink-0 h-full md:relative md:translate-x-0',
-        sidebarOpen ? 'translate-x-0 w-60 md:w-60' : '-translate-x-full w-0 md:w-16'
+        sidebarOpen ? 'translate-x-0 w-72 md:w-60' : '-translate-x-full w-0 md:w-16'
       )}>
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100 dark:border-gray-800">
@@ -123,22 +123,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Topbar */}
-        <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-4 px-4 flex-shrink-0">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+        <header className="sticky top-0 z-20 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-4 px-4 flex-shrink-0">
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-          <h1 className="font-semibold text-gray-800 dark:text-gray-200 text-sm flex-1">
-            {NAV.find(n => pathname.startsWith(n.href))?.label || 'Peyala'}
-          </h1>
-          <button onClick={() => setDark(!dark)} className="p-1.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <div className="flex-1 min-w-0">
+            <h1 className="font-semibold text-gray-800 dark:text-gray-200 text-sm truncate">
+              {NAV.find(n => pathname.startsWith(n.href))?.label || 'Peyala'}
+            </h1>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">Mobile friendly business dashboard</p>
+          </div>
+          <button onClick={() => setDark(!dark)} className="p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 safe-bottom">
           {children}
         </main>
+
+        {/* Bottom mobile nav */}
+        <footer className="md:hidden fixed inset-x-0 bottom-0 z-20 bg-white/95 dark:bg-gray-950/95 border-t border-gray-200 dark:border-gray-800 shadow-xl backdrop-blur-sm">
+          <div className="mx-auto flex max-w-5xl items-center gap-1 overflow-x-auto px-2 py-2">
+            {NAV.map(({ href, label, icon: Icon }) => {
+              const active = pathname.startsWith(href);
+              return (
+                <button
+                  key={href}
+                  type="button"
+                  onClick={() => router.push(href)}
+                  className={cn(
+                    'min-w-[64px] rounded-2xl px-3 py-2 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all',
+                    active ? 'bg-brand-100 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="truncate w-full text-[10px]">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </footer>
       </div>
     </div>
   );

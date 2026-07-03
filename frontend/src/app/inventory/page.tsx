@@ -101,8 +101,9 @@ export default function InventoryPage() {
                     <span className="badge-blue ml-1">{catItems.length}</span>
                     <span className="text-xs text-gray-400 ml-auto">{formatCurrency(catItems.reduce((s: number, i: any) => s + i.currentStock * i.averageCost, 0))}</span>
                   </div>
-                  <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-gray-800/30">
+                  <div className="table-responsive">
+                    <table className="w-full min-w-max">
+                      <thead className="bg-gray-50 dark:bg-gray-800/30">
                       <tr>
                         <th className="table-th">Item</th>
                         <th className="table-th">Stock</th>
@@ -137,7 +138,8 @@ export default function InventoryPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                    </table>
+                  </div>
                 </div>
               );
             })}

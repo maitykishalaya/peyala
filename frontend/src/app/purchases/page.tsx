@@ -414,9 +414,10 @@ export default function PurchasesPage() {
         </div>
 
         {/* Table */}
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-800/50">
+        <div className="card">
+          <div className="table-responsive">
+            <table className="w-full min-w-max">
+              <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
                 <th className="table-th">Date</th>
                 <th className="table-th">Supplier</th>
@@ -479,6 +480,7 @@ export default function PurchasesPage() {
               ))}
             </tbody>
           </table>
+          </div>
           {pages > 1 && (
             <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <p className="text-xs text-gray-400">Page {page} of {pages} · {total} entries</p>
