@@ -4,8 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('admin@peyala.com');
-  const [password, setPassword] = useState('peyala123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
