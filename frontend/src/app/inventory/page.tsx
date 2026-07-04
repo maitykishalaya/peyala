@@ -12,8 +12,9 @@ export default function InventoryPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [selectedCat, setSelectedCat] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
-  const [modal, setModal] = useState<'item' | 'cat' | 'edit' | null>(null);
+  const [modal, setModal] = useState<'item' | 'cat' | 'edit' | 'editCat' | null>(null);
   const [selected, setSelected] = useState<any>(null);
+  const [editingCategory, setEditingCategory] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
@@ -41,9 +42,30 @@ export default function InventoryPage() {
     setModal(null); load();
   };
 
+  const openEditCat = (cat: any) => {
+    setEditingCategory(cat);
+    setCatForm({ name: cat.name, icon: cat.icon, color: cat.color });
+    setModal('editCat');
+  };
+
+  const deleteCat = async (cat: any, itemCount: number) => {
+    if (itemCount > 0) {
+      alert(`Can't delete "${cat.name}" — it still has ${itemCount} item(s) in it. Move or remove those items first.`);
+      return;
+    }
+    if (!confirm(`Delete the empty category "${cat.name}"?`)) return;
+    try {
+      await inventoryApi.deleteCategory(cat._id);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Could not delete category');
+    }
+  };
+
   const saveCat = async () => {
-    await inventoryApi.createCategory(catForm);
-    setModal(null); load();
+    if (modal === 'editCat') await inventoryApi.updateCategory(editingCategory._id, catForm);
+    else await inventoryApi.createCategory(catForm);
+    setModal(null); setEditingCategory(null); load();
   };
 
   const del = async (id: string) => {
@@ -69,7 +91,7 @@ export default function InventoryPage() {
             <p className="text-sm text-gray-500">{items.length} items · Value: <strong>{formatCurrency(totalValue)}</strong> · {lowCount > 0 && <span className="text-yellow-600">{lowCount} low stock</span>}</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setModal('cat')} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
+            <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
             <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
           </div>
         </div>
@@ -91,16 +113,24 @@ export default function InventoryPage() {
         {loading ? <div className="text-center py-16 text-gray-400">Loading...</div> : (
           <div className="space-y-4">
             {Object.values(grouped).map(({ cat, items: catItems }: any) => {
-              if (catItems.length === 0 && selectedCat && selectedCat !== cat._id) return null;
-              if (catItems.length === 0 && !selectedCat) return null;
+              if (selectedCat && selectedCat !== cat._id) return null;
               return (
                 <div key={cat._id} className="card overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2" style={{ borderLeftColor: cat.color, borderLeftWidth: 3 }}>
                     <span>{cat.icon}</span>
                     <span className="font-semibold text-gray-800 dark:text-gray-200">{cat.name}</span>
+                    <button onClick={() => openEditCat(cat)} className="p-1 text-gray-400 hover:text-brand-500 rounded" title="Rename category"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button
+                      onClick={() => deleteCat(cat, catItems.length)}
+                      className={`p-1 rounded ${catItems.length === 0 ? 'text-gray-400 hover:text-red-500' : 'text-gray-200 dark:text-gray-700 cursor-not-allowed'}`}
+                      title={catItems.length === 0 ? 'Delete empty category' : `Can't delete — ${catItems.length} item(s) inside`}
+                    ><Trash2 className="w-3.5 h-3.5" /></button>
                     <span className="badge-blue ml-1">{catItems.length}</span>
                     <span className="text-xs text-gray-400 ml-auto">{formatCurrency(catItems.reduce((s: number, i: any) => s + i.currentStock * i.averageCost, 0))}</span>
                   </div>
+                  {catItems.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-sm text-gray-400">No items in this category yet</div>
+                  ) : (
                   <div className="table-responsive">
                     <table className="w-full min-w-max">
                       <thead className="bg-gray-50 dark:bg-gray-800/30">
@@ -140,6 +170,7 @@ export default function InventoryPage() {
                     </tbody>
                     </table>
                   </div>
+                  )}
                 </div>
               );
             })}
@@ -183,14 +214,14 @@ export default function InventoryPage() {
       </Modal>
 
       {/* Category Modal */}
-      <Modal open={modal === 'cat'} onClose={() => setModal(null)} title="Add Category" size="sm">
+      <Modal open={modal === 'cat' || modal === 'editCat'} onClose={() => { setModal(null); setEditingCategory(null); }} title={modal === 'editCat' ? 'Rename Category' : 'Add Category'} size="sm">
         <div className="space-y-4">
           <div><label className="label">Category Name *</label><input className="input" value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} /></div>
           <div><label className="label">Icon (emoji)</label><input className="input" value={catForm.icon} onChange={e => setCatForm({...catForm, icon: e.target.value})} /></div>
           <div><label className="label">Color</label><input type="color" className="input h-10" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} /></div>
           <div className="flex gap-3 pt-2">
-            <button onClick={saveCat} className="btn-primary flex-1">Add Category</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button onClick={saveCat} className="btn-primary flex-1">{modal === 'editCat' ? 'Save Changes' : 'Add Category'}</button>
+            <button onClick={() => { setModal(null); setEditingCategory(null); }} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
