@@ -555,7 +555,6 @@ export default function PurchasesPage() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="label mb-0">Items *</label>
-              <button onClick={addLine} className="text-xs text-brand-600 font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add Item</button>
             </div>
             <div className="grid grid-cols-12 gap-2 text-xs text-gray-400 font-medium px-1 mb-1">
               <span className="col-span-12 sm:col-span-3">Item (search or add new)</span>
@@ -610,6 +609,7 @@ export default function PurchasesPage() {
                 </div>
               </div>
             ))}
+            <button onClick={addLine} className="mt-1 mb-2 text-xs text-brand-600 font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add Item</button>
             <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-2">
               <div className="flex items-center justify-between text-sm text-gray-500">
                 <span>Subtotal</span>
