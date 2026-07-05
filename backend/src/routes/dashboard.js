@@ -60,11 +60,10 @@ router.get('/summary', async (req, res) => {
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
 
-    // Month total purchases
-    const monthPurchases = await PurchaseEntry.aggregate([
-      { $match: { date: { $gte: monthStart, $lt: tomorrow } } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-    ]);
+    // Note: month total expenses now comes purely from Payments (below) —
+    // every purchase already creates a matching Payment record under
+    // 'Raw Materials', so summing PurchaseEntry separately here would
+    // double-count the same money.
 
     // All active accounts
     const accounts = await Account.find({ isActive: true });
@@ -108,7 +107,8 @@ router.get('/summary', async (req, res) => {
     ]);
 
     const monthSales = monthSalesAgg[0] || { total: 0, outlet: 0, zomato: 0, fatafat: 0, other: 0 };
-    const totalMonthExpenses = (monthExpenses[0]?.total || 0) + (monthPurchases[0]?.total || 0);
+    const totalMonthExpenses = monthExpenses[0]?.total || 0;
+    const rawMaterialsThisMonth = expenseByCategory.find(e => e._id === 'Raw Materials')?.total || 0;
 
     res.json({
       today: {
@@ -149,7 +149,7 @@ router.get('/summary', async (req, res) => {
         fatafat: monthSales.fatafat,
         other: monthSales.other,
         expenses: totalMonthExpenses,
-        grossProfit: monthSales.total - (monthPurchases[0]?.total || 0),
+        grossProfit: monthSales.total - rawMaterialsThisMonth,
         netProfit: monthSales.total - totalMonthExpenses,
       },
       accounts,

@@ -117,10 +117,6 @@ export default function ReportsPage() {
                   <div className="card p-5">
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><TrendingDown className="w-4 h-4 text-red-500" /> Expense Breakdown</h3>
                     <div className="space-y-2">
-                      <div className="flex justify-between py-2 border-b border-gray-50 dark:border-gray-800">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Raw Materials (Purchases)</span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(pnl.expenses.rawMaterials)}</span>
-                      </div>
                       {pnl.expenses.byCategory?.map((e: any) => (
                         <div key={e._id} className="flex justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
                           <span className="text-sm text-gray-600 dark:text-gray-400">{e._id}</span>

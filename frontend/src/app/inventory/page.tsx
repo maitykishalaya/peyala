@@ -225,6 +225,6 @@ export default function InventoryPage() {
           </div>
         </div>
       </Modal>
-    </AppLayout>
+    </AppLayout> 
   );
 }

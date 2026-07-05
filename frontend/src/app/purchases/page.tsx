@@ -528,7 +528,24 @@ export default function PurchasesPage() {
             </div>
             <div className="col-span-2">
               <label className="inline-flex items-center text-sm">
-                <input type="checkbox" checked={!!form.isGstBill} onChange={e => setForm({...form, isGstBill: e.target.checked})} className="mr-2 h-4 w-4" />
+                <input
+                  type="checkbox"
+                  checked={!!form.isGstBill}
+                  onChange={e => {
+                    const isGstBill = e.target.checked;
+                    if (!isGstBill) {
+                      // Clear any GST already set on lines so it can't silently affect the total
+                      const lines = form.lines.map((l: any) => {
+                        const baseAmount = (l.quantity || 0) * (l.pricePerUnit || 0);
+                        return { ...l, gstPercent: 0, gstAmount: 0, totalPrice: +baseAmount.toFixed(2) };
+                      });
+                      setForm({ ...form, isGstBill, lines });
+                    } else {
+                      setForm({ ...form, isGstBill });
+                    }
+                  }}
+                  className="mr-2 h-4 w-4"
+                />
                 Is this a GST bill?
               </label>
             </div>
@@ -585,8 +602,8 @@ export default function PurchasesPage() {
                   </div>
                 )}
                 <div className="col-span-6 sm:col-span-2">
-                  <input type="number" readOnly className="input text-xs py-1 sm:py-1.5 font-medium bg-gray-100 dark:bg-gray-900" value={line.totalPrice || ''} placeholder="₹ total" />
-                  <p className="text-[11px] text-gray-400 mt-1">GST ₹{formatCurrency(line.gstAmount || 0)}</p>
+                  <input type="number" className="input text-xs py-1 sm:py-1.5 font-medium" value={line.totalPrice || ''} onChange={e => updateLine(idx, 'totalPrice', +e.target.value)} placeholder="₹ total" />
+                  {form.isGstBill && <p className="text-[11px] text-gray-400 mt-1">GST ₹{formatCurrency(line.gstAmount || 0)}</p>}
                 </div>
                 <div className="col-span-12 sm:col-span-1 flex justify-end">
                   {form.lines.length > 1 && <button onClick={() => removeLine(idx)} className="p-1 text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
@@ -598,10 +615,12 @@ export default function PurchasesPage() {
                 <span>Subtotal</span>
                 <span>{formatCurrency(subTotal)}</span>
               </div>
-              <div className="flex items-center justify-between text-sm text-gray-500">
-                <span>Purchase GST</span>
-                <span>{formatCurrency(purchaseGstTotal)}</span>
-              </div>
+              {form.isGstBill && (
+                <div className="flex items-center justify-between text-sm text-gray-500">
+                  <span>Purchase GST</span>
+                  <span>{formatCurrency(purchaseGstTotal)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-2 font-semibold text-gray-900 dark:text-gray-100">
                 <span>Total</span>
                 <span>{formatCurrency(grandTotal)}</span>

@@ -26,22 +26,22 @@ router.get('/pnl', async (req, res) => {
       }}
     ]);
 
-    const purchasesAgg = await PurchaseEntry.aggregate([
-      { $match: { date: { $gte: start, $lte: end } } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-    ]);
-
     const expensesByCat = await Payment.aggregate([
       { $match: { date: { $gte: start, $lte: end } } },
       { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
       { $sort: { total: -1 } }
     ]);
 
+    // Raw Materials cost comes from Payments now (every purchase already
+    // creates a matching Payment record under 'Raw Materials'), so we
+    // read it from here instead of summing PurchaseEntry separately —
+    // summing both was double-counting the same money.
     const totalExpenses = expensesByCat.reduce((s, e) => s + e.total, 0);
-    const purchases = purchasesAgg[0]?.total || 0;
+    const rawMaterialsEntry = expensesByCat.find(e => e._id === 'Raw Materials');
+    const rawMaterials = rawMaterialsEntry?.total || 0;
     const sales = salesAgg[0] || { outlet: 0, zomato: 0, fatafat: 0, other: 0, total: 0 };
-    const grossProfit = sales.total - purchases;
-    const netProfit = sales.total - purchases - totalExpenses;
+    const grossProfit = sales.total - rawMaterials;
+    const netProfit = sales.total - totalExpenses;
 
     res.json({
       period: { start, end },
@@ -52,7 +52,7 @@ router.get('/pnl', async (req, res) => {
         other: sales.other,
         total: sales.total
       },
-      expenses: { rawMaterials: purchases, byCategory: expensesByCat, total: totalExpenses + purchases },
+      expenses: { rawMaterials, byCategory: expensesByCat, total: totalExpenses },
       grossProfit,
       netProfit,
       grossMargin: sales.total > 0 ? ((grossProfit / sales.total) * 100).toFixed(1) : 0,
