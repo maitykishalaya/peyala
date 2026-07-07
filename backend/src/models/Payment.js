@@ -51,4 +51,14 @@ const paymentSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
+// ── Indexes ──────────────────────────────────────────────────────
+// Dashboard/reports aggregate Payments by date range and by category
+// constantly; the account ledger filters by paidFrom; categories.js
+// drills down by category/subcategory alone (no date); staff.js pulls
+// a staff member's full payment history by staff id.
+paymentSchema.index({ date: -1, category: 1 });
+paymentSchema.index({ paidFrom: 1 });
+paymentSchema.index({ category: 1, subcategory: 1 });
+paymentSchema.index({ staff: 1 });
+
 module.exports = mongoose.model('Payment', paymentSchema);

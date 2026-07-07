@@ -98,4 +98,8 @@ accountSchema.pre('save', function (next) {
   next();
 });
 
+// ── Index ──────────────────────────────────────────────────────────
+// Almost every route queries Account.find({ isActive: true }).
+accountSchema.index({ isActive: 1 });
+
 module.exports = mongoose.model('Account', accountSchema);

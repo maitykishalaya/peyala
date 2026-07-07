@@ -85,4 +85,8 @@ salesEntrySchema.statics.calcTotals = function(data) {
   return { outletSales, totalRevenue };
 };
 
+// ── Index ────────────────────────────────────────────────────────
+// Dashboard and reports constantly filter/aggregate SalesEntry by date range.
+salesEntrySchema.index({ date: -1 });
+
 module.exports = mongoose.model('SalesEntry', salesEntrySchema);

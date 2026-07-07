@@ -12,14 +12,44 @@ import {
 
 const COLORS = ['#e26411', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
+const CACHE_KEY = 'peyala_dashboard_cache_v1';
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: any) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [ownerNote, setOwnerNote] = useState<string>('');
 
   useEffect(() => {
-    dashboardApi.summary().then(r => { setData(r.data); setLoading(false); })
-      .catch(() => setLoading(false));
+    const cached = readCache();
+    if (cached) {
+      setData(cached.data);
+      setLoading(false);
+    }
+    // Always fetch fresh data too — cached data (if any) just avoids a
+    // blank spinner while this request is in flight.
+    dashboardApi.summary().then(r => {
+      setData(r.data);
+      setLoading(false);
+      writeCache(r.data);
+    }).catch(() => setLoading(false));
     ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
   }, []);
 

@@ -34,4 +34,8 @@ const paymentCategorySchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+// ── Index ────────────────────────────────────────────────────────
+// categories.js queries find({ isActive: true }).sort('order name').
+paymentCategorySchema.index({ isActive: 1, order: 1, name: 1 });
+
 module.exports = mongoose.model('PaymentCategory', paymentCategorySchema);
