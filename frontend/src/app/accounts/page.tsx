@@ -17,6 +17,26 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2 } from 'lucide-react';
 
+const ACCOUNTS_CACHE_KEY = 'peyala_accounts_cache_v1';
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(ACCOUNTS_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: any) {
+  try {
+    localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
+
 // ── Icon mapping for account types ───────────────────────────────
 const TYPE_ICONS = {
   cash: Wallet,
@@ -85,10 +105,19 @@ export default function AccountsPage() {
     setAccounts(a.data);
     setTransfers(t.data);
     setLoading(false);
+    writeCache({ accounts: a.data, transfers: t.data });
   };
 
-  // Run load() once when component mounts
-  useEffect(() => { load(); }, []);
+  // Run load() once when component mounts — show cache instantly first if we have it
+  useEffect(() => {
+    const cached = readCache();
+    if (cached) {
+      setAccounts(cached.accounts || []);
+      setTransfers(cached.transfers || []);
+      setLoading(false);
+    }
+    load(); // always refresh from the server too
+  }, []);
 
   // ── When account type changes, auto-suggest payment modes ───────
   // Called when user picks a type in the form dropdown
@@ -191,7 +220,7 @@ export default function AccountsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 pb-24">
 
         {/* ── Page Header ────────────────────────────────────────── */}
         <div className="flex items-center justify-between">

@@ -23,6 +23,27 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
+
+const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
+const SALES_ACCOUNTS_CACHE_KEY = 'peyala_sales_accounts_cache_v1';
+
+function readCache(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, data: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
 import { formatCurrency, formatDate, today } from '@/lib/utils';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info } from 'lucide-react';
 
@@ -100,6 +121,7 @@ export default function SalesPage() {
 
   // ── Load sales list ─────────────────────────────────────────────
   const load = async () => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
     setLoading(true);
     const params: any = { page, limit: 30 };
     if (filters.startDate) params.startDate = filters.startDate;
@@ -108,14 +130,31 @@ export default function SalesPage() {
     setSales(r.data.sales);
     setTotal(r.data.total);
     setLoading(false);
+    if (isDefaultView) writeCache(SALES_LIST_CACHE_KEY, { sales: r.data.sales, total: r.data.total });
   };
 
-  useEffect(() => { load(); }, [page, filters]);
+  useEffect(() => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
+    if (isDefaultView) {
+      const cached = readCache(SALES_LIST_CACHE_KEY);
+      if (cached) {
+        setSales(cached.sales || []);
+        setTotal(cached.total || 0);
+        setLoading(false);
+        load(); // quietly refresh in the background
+        return;
+      }
+    }
+    load();
+  }, [page, filters]);
 
   useEffect(() => {
+    const cached = readCache(SALES_ACCOUNTS_CACHE_KEY);
+    if (cached) setAccounts(cached.accounts || []);
     const loadAccounts = async () => {
       const res = await accountsApi.list();
       setAccounts(res.data);
+      writeCache(SALES_ACCOUNTS_CACHE_KEY, { accounts: res.data });
     };
     loadAccounts();
   }, []);
@@ -315,7 +354,7 @@ export default function SalesPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5">
+      <div className="space-y-5 pb-24">
 
         {/* ── Page Header ──────────────────────────────────────── */}
         <div className="flex items-center justify-between">

@@ -20,6 +20,26 @@ import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/pa
 import { formatCurrency, formatDate, today } from '@/lib/utils';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 
+const PAYMENTS_CACHE_KEY = 'peyala_payments_cache_v1';
+
+function readCache(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, data: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
+
 export default function PaymentsPage() {
   // ── Data state ──────────────────────────────────────────────────
   const [payments, setPayments] = useState<any[]>([]);
@@ -52,6 +72,7 @@ export default function PaymentsPage() {
 
   // ── Load payments list ──────────────────────────────────────────
   const load = async () => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
     setLoading(true);
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
@@ -70,9 +91,31 @@ export default function PaymentsPage() {
     setSuppliers(s.data);
     setCategories(c.data);
     setLoading(false);
+    if (isDefaultView) {
+      writeCache(PAYMENTS_CACHE_KEY, {
+        payments: p.data.payments, total: p.data.total,
+        accounts: a.data, suppliers: s.data, categories: c.data,
+      });
+    }
   };
 
-  useEffect(() => { load(); }, [page, filters]);
+  useEffect(() => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
+    if (isDefaultView) {
+      const cached = readCache(PAYMENTS_CACHE_KEY);
+      if (cached) {
+        setPayments(cached.payments || []);
+        setTotal(cached.total || 0);
+        setAccounts(cached.accounts || []);
+        setSuppliers(cached.suppliers || []);
+        setCategories(cached.categories || []);
+        setLoading(false);
+        load(); // quietly refresh in the background
+        return;
+      }
+    }
+    load();
+  }, [page, filters]);
 
   // ── When category changes, update subcategory list ───────────────
   const handleCategoryChange = (catName: string) => {
@@ -135,7 +178,7 @@ export default function PaymentsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5">
+      <div className="space-y-5 pb-24">
 
         {/* Header */}
         <div className="flex items-center justify-between">
