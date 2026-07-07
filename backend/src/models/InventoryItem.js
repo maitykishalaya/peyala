@@ -23,4 +23,13 @@ inventoryItemSchema.virtual('isLowStock').get(function() {
 
 inventoryItemSchema.set('toJSON', { virtuals: true });
 
+// ── Indexes ────────────────────────────────────────────────────────
+// Speeds up the exact queries the Inventory page runs:
+//   find({ isActive: true })                → isActive index
+//   find({ isActive: true, category: id })   → compound index below
+//   .sort('name')                            → name index
+// Without these, MongoDB has to scan every document every time.
+inventoryItemSchema.index({ isActive: 1, category: 1 });
+inventoryItemSchema.index({ name: 1 });
+
 module.exports = mongoose.model('InventoryItem', inventoryItemSchema);

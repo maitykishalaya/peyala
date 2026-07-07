@@ -6,6 +6,26 @@ import { inventoryApi, suppliersApi } from '@/lib/api';
 import { formatCurrency, UNITS } from '@/lib/utils';
 import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search } from 'lucide-react';
 
+const CACHE_KEY = 'peyala_inventory_cache_v1';
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: { items: any[]; categories: any[]; suppliers: any[] }) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -21,15 +41,33 @@ export default function InventoryPage() {
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
 
-  const load = async () => {
+  const load = async (isBackgroundRefresh = false) => {
     const params: any = {};
     if (selectedCat) params.category = selectedCat;
     if (lowStockOnly) params.lowStock = 'true';
     const [i, c, s] = await Promise.all([inventoryApi.items(params), inventoryApi.categories(), suppliersApi.list()]);
     setItems(i.data); setCategories(c.data); setSuppliers(s.data); setLoading(false);
+    // Only cache the unfiltered "All" view, so cached data is always the full picture
+    if (!selectedCat && !lowStockOnly) writeCache({ items: i.data, categories: c.data, suppliers: s.data });
   };
 
-  useEffect(() => { load(); }, [selectedCat, lowStockOnly]);
+  useEffect(() => {
+    // On first load (no filters yet applied), show cached data instantly
+    // if we have it, then quietly refresh from the server in the background
+    // so the page never sits on a blank spinner if we've loaded it before.
+    if (!selectedCat && !lowStockOnly) {
+      const cached = readCache();
+      if (cached) {
+        setItems(cached.items || []);
+        setCategories(cached.categories || []);
+        setSuppliers(cached.suppliers || []);
+        setLoading(false);
+        load(true); // refresh quietly in the background
+        return;
+      }
+    }
+    load();
+  }, [selectedCat, lowStockOnly]);
 
   const openEdit = (item: any) => {
     setSelected(item);
@@ -88,7 +126,7 @@ export default function InventoryPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5">
+      <div className="space-y-5 pb-24">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Inventory</h1>

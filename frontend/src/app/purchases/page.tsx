@@ -28,6 +28,27 @@ import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/pa
 import { formatCurrency, formatDate, today, UNITS } from '@/lib/utils';
 import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle } from 'lucide-react';
 
+const REFDATA_CACHE_KEY = 'peyala_purchases_refdata_cache_v1';
+const LIST_CACHE_KEY = 'peyala_purchases_list_cache_v1';
+
+function readCache(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, data: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
+  }
+}
+
 // ── Inline Item Search + Quick Add ───────────────────────────────
 // This sub-component renders per line item.
 // Shows a search box; when user types it filters items.
@@ -165,6 +186,7 @@ export default function PurchasesPage() {
   const [form, setForm] = useState<any>(blankPurchaseForm());
 
   const load = async () => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
     setLoading(true);
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
@@ -174,14 +196,38 @@ export default function PurchasesPage() {
     setPurchases(res.data.purchases);
     setTotal(res.data.total);
     setLoading(false);
+    if (isDefaultView) writeCache(LIST_CACHE_KEY, { purchases: res.data.purchases, total: res.data.total });
   };
 
-  useEffect(() => { load(); }, [page, filters]);
+  useEffect(() => {
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
+    if (isDefaultView) {
+      const cached = readCache(LIST_CACHE_KEY);
+      if (cached) {
+        setPurchases(cached.purchases || []);
+        setTotal(cached.total || 0);
+        setLoading(false);
+        load(); // quietly refresh in the background
+        return;
+      }
+    }
+    load();
+  }, [page, filters]);
 
   useEffect(() => {
+    const cached = readCache(REFDATA_CACHE_KEY);
+    if (cached) {
+      setSuppliers(cached.suppliers || []);
+      setItems(cached.items || []);
+      setAccounts(cached.accounts || []);
+      setCategories(cached.categories || []);
+    }
+    // Always refresh from the server too — cached data (if any) just avoids
+    // a blank picker while this fetch is in flight.
     Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()])
       .then(([s, i, a, c]) => {
         setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
+        writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
       });
   }, []);
 

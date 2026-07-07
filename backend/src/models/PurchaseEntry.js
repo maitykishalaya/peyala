@@ -24,4 +24,10 @@ const purchaseEntrySchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
+// ── Indexes ────────────────────────────────────────────────────────
+// Matches how the Purchases page actually queries this collection:
+//   sort by date, filter by date range, filter by supplier.
+purchaseEntrySchema.index({ date: -1 });
+purchaseEntrySchema.index({ supplier: 1, date: -1 });
+
 module.exports = mongoose.model('PurchaseEntry', purchaseEntrySchema);

@@ -8,4 +8,6 @@ const inventoryCategorySchema = new mongoose.Schema({
   icon: { type: String, default: '📦' },
 }, { timestamps: true });
 
+inventoryCategorySchema.index({ name: 1 });
+
 module.exports = mongoose.model('InventoryCategory', inventoryCategorySchema);
