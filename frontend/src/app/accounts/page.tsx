@@ -37,7 +37,7 @@ function writeCache(data: any) {
   }
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+const CACHE_TTL_MS = 30 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
 
 // ── Icon mapping for account types ───────────────────────────────
 const TYPE_ICONS = {
