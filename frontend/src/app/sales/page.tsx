@@ -23,6 +23,8 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
+import { formatCurrency, formatDate, today } from '@/lib/utils';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info } from 'lucide-react';
 
 const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
 const SALES_ACCOUNTS_CACHE_KEY = 'peyala_sales_accounts_cache_v1';
@@ -44,8 +46,8 @@ function writeCache(key: string, data: any) {
     // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
   }
 }
-import { formatCurrency, formatDate, today } from '@/lib/utils';
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info } from 'lucide-react';
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
 
 // ── Empty platform section (Zomato / Fatafat) ────────────────────
 const emptyPlatform = {
@@ -122,7 +124,6 @@ export default function SalesPage() {
   // ── Load sales list ─────────────────────────────────────────────
   const load = async () => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
-    setLoading(true);
     const params: any = { page, limit: 30 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
@@ -141,7 +142,8 @@ export default function SalesPage() {
         setSales(cached.sales || []);
         setTotal(cached.total || 0);
         setLoading(false);
-        load(); // quietly refresh in the background
+        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
+        if (isStale) load(); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -150,13 +152,14 @@ export default function SalesPage() {
 
   useEffect(() => {
     const cached = readCache(SALES_ACCOUNTS_CACHE_KEY);
+    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
     if (cached) setAccounts(cached.accounts || []);
-    const loadAccounts = async () => {
-      const res = await accountsApi.list();
-      setAccounts(res.data);
-      writeCache(SALES_ACCOUNTS_CACHE_KEY, { accounts: res.data });
-    };
-    loadAccounts();
+    if (!cached || isStale) {
+      accountsApi.list().then(res => {
+        setAccounts(res.data);
+        writeCache(SALES_ACCOUNTS_CACHE_KEY, { accounts: res.data });
+      });
+    }
   }, []);
 
   // ── Open edit modal — populate form from existing entry ──────────

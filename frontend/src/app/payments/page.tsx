@@ -40,6 +40,8 @@ function writeCache(key: string, data: any) {
   }
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+
 export default function PaymentsPage() {
   // ── Data state ──────────────────────────────────────────────────
   const [payments, setPayments] = useState<any[]>([]);
@@ -73,7 +75,6 @@ export default function PaymentsPage() {
   // ── Load payments list ──────────────────────────────────────────
   const load = async () => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
-    setLoading(true);
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
@@ -110,7 +111,8 @@ export default function PaymentsPage() {
         setSuppliers(cached.suppliers || []);
         setCategories(cached.categories || []);
         setLoading(false);
-        load(); // quietly refresh in the background
+        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
+        if (isStale) load(); // quietly refresh only if the cache is old
         return;
       }
     }

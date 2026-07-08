@@ -26,6 +26,8 @@ function writeCache(data: { items: any[]; categories: any[]; suppliers: any[] })
   }
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+
 export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -37,6 +39,8 @@ export default function InventoryPage() {
   const [selected, setSelected] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
@@ -53,8 +57,10 @@ export default function InventoryPage() {
 
   useEffect(() => {
     // On first load (no filters yet applied), show cached data instantly
-    // if we have it, then quietly refresh from the server in the background
-    // so the page never sits on a blank spinner if we've loaded it before.
+    // if we have it. Only go back to the server if that cache has gone
+    // stale (older than CACHE_TTL_MS) — otherwise we trust it as-is and
+    // skip the network call entirely, so the page doesn't refetch every
+    // single time you visit it.
     if (!selectedCat && !lowStockOnly) {
       const cached = readCache();
       if (cached) {
@@ -62,7 +68,8 @@ export default function InventoryPage() {
         setCategories(cached.categories || []);
         setSuppliers(cached.suppliers || []);
         setLoading(false);
-        load(true); // refresh quietly in the background
+        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
+        if (isStale) load(true); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -72,13 +79,23 @@ export default function InventoryPage() {
   const openEdit = (item: any) => {
     setSelected(item);
     setItemForm({ name: item.name, category: item.category?._id || '', unit: item.unit, currentStock: item.currentStock, minimumStock: item.minimumStock, lastPurchasePrice: item.lastPurchasePrice, preferredSupplier: item.preferredSupplier?._id || '', notes: item.notes || '' });
+    setSaveError('');
     setModal('edit');
   };
 
   const saveItem = async () => {
-    if (modal === 'edit') await inventoryApi.updateItem(selected._id, itemForm);
-    else await inventoryApi.createItem(itemForm);
-    setModal(null); load();
+    setSaving(true);
+    setSaveError('');
+    try {
+      if (modal === 'edit') await inventoryApi.updateItem(selected._id, itemForm);
+      else await inventoryApi.createItem(itemForm);
+      setModal(null);
+      await load();
+    } catch (err: any) {
+      setSaveError(err?.response?.data?.message || 'Could not save the item. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openEditCat = (cat: any) => {
@@ -134,7 +151,7 @@ export default function InventoryPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
-            <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
+            <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setSaveError(''); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
           </div>
         </div>
 
@@ -263,9 +280,14 @@ export default function InventoryPage() {
               {suppliers.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
             </select>
           </div>
+          {saveError && (
+            <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{saveError}</div>
+          )}
           <div className="flex gap-3 pt-2">
-            <button onClick={saveItem} className="btn-primary flex-1">Save Item</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button onClick={saveItem} disabled={saving} className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed">
+              {saving ? 'Saving...' : 'Save Item'}
+            </button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

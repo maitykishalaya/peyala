@@ -32,6 +32,8 @@ function writeCache(data: any) {
   }
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -39,17 +41,19 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const cached = readCache();
+    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
     if (cached) {
       setData(cached.data);
       setLoading(false);
     }
-    // Always fetch fresh data too — cached data (if any) just avoids a
-    // blank spinner while this request is in flight.
-    dashboardApi.summary().then(r => {
-      setData(r.data);
-      setLoading(false);
-      writeCache(r.data);
-    }).catch(() => setLoading(false));
+    // Only hit the server if we had nothing cached, or the cache has gone stale.
+    if (!cached || isStale) {
+      dashboardApi.summary().then(r => {
+        setData(r.data);
+        setLoading(false);
+        writeCache(r.data);
+      }).catch(() => setLoading(false));
+    }
     ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
   }, []);
 

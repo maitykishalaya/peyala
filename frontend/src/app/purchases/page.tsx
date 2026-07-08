@@ -49,6 +49,8 @@ function writeCache(key: string, data: any) {
   }
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+
 // ── Inline Item Search + Quick Add ───────────────────────────────
 // This sub-component renders per line item.
 // Shows a search box; when user types it filters items.
@@ -187,7 +189,6 @@ export default function PurchasesPage() {
 
   const load = async () => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
-    setLoading(true);
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
@@ -207,7 +208,8 @@ export default function PurchasesPage() {
         setPurchases(cached.purchases || []);
         setTotal(cached.total || 0);
         setLoading(false);
-        load(); // quietly refresh in the background
+        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
+        if (isStale) load(); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -216,19 +218,21 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     const cached = readCache(REFDATA_CACHE_KEY);
+    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
     if (cached) {
       setSuppliers(cached.suppliers || []);
       setItems(cached.items || []);
       setAccounts(cached.accounts || []);
       setCategories(cached.categories || []);
     }
-    // Always refresh from the server too — cached data (if any) just avoids
-    // a blank picker while this fetch is in flight.
-    Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()])
-      .then(([s, i, a, c]) => {
-        setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
-        writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
-      });
+    // Only hit the server if we had nothing cached, or the cache has gone stale.
+    if (!cached || isStale) {
+      Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()])
+        .then(([s, i, a, c]) => {
+          setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
+          writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
+        });
+    }
   }, []);
 
   // ── Handle account change → update allowed payment modes ────────

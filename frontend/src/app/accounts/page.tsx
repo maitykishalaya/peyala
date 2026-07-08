@@ -37,6 +37,8 @@ function writeCache(data: any) {
   }
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+
 // ── Icon mapping for account types ───────────────────────────────
 const TYPE_ICONS = {
   cash: Wallet,
@@ -111,12 +113,13 @@ export default function AccountsPage() {
   // Run load() once when component mounts — show cache instantly first if we have it
   useEffect(() => {
     const cached = readCache();
+    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
     if (cached) {
       setAccounts(cached.accounts || []);
       setTransfers(cached.transfers || []);
       setLoading(false);
     }
-    load(); // always refresh from the server too
+    if (!cached || isStale) load(); // only hit the server if nothing cached, or it's gone stale
   }, []);
 
   // ── When account type changes, auto-suggest payment modes ───────
