@@ -76,8 +76,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}>
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-gray-100 dark:border-gray-800">
-          <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center flex-shrink-0">
-            <span className="text-lg">🍵</span>
+          <div className="w-10 h-10 rounded-lg flex-shrink-0 overflow-hidden">
+            <img src="/icon.png" alt="Peyala" className="w-full h-full object-contain" />
           </div>
           {sidebarOpen && <div><p className="font-bold text-gray-900 dark:text-white text-sm leading-none">Peyala</p><p className="text-[10px] text-gray-400 mt-0.5">Business Admin</p></div>}
         </div>
