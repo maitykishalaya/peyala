@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
-import { inventoryApi, suppliersApi } from '@/lib/api';
-import { formatCurrency, UNITS } from '@/lib/utils';
-import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search } from 'lucide-react';
+import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
+import { formatCurrency, formatDate, UNITS } from '@/lib/utils';
+import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_inventory_cache_v1';
 
@@ -41,6 +41,10 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState('');
 
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
@@ -98,6 +102,20 @@ export default function InventoryPage() {
     }
   };
 
+  const openLogs = async () => {
+    setLogsOpen(true);
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      const res = await auditApi.list({ module: 'Inventory', limit: 100 });
+      setLogs(res.data.logs || res.data || []);
+    } catch (err: any) {
+      setLogsError(err?.response?.data?.message || 'Could not load logs. Please try again.');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
   const openEditCat = (cat: any) => {
     setEditingCategory(cat);
     setCatForm({ name: cat.name, icon: cat.icon, color: cat.color });
@@ -150,6 +168,7 @@ export default function InventoryPage() {
             <p className="text-sm text-gray-500">{items.length} items · Value: <strong>{formatCurrency(totalValue)}</strong> · {lowCount > 0 && <span className="text-yellow-600">{lowCount} low stock</span>}</p>
           </div>
           <div className="flex gap-2">
+            <button onClick={openLogs} className="btn-secondary flex items-center gap-2"><History className="w-4 h-4" /> Check Logs</button>
             <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
             <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setSaveError(''); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
           </div>
@@ -302,6 +321,26 @@ export default function InventoryPage() {
             <button onClick={saveCat} className="btn-primary flex-1">{modal === 'editCat' ? 'Save Changes' : 'Add Category'}</button>
             <button onClick={() => { setModal(null); setEditingCategory(null); }} className="btn-secondary">Cancel</button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Logs Modal */}
+      <Modal open={logsOpen} onClose={() => setLogsOpen(false)} title="Inventory Change Logs" size="lg">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+          {logsLoading ? (
+            <div className="text-center py-10 text-gray-400 text-sm">Loading logs...</div>
+          ) : logsError ? (
+            <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{logsError}</div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 text-sm">No inventory changes recorded yet.</div>
+          ) : (
+            logs.map((entry: any) => (
+              <div key={entry._id} className="border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
+                <p className="text-sm text-gray-800 dark:text-gray-200">{entry.description}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{formatDate(entry.createdAt)}</p>
+              </div>
+            ))
+          )}
         </div>
       </Modal>
     </AppLayout>
