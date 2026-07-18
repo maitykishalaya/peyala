@@ -3,6 +3,7 @@ const router = require('express').Router();
 const SalesEntry = require('../models/SalesEntry');
 const Payment = require('../models/Payment');
 const PurchaseEntry = require('../models/PurchaseEntry');
+const InventoryItem = require('../models/InventoryItem');
 const { auth } = require('../middleware/auth');
 
 router.use(auth);
@@ -85,6 +86,50 @@ router.get('/daily', async (req, res) => {
       totalExpenses,
       netProfit: (sales?.totalRevenue || 0) - totalExpenses
     });
+  } catch (err) {
+    res.status(500).json({ message: err.message }); }
+});
+
+// Inventory purchase report — per item, quantity bought and money spent
+// within a date range. Reads straight from PurchaseEntry line items.
+router.get('/inventory-purchases', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const start = new Date(startDate);
+    const end = new Date(endDate + 'T23:59:59');
+
+    const rows = await PurchaseEntry.aggregate([
+      { $match: { date: { $gte: start, $lte: end } } },
+      { $unwind: '$items' },
+      { $group: {
+        _id: '$items.item',
+        totalQuantity: { $sum: '$items.quantity' },
+        totalSpent: { $sum: '$items.totalPrice' },
+        purchaseCount: { $sum: 1 },
+      }},
+      { $sort: { totalSpent: -1 } },
+    ]);
+
+    const itemIds = rows.map(r => r._id).filter(Boolean);
+    const items = await InventoryItem.find({ _id: { $in: itemIds } })
+      .populate('category', 'name')
+      .select('name unit category');
+    const itemMap = items.reduce((map, i) => { map[i._id.toString()] = i; return map; }, {});
+
+    const result = rows.map(r => {
+      const item = itemMap[r._id?.toString()];
+      return {
+        itemId: r._id,
+        name: item?.name || 'Deleted item',
+        unit: item?.unit || '',
+        category: item?.category?.name || '',
+        totalQuantity: r.totalQuantity,
+        totalSpent: r.totalSpent,
+        purchaseCount: r.purchaseCount,
+      };
+    });
+
+    res.json({ period: { start, end }, items: result });
   } catch (err) {
     res.status(500).json({ message: err.message }); }
 });

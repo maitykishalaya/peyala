@@ -45,6 +45,7 @@ export default function InventoryPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState('');
+  const [logsSearch, setLogsSearch] = useState('');
 
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
@@ -106,6 +107,7 @@ export default function InventoryPage() {
     setLogsOpen(true);
     setLogsLoading(true);
     setLogsError('');
+    setLogsSearch('');
     try {
       const res = await auditApi.list({ module: 'Inventory', limit: 100 });
       setLogs(res.data.logs || res.data || []);
@@ -325,7 +327,17 @@ export default function InventoryPage() {
       </Modal>
 
       {/* Logs Modal */}
-      <Modal open={logsOpen} onClose={() => setLogsOpen(false)} title="Inventory Change Logs" size="lg">
+      <Modal open={logsOpen} onClose={() => { setLogsOpen(false); setLogsSearch(''); }} title="Inventory Change Logs" size="lg">
+        <div className="relative mb-3">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={logsSearch}
+            onChange={e => setLogsSearch(e.target.value)}
+            placeholder="Search logs by item, category, or user..."
+            className="input pl-9"
+          />
+        </div>
         <div className="space-y-3 max-h-[60vh] overflow-y-auto">
           {logsLoading ? (
             <div className="text-center py-10 text-gray-400 text-sm">Loading logs...</div>
@@ -334,12 +346,23 @@ export default function InventoryPage() {
           ) : logs.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">No inventory changes recorded yet.</div>
           ) : (
-            logs.map((entry: any) => (
-              <div key={entry._id} className="border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
-                <p className="text-sm text-gray-800 dark:text-gray-200">{entry.description}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{formatDate(entry.createdAt)}</p>
-              </div>
-            ))
+            (() => {
+              const filtered = logsSearch.trim()
+                ? logs.filter((entry: any) =>
+                    entry.description?.toLowerCase().includes(logsSearch.trim().toLowerCase()) ||
+                    entry.userName?.toLowerCase().includes(logsSearch.trim().toLowerCase())
+                  )
+                : logs;
+              if (filtered.length === 0) {
+                return <div className="text-center py-10 text-gray-400 text-sm">No logs match "{logsSearch}"</div>;
+              }
+              return filtered.map((entry: any) => (
+                <div key={entry._id} className="border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
+                  <p className="text-sm text-gray-800 dark:text-gray-200">{entry.description}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{formatDate(entry.createdAt)}</p>
+                </div>
+              ));
+            })()
           )}
         </div>
       </Modal>

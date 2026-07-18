@@ -15,11 +15,15 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<'pnl' | 'daily'>('pnl');
   const [dailyDate, setDailyDate] = useState(today());
   const [daily, setDaily] = useState<any>(null);
+  const [inventoryReport, setInventoryReport] = useState<any>(null);
 
   const loadPnl = async () => {
     setLoading(true);
     const r = await reportsApi.pnl(range.start, range.end);
-    setPnl(r.data); setLoading(false);
+    setPnl(r.data);
+    const ir = await reportsApi.inventoryPurchases(range.start, range.end);
+    setInventoryReport(ir.data);
+    setLoading(false);
   };
 
   const loadDaily = async () => {
@@ -160,6 +164,45 @@ export default function ReportsPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                </div>
+
+                {/* Inventory Item Reports */}
+                <div className="card p-5">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-brand-500" /> Inventory Item Reports</h3>
+                  {inventoryReport?.items?.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 dark:bg-gray-800">
+                            <th className="table-th">Item</th>
+                            <th className="table-th">Category</th>
+                            <th className="table-th">Quantity Bought</th>
+                            <th className="table-th">Amount Spent</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                          {inventoryReport.items.map((it: any) => (
+                            <tr key={it.itemId}>
+                              <td className="table-td font-medium">{it.name}</td>
+                              <td className="table-td text-gray-500">{it.category || '-'}</td>
+                              <td className="table-td">{it.totalQuantity} {it.unit}</td>
+                              <td className="table-td font-medium text-red-500">{formatCurrency(it.totalSpent)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-gray-200 dark:border-gray-700">
+                            <td className="table-td font-bold" colSpan={3}>Total</td>
+                            <td className="table-td font-bold text-red-500">
+                              {formatCurrency(inventoryReport.items.reduce((s: number, it: any) => s + it.totalSpent, 0))}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-10">No purchases in this period</p>
+                  )}
                 </div>
               </>
             )}

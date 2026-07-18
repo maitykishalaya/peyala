@@ -4,10 +4,19 @@ const { auth, adminOnly } = require('../middleware/auth');
 
 router.use(auth);
 
-// Get audit logs (admin only)
-router.get('/', adminOnly, async (req, res) => {
+// Get audit logs.
+// Inventory logs are visible to admins AND managers; every other
+// module stays admin-only.
+router.get('/', async (req, res) => {
   try {
     const { module, user, page = 1, limit = 50 } = req.query;
+
+    const isInventory = module === 'Inventory';
+    const allowedRoles = isInventory ? ['admin', 'manager'] : ['admin'];
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ message: isInventory ? 'Admin or manager access required' : 'Admin access required' });
+    }
+
     const filter = {};
     if (module) filter.module = module;
     if (user) filter.userName = new RegExp(user, 'i');

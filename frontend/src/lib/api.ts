@@ -151,6 +151,7 @@ export const transfersApi = {
 export const reportsApi = {
   pnl: (startDate: string, endDate: string) => api.get('/reports/pnl', { params: { startDate, endDate } }),
   daily: (date: string) => api.get('/reports/daily', { params: { date } }),
+  inventoryPurchases: (startDate: string, endDate: string) => api.get('/reports/inventory-purchases', { params: { startDate, endDate } }),
 };
 
 // Audit Log
