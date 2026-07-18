@@ -174,6 +174,7 @@ router.post('/', async (req, res) => {
         description: `Due purchase from ${supplierName} — ₹${totalAmount}`,
         amount: totalAmount, paymentMode: 'due',
         isPending: true, relatedPurchase: purchase._id,
+        supplier,
         notes, createdBy: req.user._id,
       });
     } else {
@@ -192,6 +193,7 @@ router.post('/', async (req, res) => {
         description: `Purchase from ${supplierName} — ${items.length} item(s)`,
         amount: totalAmount, paymentMode,
         isPending: false, relatedPurchase: purchase._id,
+        supplier,
         notes, createdBy: req.user._id,
       });
     }
@@ -432,6 +434,7 @@ router.post('/:id/clear-due', async (req, res) => {
         paidFrom,
         paymentMode,
         isPending: false,
+        supplier: purchase.supplier._id,
         description: `Due cleared — ${purchase.supplier?.name} (₹${purchase.totalAmount})`,
         date: date ? new Date(date) : new Date(),
       }

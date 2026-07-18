@@ -49,7 +49,7 @@ function writeCache(key: string, data: any) {
   }
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
+const CACHE_TTL_MS = 0.5 * 60 * 1000; // 30s — reuse cache as-is within this window, no network call at all
 
 // ── Inline Item Search + Quick Add ───────────────────────────────
 // This sub-component renders per line item.

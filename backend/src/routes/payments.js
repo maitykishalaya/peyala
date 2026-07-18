@@ -139,6 +139,65 @@ router.put('/:id', async (req, res) => {
     const oldSupplier = oldPayment.supplier ? oldPayment.supplier.toString() : null;
     const oldMode = oldPayment.paymentMode;
 
+    // ── Purchase-linked payments ──────────────────────────────────
+    // For payments created from a Purchase (relatedPurchase set), the
+    // account balance and supplier totalPaid are already fully managed
+    // by the Purchases route (create / edit / clear-due / delete). If we
+    // also let this route move money for these payments, the same
+    // amount gets counted twice — that's the "double deduction from
+    // supplier dues" bug. So for these payments, amount/paidFrom/supplier
+    // are locked (edit the purchase itself instead) — only category,
+    // subcategory, description, and notes remain freely editable, and
+    // this route never touches Account or Supplier balances for them.
+    if (oldPayment.relatedPurchase) {
+      if (req.body.amount !== undefined && Number(req.body.amount) !== oldAmount) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the amount from the Purchases section instead.' });
+      }
+      if (req.body.paidFrom !== undefined && (req.body.paidFrom || null) !== oldPaidFrom) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the payment account from the Purchases section instead.' });
+      }
+      if (req.body.supplier !== undefined && (req.body.supplier || null) !== oldSupplier) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the supplier from the Purchases section instead.' });
+      }
+
+      const updatedPayment = {
+        ...req.body,
+        amount: oldAmount,
+        paidFrom: oldPayment.paidFrom,
+        supplier: oldPayment.supplier,
+        paymentMode: oldMode,
+        isPending: oldPayment.isPending,
+      };
+
+      const payment = await Payment.findByIdAndUpdate(req.params.id, updatedPayment, {
+        new: true,
+        runValidators: true,
+        session,
+      })
+        .populate('paidFrom', 'name type')
+        .populate('createdBy', 'name')
+        .populate('supplier', 'name')
+        .populate('staff', 'name position');
+
+      await session.commitTransaction();
+      session.endSession();
+
+      log({
+        user: req.user,
+        action: 'UPDATE',
+        module: 'Payments',
+        description: `${req.user.name} updated payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
+      }).catch(() => {});
+
+      return res.json(payment);
+    }
+
     const amount = req.body.amount !== undefined ? getPaymentAmount(req.body.amount) : oldAmount;
     if (amount === null || amount <= 0) {
       await session.abortTransaction();
