@@ -141,6 +141,31 @@ router.post('/:id/pay-salary', async (req, res) => {
   } catch (err) { res.status(400).json({ message: err.message }); }
 });
 
+// ── POST /api/staff/:id/reset-salary ─────────────────────────────────
+router.post('/:id/reset-salary', async (req, res) => {
+  try {
+    const member = await Staff.findById(req.params.id);
+    if (!member) return res.status(404).json({ message: 'Staff not found' });
+
+    await Staff.findByIdAndUpdate(req.params.id, {
+      totalSalaryPaid: 0,
+      totalAdvancePaid: 0,
+      totalBonusPaid: 0,
+    });
+
+    await log({
+      user: req.user,
+      action: 'UPDATE',
+      module: 'Staff',
+      description: `${req.user.name} reset salary totals for ${member.name}`,
+    });
+
+    res.json({ message: 'Salary totals reset for staff member' });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
 // ── DELETE /api/staff/:id ─────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
@@ -150,3 +175,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+

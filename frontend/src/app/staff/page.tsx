@@ -219,6 +219,17 @@ export default function StaffPage() {
                 <button onClick={() => openPay(member)} className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
                   <IndianRupee className="w-3 h-3" /> Pay
                 </button>
+                <button
+                  onClick={async () => {
+                    if (typeof window !== 'undefined' && window.confirm(`Reset salary totals for ${member.name}? This will set salary paid, advance paid, and bonus paid back to 0.`)) {
+                      await staffApi.resetSalary(member._id);
+                      load();
+                    }
+                  }}
+                  className="btn-outline text-xs py-1.5"
+                >
+                  Reset
+                </button>
               </div>
             </div>
           ))}

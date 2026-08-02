@@ -136,6 +136,8 @@ export const staffApi = {
   update: (id: string, data: any) => api.put(`/staff/${id}`, data),
   // Unified pay endpoint — handles salary, advance, bonus
   pay: (id: string, data: any) => api.post(`/staff/${id}/pay`, data),
+  // Reset salary totals for one staff member
+  resetSalary: (id: string) => api.post(`/staff/${id}/reset-salary`),
   // Keep old for backward compatibility
   paySalary: (id: string, data: any) => api.post(`/staff/${id}/pay`, { ...data, paymentType: 'salary' }),
   delete: (id: string) => api.delete(`/staff/${id}`),
