@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
@@ -8,7 +8,7 @@ import Walkthrough from '@/components/ui/Walkthrough';
 import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowDownLeft, ArrowUpRight, UserCheck, BarChart3, Settings,
-  Menu, X, LogOut, ChevronRight, Moon, Sun, Scale
+  Menu, X, LogOut, ChevronRight, Moon, Sun, Scale, CalendarCheck
 } from 'lucide-react';
 
 const NAV = [
@@ -21,6 +21,7 @@ const NAV = [
   { href: '/receipts', label: 'Receipts', icon: ArrowDownLeft },
   { href: '/payments', label: 'Payments', icon: ArrowUpRight },
   { href: '/staff', label: 'Staff', icon: UserCheck },
+  { href: '/attendance', label: 'Attendance', icon: CalendarCheck },
   { href: '/balancesheet', label: 'Balance Sheet', icon: Scale },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -38,8 +39,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!loading && !user) router.push('/login');
   }, [user, loading, router]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const storedTheme = localStorage.getItem('peyala_dark_mode');
+    const initialDark = storedTheme !== null
+      ? storedTheme === 'true'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    setDark(initialDark);
+    document.documentElement.classList.toggle('dark', initialDark);
     setMounted(true);
+
     const handleResize = () => {
       if (window.innerWidth < 768) {
         setSidebarOpen(false);
@@ -54,8 +63,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-  }, [dark]);
+    if (mounted) {
+      localStorage.setItem('peyala_dark_mode', dark.toString());
+      document.documentElement.classList.toggle('dark', dark);
+    }
+  }, [dark, mounted]);
 
   if (loading || !user || !mounted) return (
     <div className="min-h-screen flex items-center justify-center">

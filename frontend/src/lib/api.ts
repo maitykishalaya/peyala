@@ -143,6 +143,14 @@ export const staffApi = {
   delete: (id: string) => api.delete(`/staff/${id}`),
 };
 
+// Attendance
+export const attendanceApi = {
+  getMonthly: (month: number, year: number, staffId?: string) => api.get('/attendance', { params: { month, year, staffId } }),
+  mark: (data: any) => api.post('/attendance', data),
+  update: (id: string, data: any) => api.put(`/attendance/${id}`, data),
+  getSummary: (staffId: string, month?: number, year?: number) => api.get(`/attendance/summary/${staffId}`, { params: month ? { month, year } : {} }),
+};
+
 // Transfers
 export const transfersApi = {
   list: () => api.get('/transfers'),
