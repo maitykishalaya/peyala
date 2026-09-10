@@ -13,17 +13,17 @@ const MONTHS = [
 ];
 
 const STATUS_LABELS = {
-  present: { label: 'P', color: 'badge-green' },
-  absent: { label: 'A', color: 'badge-red' },
-  leave: { label: 'L', color: 'badge-yellow' },
-  holiday: { label: 'H', color: 'badge-blue' },
-};
+  present: { label: 'P', color: 'badge-green', text: 'Present' },
+  absent: { label: 'A', color: 'badge-red', text: 'Absent' },
+  leave: { label: 'L', color: 'badge-yellow', text: 'Leave' },
+  halfday: { label: 'H', color: 'badge-blue', text: 'Half Day' },
+} as const;
 
 const SELECTED_CLASSES: Record<keyof typeof STATUS_LABELS, string> = {
   present: 'bg-green-600 text-white',
   absent: 'bg-red-600 text-white',
   leave: 'bg-yellow-600 text-white',
-  holiday: 'bg-blue-600 text-white',
+  halfday: 'bg-blue-600 text-white',
 };
 
 const YEARS = (() => {
@@ -43,6 +43,12 @@ function formatDateOnly(date: Date) {
   const m = date.getMonth() + 1;
   const d = date.getDate();
   return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+function normalizeStatusValue(status?: string): keyof typeof STATUS_LABELS {
+  if (status === 'halfday' || status === 'holiday') return 'halfday';
+  if (status === 'present' || status === 'absent' || status === 'leave') return status;
+  return 'present';
 }
 
 export default function AttendancePage() {
@@ -76,6 +82,25 @@ export default function AttendancePage() {
     });
     return map;
   }, [attendance]);
+
+  const notesSummary = useMemo(() => {
+    const entries: Array<{ date: string; staff: string; status: string; note: string }> = [];
+
+    activeStaff.forEach((member) => {
+      const summary = summaries[member._id];
+      const list = Array.isArray(summary?.notes) ? summary.notes : [];
+      list.forEach((item: any) => {
+        entries.push({
+          date: item.date,
+          staff: member.name,
+          status: item.status,
+          note: item.note,
+        });
+      });
+    });
+
+    return entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [activeStaff, summaries]);
 
   const loadStaff = async () => {
     const res = await staffApi.list();
@@ -120,23 +145,26 @@ export default function AttendancePage() {
     if (date > today) return;
 
     const record = attendanceMap[member._id]?.[day] || null;
+    const normalizedStatus = normalizeStatusValue(record?.status);
     setSelected({ member, date: formatDateOnly(date), record });
-    setForm({ status: record?.status || 'present', note: record?.note || '' });
+    setForm({ status: normalizedStatus, note: record?.note || '' });
     setModalOpen(true);
   };
 
   const saveAttendance = async () => {
     if (!selected) return;
 
+    const statusValue = normalizeStatusValue(form.status);
+
     if (selected.record?._id) {
       await attendanceApi.update(selected.record._id, {
-        status: form.status,
+        status: statusValue,
         note: form.note,
       });
     } else {
       await attendanceApi.mark({
         date: selected.date,
-        status: form.status,
+        status: statusValue,
         note: form.note,
         staffId: selected.member._id,
       });
@@ -174,7 +202,7 @@ export default function AttendancePage() {
             </div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Staff Attendance</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 max-w-2xl">
-              Track attendance for your active staff. Click a day to mark present, absent, leave, or holiday. Admins and managers can edit records.
+              Track attendance for your active staff. Click a day to mark present, absent, leave, or half day. Admins and managers can edit records.
             </p>
           </div>
 
@@ -279,7 +307,7 @@ export default function AttendancePage() {
                         const date = new Date(year, month - 1, day);
                         date.setHours(0, 0, 0, 0);
                         const isFuture = date > today;
-                        const recordStatus = record?.status as keyof typeof STATUS_LABELS;
+                        const recordStatus = normalizeStatusValue(record?.status);
 
                         return (
                           <td key={day} className="table-td px-1.5 py-1 text-center">
@@ -299,19 +327,23 @@ export default function AttendancePage() {
                           </td>
                         );
                       })}
-                      <td className="table-td sticky right-0 z-10 bg-white dark:bg-gray-900 w-40">
+                      <td className="table-td sticky right-0 z-10 bg-white dark:bg-gray-900 w-44">
                         <div className="space-y-2 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-gray-500">P</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{summaries[member._id]?.present ?? 0}</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{summaries[member._id]?.presentMonth ?? 0}</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-gray-500">A</span>
-                            <span className="font-semibold text-red-600">{summaries[member._id]?.absent ?? 0}</span>
+                            <span className="font-semibold text-red-600">{summaries[member._id]?.absentMonth ?? 0}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-gray-500">H</span>
+                            <span className="font-semibold text-blue-600">{summaries[member._id]?.halfDayMonth ?? 0}</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-gray-500">Leaves</span>
-                            <span className="font-semibold text-yellow-600">{summaries[member._id]?.leavesRemainingMonth ?? summaries[member._id]?.leavesRemaining ?? 24}</span>
+                            <span className="font-semibold text-yellow-600">{summaries[member._id]?.leavesRemainingMonth ?? summaries[member._id]?.leavesRemaining ?? 0}</span>
                           </div>
                         </div>
                       </td>
@@ -336,11 +368,32 @@ export default function AttendancePage() {
                   <span className={`${meta.color} inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold`}>{meta.label}</span>
                   <div>
                     <div className="font-medium text-gray-900 dark:text-white capitalize">{status}</div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{status === 'present' ? 'Present' : status === 'absent' ? 'Absent' : status === 'leave' ? 'Leave' : 'Holiday'}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{meta.text}</p>
                   </div>
                 </div>
               ))}
             </div>
+
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-950 p-4 border border-gray-200 dark:border-gray-800">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400 font-semibold">Notes summary</div>
+              {notesSummary.length === 0 ? (
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No notes entered for this month yet.</p>
+              ) : (
+                <ul className="mt-3 space-y-3 text-sm text-gray-700 dark:text-gray-300">
+                  {notesSummary.slice(0, 6).map((note, index) => (
+                    <li key={`${note.date}-${note.staff}-${index}`} className="rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <span>{note.date}</span>
+                        <span>{note.staff}</span>
+                      </div>
+                      <div className="mt-1 font-medium text-gray-900 dark:text-white">{normalizeStatusValue(note.status)} → {STATUS_LABELS[normalizeStatusValue(note.status)].text}</div>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{note.note}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className="rounded-lg bg-gray-50 dark:bg-gray-950 p-4 border border-gray-200 dark:border-gray-800">
               <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400 font-semibold">Bulk actions</div>
               <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Click "All" in the day header to mark the entire active staff list present for that date.</p>
@@ -364,7 +417,7 @@ export default function AttendancePage() {
                 <button
                   key={status}
                   type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, status }))}
+                  onClick={() => setForm((prev) => ({ ...prev, status: status as keyof typeof STATUS_LABELS }))}
                   className={cn(
                     'rounded-lg border px-3 py-3 text-sm font-medium transition-colors',
                     form.status === status
@@ -373,7 +426,7 @@ export default function AttendancePage() {
                   )}
                 >
                   <span className={`${meta.color} inline-flex items-center justify-center rounded-md mr-2`}>{meta.label}</span>
-                  <span className="capitalize">{status}</span>
+                  <span>{meta.text}</span>
                 </button>
               ))}
             </div>

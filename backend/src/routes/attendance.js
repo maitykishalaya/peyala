@@ -11,6 +11,19 @@ const adminOrManager = (req, res, next) => {
   next();
 };
 
+const normalizeStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (['halfday', 'half-day', 'holiday'].includes(value)) return 'halfday';
+  if (['present', 'absent', 'leave'].includes(value)) return value;
+  return 'present';
+};
+
+const formatDateKey = (dateValue) => {
+  const date = new Date(dateValue);
+  const utc = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+  return utc.toISOString().slice(0, 10);
+};
+
 const normalizeDate = (value) => {
   // If value is a YYYY-MM-DD string, construct a local-date to avoid timezone shifts.
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -66,13 +79,14 @@ router.post('/', adminOrManager, async (req, res) => {
       return res.status(400).json({ message: 'Cannot mark future dates' });
     }
 
+    const normalizedStatus = normalizeStatus(status);
     const records = [];
     for (const staff of staffList) {
       // Enforce monthly leave cap: max 4 leaves/month per staff. Additional leaves become 'absent'.
-      let statusToSave = status;
+      let statusToSave = normalizedStatus;
       let noteToSave = note;
 
-      if (status === 'leave') {
+      if (normalizedStatus === 'leave') {
         const monthStart = new Date(attendanceDate.getFullYear(), attendanceDate.getMonth(), 1);
         const monthEnd = new Date(attendanceDate.getFullYear(), attendanceDate.getMonth() + 1, 0, 23, 59, 59, 999);
         // Count existing leave records for this staff in the month
@@ -117,10 +131,11 @@ router.put('/:id', adminOrManager, async (req, res) => {
     const existing = await Attendance.findById(req.params.id);
     if (!existing) return res.status(404).json({ message: 'Attendance record not found' });
 
-    let statusToSave = status;
+    const normalizedStatus = normalizeStatus(status);
+    let statusToSave = normalizedStatus;
     let noteToSave = note;
 
-    if (status === 'leave') {
+    if (normalizedStatus === 'leave') {
       const attendanceDate = normalizeDate(existing.date);
       const monthStart = new Date(attendanceDate.getFullYear(), attendanceDate.getMonth(), 1);
       const monthEnd = new Date(attendanceDate.getFullYear(), attendanceDate.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -180,19 +195,42 @@ router.get('/summary/:staffId', async (req, res) => {
 
     const present = records.filter((item) => item.status === 'present').length;
     const absent = records.filter((item) => item.status === 'absent').length;
+    const halfDay = records.filter((item) => ['halfday', 'holiday'].includes(item.status)).length;
     const leavesTakenYear = records.filter((item) => item.status === 'leave').length;
     const leavesRemainingYear = Math.max(24 - leavesTakenYear, 0);
 
-    const result = { present, absent, leavesTaken: leavesTakenYear, leavesRemaining: leavesRemainingYear };
+    const result = {
+      present,
+      absent,
+      halfDay,
+      leavesTaken: leavesTakenYear,
+      leavesRemaining: leavesRemainingYear,
+    };
 
     if (month) {
       const monthStart = new Date(year, month - 1, 1);
       const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
       const recordsMonth = await Attendance.find({ staff: staffId, date: { $gte: monthStart, $lte: monthEnd } });
+      const presentMonth = recordsMonth.filter((r) => r.status === 'present').length;
+      const absentMonth = recordsMonth.filter((r) => r.status === 'absent').length;
+      const halfDayMonth = recordsMonth.filter((r) => ['halfday', 'holiday'].includes(r.status)).length;
       const leavesTakenMonth = recordsMonth.filter((r) => r.status === 'leave').length;
       const monthLeavesRemaining = Math.max(4 - leavesTakenMonth, 0);
+      const notes = recordsMonth
+        .filter((r) => r.note && String(r.note).trim())
+        .map((r) => ({
+          id: r._id.toString(),
+          date: formatDateKey(r.date),
+          status: r.status,
+          note: String(r.note).trim(),
+        }));
+
+      result.presentMonth = presentMonth;
+      result.absentMonth = absentMonth;
+      result.halfDayMonth = halfDayMonth;
       result.leavesTakenMonth = leavesTakenMonth;
       result.leavesRemainingMonth = monthLeavesRemaining;
+      result.notes = notes;
     }
 
     res.json(result);
