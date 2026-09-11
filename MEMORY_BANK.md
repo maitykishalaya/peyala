@@ -92,10 +92,10 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Bypassing Chrome Print Dialog (Zero-Click Kiosk Printing)**:
   - Chrome requires `--kiosk-printing` to bypass its native print preview dialog.
   - **Windows Kiosk Architecture**:
-    - `start-kiosk.bat`: Automatically detects Chrome, prompts & persists target URL in `kiosk-url.txt`, normalizes URL with `?printStation=true` (auto-activating print station & production mode), and launches Chrome in true fullscreen kiosk mode (`--kiosk --kiosk-printing --user-data-dir="%LOCALAPPDATA%\PeyalaPOSChrome"`). Supports `--windowed` flag for app-window mode.
+    - `start-kiosk.bat`: Hardcoded by default to `https://peyala.vercel.app/login`. Automatically detects Chrome, creates dedicated profile (`%LOCALAPPDATA%\PeyalaPOSChrome`), and launches in true fullscreen kiosk mode (`--kiosk --kiosk-printing`). Supports `--windowed` flag for app-window mode.
     - `create-windows-shortcut.bat`: VBScript-powered utility placing a 1-click "Peyala POS Station" shortcut on the Windows desktop.
     - Press `Alt + F4` or `F11` to close or toggle fullscreen.
-  - **macOS**: `start-kiosk.sh` / `start-kiosk.command` launches Chrome with:
+  - **macOS**: `start-kiosk.sh` / `start-kiosk.command` launches Chrome targeting `https://peyala.vercel.app/login` with:
     `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --kiosk-printing --user-data-dir="$HOME/Library/Application Support/PeyalaPOSChrome"`
   - Isolated user data profiles ensure the POS kiosk runs side-by-side with personal browser sessions without conflict.
 - **Minimizing Top Whitespace in KOT & Bill PDFs**:

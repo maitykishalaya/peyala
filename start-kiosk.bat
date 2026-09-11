@@ -8,14 +8,14 @@ echo   🍵 Peyala POS - Dedicated Windows Kiosk & Silent Auto-Print Hub
 echo ====================================================================
 echo.
 
-set "CONFIG_FILE=%~dp0kiosk-url.txt"
+:: Hardcoded Vercel Production Portal
+set "DEFAULT_URL=https://peyala.vercel.app/login"
 set "USER_DATA_DIR=%LOCALAPPDATA%\PeyalaPOSChrome"
 
-:: 1. Determine Target POS URL
+:: Check for windowed mode flag or custom URL override
 set "APP_URL=%~1"
-
-:: If first argument is --windowed or --fullscreen, shift it
 set "MODE=kiosk"
+
 if /i "%~1"=="--windowed" (
     set "MODE=windowed"
     set "APP_URL=%~2"
@@ -23,52 +23,8 @@ if /i "%~1"=="--windowed" (
     set "MODE=windowed"
 )
 
-:: If URL wasn't passed via argument, try reading from kiosk-url.txt
 if "%APP_URL%"=="" (
-    if exist "%CONFIG_FILE%" (
-        set /p APP_URL=<"%CONFIG_FILE%"
-    )
-)
-
-:: If still blank, prompt user
-if "%APP_URL%"=="" (
-    echo Please enter your Peyala POS website URL.
-    echo (e.g. https://your-pos-app.vercel.app or http://localhost:3000)
-    set /p "USER_INPUT=POS URL: "
-    set "APP_URL=!USER_INPUT!"
-    
-    if not "!APP_URL!"=="" (
-        echo !APP_URL!>"%CONFIG_FILE%"
-        echo Saved URL to kiosk-url.txt for future one-click launches.
-        echo.
-    )
-)
-
-:: Fallback if user just hit Enter
-if "%APP_URL%"=="" (
-    set "APP_URL=http://localhost:3000/tables"
-)
-
-:: Ensure URL targets /tables with ?printStation=true
-echo %APP_URL% | findstr /I "printStation" >nul
-if errorlevel 1 (
-    echo %APP_URL% | findstr /I "/tables" >nul
-    if errorlevel 1 (
-        :: Does not have /tables
-        if "%APP_URL:~-1%"=="/" (
-            set "APP_URL=%APP_URL%tables?printStation=true"
-        ) else (
-            set "APP_URL=%APP_URL%/tables?printStation=true"
-        )
-    ) else (
-        :: Has /tables, append ?printStation=true
-        echo %APP_URL% | findstr "?" >nul
-        if errorlevel 1 (
-            set "APP_URL=%APP_URL%?printStation=true"
-        ) else (
-            set "APP_URL=%APP_URL%&printStation=true"
-        )
-    )
+    set "APP_URL=%DEFAULT_URL%"
 )
 
 :: 2. Locate Google Chrome
@@ -86,7 +42,6 @@ if "%CHROME_BIN%"=="" (
     echo Please ensure Google Chrome is installed on this Windows laptop.
     echo Opening URL in default browser...
     start "" "%APP_URL%"
-    pause
     exit /b 1
 )
 

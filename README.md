@@ -64,15 +64,12 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Bypassing Chrome Print Dialog & True Kiosk Mode on Windows**:
   - By default, standard Chrome security displays a print dialog and browser chrome (tabs, search bar).
   - **On Windows Counter Laptop**:
-    1. Double-click [`start-kiosk.bat`](file:///Users/kishalaya/Downloads/peyala_v8/start-kiosk.bat) (or run with your Vercel URL):
-       ```cmd
-       start-kiosk.bat https://your-pos-app.vercel.app/tables
-       ```
-    2. The script prompts you for your POS URL on first run and saves it to `kiosk-url.txt` so every future launch is instant.
-    3. It launches Chrome in **True Full-Screen Kiosk Mode** (`--kiosk`) with **Silent Auto-Printing** (`--kiosk-printing`) and appends `?printStation=true` to automatically activate Print Station mode without any manual clicks.
-    4. **Create a Desktop Shortcut**: Run [`create-windows-shortcut.bat`](file:///Users/kishalaya/Downloads/peyala_v8/create-windows-shortcut.bat) to place a 1-click **"Peyala POS Station"** icon on the Windows desktop.
-    5. **Keyboard Shortcuts**: Press `Alt + F4` to close the kiosk, or `F11` to toggle fullscreen. To run in a clean app window with a title bar instead of fullscreen, run `start-kiosk.bat --windowed`.
-  - **On macOS**: Run `./start-kiosk.sh` or double-click `start-kiosk.command`.
+    1. Double-click [`start-kiosk.bat`](file:///Users/kishalaya/Downloads/peyala_v8/start-kiosk.bat):
+       Hardcoded by default to **`https://peyala.vercel.app/login`**.
+    2. It launches Chrome in **True Full-Screen Kiosk Mode** (`--kiosk`) with **Silent Auto-Printing** (`--kiosk-printing`) targeting `https://peyala.vercel.app/login`.
+    3. **Create a Desktop Shortcut**: Run [`create-windows-shortcut.bat`](file:///Users/kishalaya/Downloads/peyala_v8/create-windows-shortcut.bat) to place a 1-click **"Peyala POS Station"** icon on the Windows desktop.
+    4. **Keyboard Shortcuts**: Press `Alt + F4` to close the kiosk, or `F11` to toggle fullscreen. To run in a clean app window with a title bar instead of fullscreen, run `start-kiosk.bat --windowed`.
+  - **On macOS**: Run `./start-kiosk.sh` or double-click `start-kiosk.command` (also defaults to `https://peyala.vercel.app/login`).
 - **🧪 Test Mode**: Renders a photorealistic 80mm receipt preview in an interactive modal with direct print preview.
 - **Zero Top Whitespace in KOT & Bill PDFs**:
   - `@page { margin: 0 !important; }` and zero user-agent CSS margins strip out Chrome's automatic 20mm print header space, ensuring KOTs and bills start right at the top of the thermal roll and PDF without wasted paper.

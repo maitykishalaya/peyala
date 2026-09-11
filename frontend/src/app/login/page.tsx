@@ -16,7 +16,9 @@ export default function LoginPage() {
     setLoading(true); setError('');
     try {
       await login(email, password);
-      router.push('/dashboard');
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      const redirectTarget = params?.get('redirect') || '/dashboard';
+      router.push(redirectTarget);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed');
     } finally { setLoading(false); }

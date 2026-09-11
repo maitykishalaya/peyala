@@ -8,7 +8,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-APP_URL="http://localhost:3000/tables"
+APP_URL="${1:-https://peyala.vercel.app/login}"
 USER_DATA_DIR="$HOME/Library/Application Support/PeyalaPOSChrome"
 
 echo ""
