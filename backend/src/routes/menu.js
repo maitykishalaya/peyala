@@ -15,7 +15,9 @@ router.get('/categories', async (req, res) => {
   try {
     const { includeInactive } = req.query;
     const filter = includeInactive === 'true' ? {} : { isActive: true };
-    const categories = await MenuCategory.find(filter).sort('sortOrder name');
+    const categories = await MenuCategory.find(filter)
+      .populate('defaultAddons')
+      .sort('sortOrder name');
     res.json(categories);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -25,7 +27,7 @@ router.get('/categories', async (req, res) => {
 // POST /api/menu/categories
 router.post('/categories', async (req, res) => {
   try {
-    const { name, description, sortOrder, isActive } = req.body;
+    const { name, description, sortOrder, isActive, defaultAddons } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Category name is required' });
     }
@@ -35,7 +37,10 @@ router.post('/categories', async (req, res) => {
       description: description?.trim(),
       sortOrder: Number(sortOrder) || 0,
       isActive: isActive !== false,
+      defaultAddons: Array.isArray(defaultAddons) ? defaultAddons : [],
     });
+
+    const populated = await MenuCategory.findById(category._id).populate('defaultAddons');
 
     await log({
       user: req.user,
@@ -44,7 +49,7 @@ router.post('/categories', async (req, res) => {
       description: `${req.user.name} created menu category "${category.name}"`,
     });
 
-    res.status(201).json(category);
+    res.status(201).json(populated);
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -53,17 +58,18 @@ router.post('/categories', async (req, res) => {
 // PUT /api/menu/categories/:id
 router.put('/categories/:id', async (req, res) => {
   try {
-    const { name, description, sortOrder, isActive } = req.body;
+    const { name, description, sortOrder, isActive, defaultAddons } = req.body;
     const update = {};
     if (name !== undefined) update.name = name.trim();
     if (description !== undefined) update.description = description.trim();
     if (sortOrder !== undefined) update.sortOrder = Number(sortOrder) || 0;
     if (isActive !== undefined) update.isActive = Boolean(isActive);
+    if (defaultAddons !== undefined) update.defaultAddons = Array.isArray(defaultAddons) ? defaultAddons : [];
 
     const category = await MenuCategory.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
-    });
+    }).populate('defaultAddons');
 
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
@@ -129,7 +135,12 @@ router.get('/', async (req, res) => {
     }
 
     const items = await MenuItem.find(filter)
-      .populate('category', 'name sortOrder isActive')
+      .populate({
+        path: 'category',
+        select: 'name sortOrder isActive defaultAddons',
+        populate: { path: 'defaultAddons', model: 'Addon' },
+      })
+      .populate('addons')
       .sort('name');
 
     res.json(items);
@@ -141,7 +152,14 @@ router.get('/', async (req, res) => {
 // GET /api/menu/:id
 router.get('/:id', async (req, res) => {
   try {
-    const item = await MenuItem.findById(req.params.id).populate('category', 'name sortOrder isActive');
+    const item = await MenuItem.findById(req.params.id)
+      .populate({
+        path: 'category',
+        select: 'name sortOrder isActive defaultAddons',
+        populate: { path: 'defaultAddons', model: 'Addon' },
+      })
+      .populate('addons');
+
     if (!item) {
       return res.status(404).json({ message: 'Menu item not found' });
     }
@@ -154,7 +172,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/menu
 router.post('/', async (req, res) => {
   try {
-    const { name, category, price, isVeg, taxPercent, description, isAvailable } = req.body;
+    const { name, category, price, isVeg, taxPercent, description, isAvailable, hasVariants, variants, addons } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Item name is required' });
@@ -166,6 +184,16 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'A valid non-negative price is required' });
     }
 
+    const cleanVariants = Array.isArray(variants)
+      ? variants
+          .filter((v) => v && v.name && v.name.trim())
+          .map((v) => ({
+            name: v.name.trim(),
+            price: Math.max(0, Number(v.price) || 0),
+            isVeg: v.isVeg !== undefined ? Boolean(v.isVeg) : (isVeg !== false),
+          }))
+      : [];
+
     const item = await MenuItem.create({
       name: name.trim(),
       category,
@@ -174,9 +202,18 @@ router.post('/', async (req, res) => {
       taxPercent: taxPercent !== undefined ? Number(taxPercent) : 5,
       description: description?.trim(),
       isAvailable: isAvailable !== false,
+      hasVariants: Boolean(hasVariants) && cleanVariants.length > 0,
+      variants: cleanVariants,
+      addons: Array.isArray(addons) ? addons : [],
     });
 
-    const populated = await MenuItem.findById(item._id).populate('category', 'name sortOrder isActive');
+    const populated = await MenuItem.findById(item._id)
+      .populate({
+        path: 'category',
+        select: 'name sortOrder isActive defaultAddons',
+        populate: { path: 'defaultAddons', model: 'Addon' },
+      })
+      .populate('addons');
 
     await log({
       user: req.user,
@@ -194,7 +231,7 @@ router.post('/', async (req, res) => {
 // PUT /api/menu/:id
 router.put('/:id', async (req, res) => {
   try {
-    const { name, category, price, isVeg, taxPercent, description, isAvailable } = req.body;
+    const { name, category, price, isVeg, taxPercent, description, isAvailable, hasVariants, variants, addons } = req.body;
     const update = {};
 
     if (name !== undefined) update.name = name.trim();
@@ -204,11 +241,28 @@ router.put('/:id', async (req, res) => {
     if (taxPercent !== undefined) update.taxPercent = Number(taxPercent);
     if (description !== undefined) update.description = description.trim();
     if (isAvailable !== undefined) update.isAvailable = Boolean(isAvailable);
+    if (hasVariants !== undefined) update.hasVariants = Boolean(hasVariants);
+    if (variants !== undefined && Array.isArray(variants)) {
+      update.variants = variants
+        .filter((v) => v && v.name && v.name.trim())
+        .map((v) => ({
+          name: v.name.trim(),
+          price: Math.max(0, Number(v.price) || 0),
+          isVeg: v.isVeg !== undefined ? Boolean(v.isVeg) : true,
+        }));
+    }
+    if (addons !== undefined) update.addons = Array.isArray(addons) ? addons : [];
 
     const item = await MenuItem.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
-    }).populate('category', 'name sortOrder isActive');
+    })
+      .populate({
+        path: 'category',
+        select: 'name sortOrder isActive defaultAddons',
+        populate: { path: 'defaultAddons', model: 'Addon' },
+      })
+      .populate('addons');
 
     if (!item) {
       return res.status(404).json({ message: 'Menu item not found' });

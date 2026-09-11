@@ -13,7 +13,7 @@ const ACTION_COLORS: Record<string, string> = {
   LOGOUT: 'badge-yellow',
 };
 
-const MODULES = ['All', 'Auth', 'Purchases', 'Sales', 'Payments', 'Receipts', 'Staff', 'Users', 'Accounts', 'Inventory'];
+const MODULES = ['All', 'Auth', 'Purchases', 'Sales', 'Payments', 'Staff', 'Users', 'Accounts', 'Inventory'];
 
 export default function AuditLogPage() {
   const [logs, setLogs] = useState<any[]>([]);

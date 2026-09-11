@@ -3,8 +3,28 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { suppliersApi } from '@/lib/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { Plus, Pencil, Trash2, Phone, MapPin } from 'lucide-react';
+import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { Plus, Pencil, Trash2, Phone, MapPin, RefreshCw } from 'lucide-react';
+
+const CACHE_KEY = 'peyala_suppliers_cache_v1';
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: any[]) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ suppliers: data, savedAt: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -12,9 +32,34 @@ export default function SuppliersPage() {
   const [detail, setDetail] = useState<any>(null);
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 });
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const load = async () => { const r = await suppliersApi.list(); setSuppliers(r.data); };
-  useEffect(() => { load(); }, []);
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    try {
+      const r = await suppliersApi.list();
+      setSuppliers(r.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache(r.data);
+    } catch (err) {
+      console.error('Failed to load suppliers:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    const cached = readCache();
+    if (cached?.suppliers) {
+      setSuppliers(cached.suppliers);
+      if (cached.savedAt) {
+        setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
+      return;
+    }
+    load();
+  }, []);
 
   const openEdit = (s: any) => { setSelected(s); setForm({ name: s.name, phone: s.phone || '', address: s.address || '', category: s.category || '', notes: s.notes || '', openingBalance: s.openingBalance || 0 }); setModal('edit'); };
   const openDetail = async (s: any) => { const r = await suppliersApi.get(s._id); setDetail(r.data); };
@@ -42,7 +87,27 @@ export default function SuppliersPage() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Suppliers</h1>
             <p className="text-sm text-gray-500">{suppliers.length} suppliers · Total dues: <span className="text-red-500 font-medium">{formatCurrency(totalDues)}</span></p>
           </div>
-          <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Add Supplier</button>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Add Supplier</button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

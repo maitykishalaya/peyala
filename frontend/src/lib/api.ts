@@ -121,13 +121,6 @@ export const paymentsApi = {
   delete: (id: string) => api.delete(`/payments/${id}`),
 };
 
-// Receipts
-export const receiptsApi = {
-  list: (params?: any) => api.get('/receipts', { params }),
-  create: (data: any) => api.post('/receipts', data),
-  delete: (id: string) => api.delete(`/receipts/${id}`),
-};
-
 // Staff
 export const staffApi = {
   list: () => api.get('/staff'),

@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
-import { formatCurrency, formatDate, UNITS } from '@/lib/utils';
-import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History } from 'lucide-react';
+import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
+import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_inventory_cache_v1';
 
@@ -26,8 +26,6 @@ function writeCache(data: { items: any[]; categories: any[]; suppliers: any[] })
   }
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
-
 export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -39,6 +37,8 @@ export default function InventoryPage() {
   const [selected, setSelected] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [logsOpen, setLogsOpen] = useState(false);
@@ -50,31 +50,37 @@ export default function InventoryPage() {
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
 
-  const load = async (isBackgroundRefresh = false) => {
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     const params: any = {};
     if (selectedCat) params.category = selectedCat;
     if (lowStockOnly) params.lowStock = 'true';
-    const [i, c, s] = await Promise.all([inventoryApi.items(params), inventoryApi.categories(), suppliersApi.list()]);
-    setItems(i.data); setCategories(c.data); setSuppliers(s.data); setLoading(false);
-    // Only cache the unfiltered "All" view, so cached data is always the full picture
-    if (!selectedCat && !lowStockOnly) writeCache({ items: i.data, categories: c.data, suppliers: s.data });
+    try {
+      const [i, c, s] = await Promise.all([inventoryApi.items(params), inventoryApi.categories(), suppliersApi.list()]);
+      setItems(i.data); setCategories(c.data); setSuppliers(s.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      // Only cache the unfiltered "All" view, so cached data is always the full picture
+      if (!selectedCat && !lowStockOnly) writeCache({ items: i.data, categories: c.data, suppliers: s.data });
+    } catch (err) {
+      console.error('Failed to load inventory:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
-    // On first load (no filters yet applied), show cached data instantly
-    // if we have it. Only go back to the server if that cache has gone
-    // stale (older than CACHE_TTL_MS) — otherwise we trust it as-is and
-    // skip the network call entirely, so the page doesn't refetch every
-    // single time you visit it.
+    // Show cached browser storage data on load, only query server upon manual refresh or filter change
     if (!selectedCat && !lowStockOnly) {
       const cached = readCache();
-      if (cached) {
+      if (cached?.items) {
         setItems(cached.items || []);
         setCategories(cached.categories || []);
         setSuppliers(cached.suppliers || []);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
         setLoading(false);
-        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-        if (isStale) load(true); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -169,7 +175,25 @@ export default function InventoryPage() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Inventory</h1>
             <p className="text-sm text-gray-500">{items.length} items · Value: <strong>{formatCurrency(totalValue)}</strong> · {lowCount > 0 && <span className="text-yellow-600">{lowCount} low stock</span>}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
             <button onClick={openLogs} className="btn-secondary flex items-center gap-2"><History className="w-4 h-4" /> Check Logs</button>
             <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
             <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setSaveError(''); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>

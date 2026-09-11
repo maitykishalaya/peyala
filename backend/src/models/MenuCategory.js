@@ -5,6 +5,7 @@ const menuCategorySchema = new mongoose.Schema({
   description: { type: String, trim: true },
   sortOrder: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true },
+  defaultAddons: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Addon' }],
 }, { timestamps: true });
 
 menuCategorySchema.index({ isActive: 1, sortOrder: 1 });

@@ -207,7 +207,12 @@ router.get('/sales', async (req, res) => {
         : ord.total;
       totalSettled += settled;
 
-      if (ord.paymentMethod && paymentBreakdown[ord.paymentMethod] !== undefined) {
+      if (ord.paymentMethod === 'part' && ord.paymentBreakdown) {
+        paymentBreakdown.cash += (ord.paymentBreakdown.cash || 0);
+        paymentBreakdown.upi += (ord.paymentBreakdown.upi || 0);
+        paymentBreakdown.card += (ord.paymentBreakdown.card || 0);
+        paymentBreakdown.other += (ord.paymentBreakdown.other || 0);
+      } else if (ord.paymentMethod && paymentBreakdown[ord.paymentMethod] !== undefined) {
         paymentBreakdown[ord.paymentMethod] += settled;
       } else if (ord.paymentMethod) {
         paymentBreakdown.other += settled;

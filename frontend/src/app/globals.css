@@ -40,5 +40,5 @@
 }
 
 @layer utilities {
-  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-bottom { padding-bottom: max(2rem, env(safe-area-inset-bottom)); }
 }

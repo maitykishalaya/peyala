@@ -17,8 +17,8 @@ import Modal from '@/components/ui/Modal';
 import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { paymentsApi, accountsApi, suppliersApi, categoriesApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
-import { formatCurrency, formatDate, today } from '@/lib/utils';
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
 
 const PAYMENTS_CACHE_KEY = 'peyala_payments_cache_v1';
 
@@ -51,6 +51,8 @@ export default function PaymentsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [filters, setFilters] = useState({ startDate: '', endDate: '', category: '' });
 
   // ── Modal state ─────────────────────────────────────────────────
@@ -73,30 +75,38 @@ export default function PaymentsPage() {
   const [form, setForm] = useState<any>(blank());
 
   // ── Load payments list ──────────────────────────────────────────
-  const load = async () => {
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
     if (filters.category) params.category = filters.category;
 
-    const [p, a, s, c] = await Promise.all([
-      paymentsApi.list(params),
-      accountsApi.list(),
-      suppliersApi.list(),
-      categoriesApi.list(),
-    ]);
-    setPayments(p.data.payments);
-    setTotal(p.data.total);
-    setAccounts(a.data);
-    setSuppliers(s.data);
-    setCategories(c.data);
-    setLoading(false);
-    if (isDefaultView) {
-      writeCache(PAYMENTS_CACHE_KEY, {
-        payments: p.data.payments, total: p.data.total,
-        accounts: a.data, suppliers: s.data, categories: c.data,
-      });
+    try {
+      const [p, a, s, c] = await Promise.all([
+        paymentsApi.list(params),
+        accountsApi.list(),
+        suppliersApi.list(),
+        categoriesApi.list(),
+      ]);
+      setPayments(p.data.payments);
+      setTotal(p.data.total);
+      setAccounts(a.data);
+      setSuppliers(s.data);
+      setCategories(c.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      if (isDefaultView) {
+        writeCache(PAYMENTS_CACHE_KEY, {
+          payments: p.data.payments, total: p.data.total,
+          accounts: a.data, suppliers: s.data, categories: c.data,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load payments:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -104,15 +114,16 @@ export default function PaymentsPage() {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
     if (isDefaultView) {
       const cached = readCache(PAYMENTS_CACHE_KEY);
-      if (cached) {
+      if (cached?.payments) {
         setPayments(cached.payments || []);
         setTotal(cached.total || 0);
         setAccounts(cached.accounts || []);
         setSuppliers(cached.suppliers || []);
         setCategories(cached.categories || []);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
         setLoading(false);
-        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-        if (isStale) load(); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -190,10 +201,30 @@ export default function PaymentsPage() {
               {total} entries · Shown total: <span className="font-medium text-red-500">{formatCurrency(totalShown)}</span>
             </p>
           </div>
-          <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
-            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
-            <Plus className="w-4 h-4" /> New Payment
-          </button>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(PAYMENTS_CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
+              className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
+              <Plus className="w-4 h-4" /> New Payment
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

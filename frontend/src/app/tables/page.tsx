@@ -3,23 +3,34 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { useAuth } from '@/lib/auth';
-import { tablesApi, ordersApi, menuApi, Table, Order, MenuItem, MenuCategory } from '@/lib/pos-api';
+import { tablesApi, ordersApi, menuApi, addonsApi, Table, Order, MenuItem, MenuCategory, Addon, MenuItemVariant } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import {
   LayoutGrid, Plus, Users, Utensils, Receipt, CheckCircle,
   XCircle, Clock, Search, Trash2, ChevronRight, AlertCircle,
   CreditCard, Wallet, Smartphone, Building2, PlusCircle, MinusCircle,
-  ChefHat, RefreshCw, Printer, ShieldAlert
+  ChefHat, RefreshCw, Printer, ShieldAlert, Sparkles, Check, Layers, Pencil
 } from 'lucide-react';
-import { printKOT, printCustomerBill, getPrintMode, setPrintMode, PrintMode } from '@/lib/thermal-print';
+import { printKOT, printCustomerBill, getPrintMode, setPrintMode, PrintMode, BillItem } from '@/lib/thermal-print';
+
+export interface CartItemConfig {
+  menuItemId: string;
+  quantity: number;
+  notes: string;
+  variant?: { name: string; price: number };
+  selectedAddons?: Array<{ addonId: string; name: string; price: number }>;
+  unitPrice: number;
+}
 
 export default function TablesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canManageOrders = user?.role === 'admin' || user?.role === 'manager';
 
   const [tables, setTables] = useState<Table[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'occupied' | 'reserved'>('all');
 
@@ -29,23 +40,59 @@ export default function TablesPage() {
   const [orderModalLoading, setOrderModalLoading] = useState(false);
 
   // Cart state for Opening New Order
-  const [cart, setCart] = useState<Record<string, { quantity: number; notes: string }>>({});
+  const [cart, setCart] = useState<Record<string, CartItemConfig>>({});
   const [menuSearch, setMenuSearch] = useState('');
   const [menuCatFilter, setMenuCatFilter] = useState('all');
 
   // Add Round (KOT) state for Occupied Table
   const [showAddRound, setShowAddRound] = useState(false);
-  const [roundCart, setRoundCart] = useState<Record<string, { quantity: number; notes: string }>>({});
+  const [roundCart, setRoundCart] = useState<Record<string, CartItemConfig>>({});
   const [roundSearch, setRoundSearch] = useState('');
   const [roundCatFilter, setRoundCatFilter] = useState('all');
+
+  // Item Customization Pop-Up Modal state
+  const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
+  const [customizingTarget, setCustomizingTarget] = useState<'cart' | 'roundCart'>('cart');
+  const [selectedVariant, setSelectedVariant] = useState<MenuItemVariant | null>(null);
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
+  const [customizingNotes, setCustomizingNotes] = useState('');
+  const [customizingQty, setCustomizingQty] = useState(1);
 
   // Billing & Payment state
   const [discountType, setDiscountType] = useState<'flat' | 'percentage'>('flat');
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [settlementInput, setSettlementInput] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'other'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'other' | 'part'>('cash');
+  const [partCash, setPartCash] = useState<string>('');
+  const [partUpi, setPartUpi] = useState<string>('');
+  const [partCard, setPartCard] = useState<string>('');
+  const [partOther, setPartOther] = useState<string>('');
   const [actionLoading, setActionLoading] = useState(false);
   const [printMode, setPrintModeState] = useState<PrintMode>('test');
+
+  const numPartCash = Math.max(0, parseFloat(partCash) || 0);
+  const numPartUpi = Math.max(0, parseFloat(partUpi) || 0);
+  const numPartCard = Math.max(0, parseFloat(partCard) || 0);
+  const numPartOther = Math.max(0, parseFloat(partOther) || 0);
+  const totalPartAllocated = Math.round((numPartCash + numPartUpi + numPartCard + numPartOther) * 100) / 100;
+  const partDifference = activeOrder ? Math.round((activeOrder.total - totalPartAllocated) * 100) / 100 : 0;
+  const partRemaining = Math.max(0, partDifference);
+
+  // Live timer tick to keep KOT elapsed minutes updated in real time
+  const [, setKotTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setKotTick((t) => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getKotElapsedMinutes = (order: any) => {
+    if (!order) return null;
+    const kotTime = order.kotRounds?.[0]?.createdAt || order.createdAt;
+    if (!kotTime) return null;
+    const diffMs = Date.now() - new Date(kotTime).getTime();
+    if (isNaN(diffMs) || diffMs < 0) return 0;
+    return Math.floor(diffMs / (1000 * 60));
+  };
 
   // Table Management Modal
   const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
@@ -56,18 +103,20 @@ export default function TablesPage() {
     status: 'available' | 'occupied' | 'reserved';
   }>({ tableNumber: '', capacity: 4, status: 'available' });
 
-  // Load all tables and menu
+  // Load all tables, menu, and addons
   const loadData = async () => {
     try {
       setLoading(true);
-      const [tableRes, itemRes, catRes] = await Promise.all([
+      const [tableRes, itemRes, catRes, addonRes] = await Promise.all([
         tablesApi.list(),
         menuApi.listItems({ availableOnly: true }),
         menuApi.listCategories(),
+        addonsApi.list(),
       ]);
       setTables(tableRes.data);
       setMenuItems(itemRes.data);
       setCategories(catRes.data);
+      setAddons(addonRes.data);
     } catch (err: any) {
       console.error('Failed to load POS data:', err);
     } finally {
@@ -175,9 +224,15 @@ export default function TablesPage() {
       }
     };
 
-    // Check immediately and then poll every 2.5s
+    // Check immediately and then poll every 4s, only when browser window is visible
     checkPendingKots();
-    const interval = setInterval(checkPendingKots, 2500);
+    const interval = setInterval(() => {
+      // Pause background requests when tab is hidden or laptop screen locked to preserve free hosting limits
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      checkPendingKots();
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [isPrintStation]);
@@ -235,25 +290,150 @@ export default function TablesPage() {
     setShowAddRound(false);
   };
 
-  // Cart operations (for opening order)
-  const updateCartQty = (itemId: string, delta: number) => {
-    setCart((prev) => {
-      const current = prev[itemId] || { quantity: 0, notes: '' };
-      const newQty = current.quantity + delta;
+  // Helper to compute composite cart key for variants/addons
+  const getCartKey = (itemId: string, variantName?: string, addonsList?: Array<{ name: string }>) => {
+    const parts = [itemId];
+    if (variantName) parts.push(variantName.trim());
+    if (addonsList && addonsList.length > 0) {
+      const sortedNames = [...addonsList].map((a) => a.name).sort();
+      parts.push(sortedNames.join('+'));
+    }
+    return parts.join('__');
+  };
+
+  // Helper to get all applicable addons for a MenuItem (item-level + category-level default addons)
+  const getItemApplicableAddons = (item: MenuItem): Addon[] => {
+    const itemAddons = (item.addons || [])
+      .map((a) => (typeof a === 'object' ? a : addons.find((ad) => ad._id === a)))
+      .filter(Boolean) as Addon[];
+
+    const cat = typeof item.category === 'object' && item.category !== null
+      ? item.category
+      : categories.find((c) => c._id === item.category);
+
+    const catAddons = (cat?.defaultAddons || [])
+      .map((a) => (typeof a === 'object' ? a : addons.find((ad) => ad._id === a)))
+      .filter(Boolean) as Addon[];
+
+    const map = new Map<string, Addon>();
+    [...catAddons, ...itemAddons].forEach((a) => {
+      if (a && a._id && a.isActive !== false) {
+        map.set(a._id, a);
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
+  // Handle clicking an item from the menu
+  const handleItemClick = (item: MenuItem, target: 'cart' | 'roundCart' = 'cart') => {
+    const applicableAddons = getItemApplicableAddons(item);
+    const hasMultipleVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
+
+    // If item has variants OR has addons, open the customization modal
+    if (hasMultipleVariants || applicableAddons.length > 0) {
+      setCustomizingItem(item);
+      setCustomizingTarget(target);
+      setSelectedVariant(hasMultipleVariants && item.variants ? item.variants[0] : null);
+      setSelectedAddonIds([]);
+      setCustomizingNotes('');
+      setCustomizingQty(1);
+      return;
+    }
+
+    // Otherwise, fast 1-tap addition
+    updateDirectCartQty(item, target, 1);
+  };
+
+  // Fast direct 1-tap cart +/-
+  const updateDirectCartQty = (item: MenuItem, target: 'cart' | 'roundCart', delta: number) => {
+    const key = item._id;
+    const setter = target === 'cart' ? setCart : setRoundCart;
+
+    setter((prev) => {
+      const current = prev[key];
+      const newQty = (current ? current.quantity : 0) + delta;
       if (newQty <= 0) {
         const next = { ...prev };
-        delete next[itemId];
+        delete next[key];
         return next;
       }
-      return { ...prev, [itemId]: { ...current, quantity: newQty } };
+      return {
+        ...prev,
+        [key]: {
+          menuItemId: item._id,
+          quantity: newQty,
+          notes: current?.notes || '',
+          unitPrice: item.price,
+        },
+      };
     });
   };
 
-  const updateCartNotes = (itemId: string, notes: string) => {
-    setCart((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] || { quantity: 1, notes: '' }), notes },
-    }));
+  // Update existing cart entry quantity (+1 / -1)
+  const updateCartEntryQty = (cartKey: string, delta: number, target: 'cart' | 'roundCart' = 'cart') => {
+    const setter = target === 'cart' ? setCart : setRoundCart;
+    setter((prev) => {
+      const current = prev[cartKey];
+      if (!current) return prev;
+      const newQty = current.quantity + delta;
+      if (newQty <= 0) {
+        const next = { ...prev };
+        delete next[cartKey];
+        return next;
+      }
+      return {
+        ...prev,
+        [cartKey]: { ...current, quantity: newQty },
+      };
+    });
+  };
+
+  const updateCartEntryNotes = (cartKey: string, notes: string, target: 'cart' | 'roundCart' = 'cart') => {
+    const setter = target === 'cart' ? setCart : setRoundCart;
+    setter((prev) => {
+      const current = prev[cartKey];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [cartKey]: { ...current, notes },
+      };
+    });
+  };
+
+  // Confirm custom item selection from modal
+  const handleConfirmCustomization = () => {
+    if (!customizingItem) return;
+    const applicableAddons = getItemApplicableAddons(customizingItem);
+    const chosenAddons = applicableAddons
+      .filter((a) => selectedAddonIds.includes(a._id))
+      .map((a) => ({ addonId: a._id, name: a.name, price: a.price }));
+
+    const variantObj = selectedVariant ? { name: selectedVariant.name, price: selectedVariant.price } : undefined;
+    const basePrice = selectedVariant ? selectedVariant.price : customizingItem.price;
+    const addonsPrice = chosenAddons.reduce((sum, a) => sum + a.price, 0);
+    const unitPrice = basePrice + addonsPrice;
+
+    const key = getCartKey(customizingItem._id, variantObj?.name, chosenAddons);
+    const setter = customizingTarget === 'cart' ? setCart : setRoundCart;
+
+    setter((prev) => {
+      const existing = prev[key];
+      const newQty = (existing ? existing.quantity : 0) + customizingQty;
+      return {
+        ...prev,
+        [key]: {
+          menuItemId: customizingItem._id,
+          quantity: newQty,
+          notes: customizingNotes.trim() || existing?.notes || '',
+          variant: variantObj,
+          selectedAddons: chosenAddons,
+          unitPrice,
+        },
+      };
+    });
+
+    setCustomizingItem(null);
   };
 
   // Cart total preview
@@ -262,14 +442,14 @@ export default function TablesPage() {
     let taxAmount = 0;
     let itemCount = 0;
 
-    Object.entries(cart).forEach(([itemId, data]) => {
-      const item = menuItems.find((i) => i._id === itemId);
-      if (item && data.quantity > 0) {
-        const line = item.price * data.quantity;
-        const tax = (line * (item.taxPercent || 0)) / 100;
+    Object.values(cart).forEach((entry) => {
+      if (entry.quantity > 0) {
+        const item = menuItems.find((i) => i._id === entry.menuItemId);
+        const line = entry.unitPrice * entry.quantity;
+        const tax = (line * (item?.taxPercent || 5)) / 100;
         subtotal += line;
         taxAmount += tax;
-        itemCount += data.quantity;
+        itemCount += entry.quantity;
       }
     });
 
@@ -284,12 +464,14 @@ export default function TablesPage() {
   // Submit New Order (Open Order / First KOT)
   const handleOpenOrder = async () => {
     if (!selectedTable) return;
-    const items = Object.entries(cart)
-      .filter(([_, d]) => d.quantity > 0)
-      .map(([itemId, d]) => ({
-        menuItemId: itemId,
+    const items = Object.values(cart)
+      .filter((d) => d.quantity > 0)
+      .map((d) => ({
+        menuItemId: d.menuItemId,
         quantity: d.quantity,
         notes: d.notes,
+        variant: d.variant,
+        selectedAddons: d.selectedAddons,
       }));
 
     if (items.length === 0) {
@@ -310,6 +492,8 @@ export default function TablesPage() {
           name: mi?.name || 'Menu Item',
           quantity: it.quantity,
           notes: it.notes,
+          variantName: it.variant?.name,
+          addons: it.selectedAddons?.map((a) => a.name),
         };
       });
 
@@ -341,36 +525,17 @@ export default function TablesPage() {
     }
   };
 
-  // Round Cart operations (for additional KOT round)
-  const updateRoundQty = (itemId: string, delta: number) => {
-    setRoundCart((prev) => {
-      const current = prev[itemId] || { quantity: 0, notes: '' };
-      const newQty = current.quantity + delta;
-      if (newQty <= 0) {
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      }
-      return { ...prev, [itemId]: { ...current, quantity: newQty } };
-    });
-  };
-
-  const updateRoundNotes = (itemId: string, notes: string) => {
-    setRoundCart((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] || { quantity: 1, notes: '' }), notes },
-    }));
-  };
-
   // Submit additional KOT round
   const handleAddRound = async () => {
     if (!activeOrder) return;
-    const items = Object.entries(roundCart)
-      .filter(([_, d]) => d.quantity > 0)
-      .map(([itemId, d]) => ({
-        menuItemId: itemId,
+    const items = Object.values(roundCart)
+      .filter((d) => d.quantity > 0)
+      .map((d) => ({
+        menuItemId: d.menuItemId,
         quantity: d.quantity,
         notes: d.notes,
+        variant: d.variant,
+        selectedAddons: d.selectedAddons,
       }));
 
     if (items.length === 0) {
@@ -392,6 +557,8 @@ export default function TablesPage() {
           name: mi?.name || 'Menu Item',
           quantity: it.quantity,
           notes: it.notes,
+          variantName: it.variant?.name,
+          addons: it.selectedAddons?.map((a) => a.name),
         };
       });
 
@@ -487,13 +654,15 @@ export default function TablesPage() {
     const targetOrder = orderToPrint || activeOrder;
     if (!targetOrder || !selectedTable) return;
 
-    const billItems = targetOrder.items
+    const billItems: BillItem[] = targetOrder.items
       ?.filter((i: any) => i.status !== 'cancelled')
       .map((i: any) => ({
         name: i.name,
         quantity: i.quantity,
         price: i.price,
         taxPercent: i.taxPercent,
+        variantName: i.variant?.name,
+        addons: i.selectedAddons?.map((a: any) => ({ name: a.name, price: a.price })),
       })) || [];
 
     const orderNum = targetOrder.orderNumber || targetOrder._id;
@@ -502,10 +671,16 @@ export default function TablesPage() {
     const enteredSettlement = settlementInput.trim() !== '' ? Number(settlementInput) : targetOrder.total;
     const finalSettled = targetOrder.settledAmount !== null && targetOrder.settledAmount !== undefined
       ? targetOrder.settledAmount
-      : (isNaN(enteredSettlement) ? targetOrder.total : enteredSettlement);
+      : (paymentMethod === 'part' ? totalPartAllocated : (isNaN(enteredSettlement) ? targetOrder.total : enteredSettlement));
     const finalWaived = targetOrder.waivedAmount !== undefined
       ? targetOrder.waivedAmount
       : Math.max(0, targetOrder.total - finalSettled);
+    const finalBreakdown = targetOrder.paymentBreakdown || (paymentMethod === 'part' ? {
+      cash: numPartCash,
+      upi: numPartUpi,
+      card: numPartCard,
+      other: numPartOther,
+    } : undefined);
 
     printCustomerBill({
       orderNumber: orderNum,
@@ -523,6 +698,7 @@ export default function TablesPage() {
       settledAmount: finalSettled,
       waivedAmount: finalWaived,
       paymentMethod: targetOrder.paymentMethod || paymentMethod,
+      paymentBreakdown: finalBreakdown,
       isPaid: isPaidStatus || targetOrder.status === 'paid',
     });
   };
@@ -530,6 +706,59 @@ export default function TablesPage() {
   // Collect Payment
   const handleCollectPayment = async () => {
     if (!activeOrder) return;
+
+    if (paymentMethod === 'part') {
+      if (totalPartAllocated <= 0) {
+        alert('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
+        return;
+      }
+
+      const waived = partRemaining;
+      const partsSummary = [
+        numPartCash > 0 ? `Cash: ${formatCurrency(numPartCash)}` : null,
+        numPartUpi > 0 ? `UPI: ${formatCurrency(numPartUpi)}` : null,
+        numPartCard > 0 ? `Card: ${formatCurrency(numPartCard)}` : null,
+        numPartOther > 0 ? `Other: ${formatCurrency(numPartOther)}` : null,
+      ].filter(Boolean).join(', ');
+
+      const confirmMsg = waived > 0
+        ? `Collect ${formatCurrency(totalPartAllocated)} via PART PAYMENT (${partsSummary})\nWaived / Discrepancy: ${formatCurrency(waived)}\nFree Table ${selectedTable?.tableNumber}?`
+        : `Collect ${formatCurrency(totalPartAllocated)} via PART PAYMENT (${partsSummary})\nFree Table ${selectedTable?.tableNumber}?`;
+
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        setActionLoading(true);
+        const breakdownPayload = {
+          cash: numPartCash,
+          upi: numPartUpi,
+          card: numPartCard,
+          other: numPartOther,
+        };
+        const res = await ordersApi.pay(activeOrder._id, 'part', totalPartAllocated, breakdownPayload);
+        handlePrintCustomerBill(res.data, true);
+        alert(`Part payment of ${formatCurrency(res.data.settledAmount ?? totalPartAllocated)} recorded successfully!${waived > 0 ? ` (Waived: ${formatCurrency(waived)})` : ''} Table ${selectedTable?.tableNumber} is now available.`);
+
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('peyala_sales_list_cache_v1');
+          localStorage.removeItem('peyala_dashboard_cache_v1');
+          localStorage.removeItem('peyala_accounts_cache_v1');
+          window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
+        }
+
+        setPartCash('');
+        setPartUpi('');
+        setPartCard('');
+        setPartOther('');
+        closeOrderModal();
+        await loadData();
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to collect part payment');
+      } finally {
+        setActionLoading(false);
+      }
+      return;
+    }
 
     const enteredSettlement = settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total;
     if (isNaN(enteredSettlement) || enteredSettlement < 0) {
@@ -549,6 +778,14 @@ export default function TablesPage() {
       const res = await ordersApi.pay(activeOrder._id, paymentMethod, enteredSettlement);
       handlePrintCustomerBill(res.data, true);
       alert(`Payment of ${formatCurrency(res.data.settledAmount ?? enteredSettlement)} recorded successfully!${waived > 0 ? ` (Waived: ${formatCurrency(waived)})` : ''} Table ${selectedTable?.tableNumber} is now available.`);
+      // Invalidate sales, dashboard, and accounts caches so newly collected sales appear instantly across tabs/pages
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('peyala_sales_list_cache_v1');
+        localStorage.removeItem('peyala_dashboard_cache_v1');
+        localStorage.removeItem('peyala_accounts_cache_v1');
+        window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
+      }
+
       closeOrderModal();
       await loadData();
     } catch (err: any) {
@@ -722,12 +959,12 @@ export default function TablesPage() {
           </div>
         )}
 
-        {/* Non-Admin Notice Banner */}
-        {!isAdmin && (
+        {/* Non-Admin / Non-Manager Notice Banner */}
+        {!canManageOrders && (
           <div className="flex items-center gap-2.5 p-3.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 rounded-xl text-xs text-blue-800 dark:text-blue-300">
             <ShieldAlert className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
             <div>
-              <span className="font-bold">Staff View (Read-Only POS):</span> Order creation, item updates, billing, discounts, and settlements are restricted to Administrator accounts. You can monitor live table occupancy and reprint customer receipts/KOTs.
+              <span className="font-bold">Staff View (Read-Only POS):</span> Order creation, item updates, billing, discounts, and settlements are restricted to Manager and Administrator accounts. You can monitor live table occupancy and reprint customer receipts/KOTs.
             </div>
           </div>
         )}
@@ -818,7 +1055,7 @@ export default function TablesPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5 sm:gap-3">
             {filteredTables.map((table) => {
               const isOccupied = table.status === 'occupied';
               const isAvailable = table.status === 'available';
@@ -830,97 +1067,119 @@ export default function TablesPage() {
                   key={table._id}
                   onClick={() => handleTableClick(table)}
                   className={cn(
-                    'card p-4 transition-all duration-200 cursor-pointer border-2 relative overflow-hidden flex flex-col justify-between group',
-                    isOccupied && 'border-red-400/80 bg-red-50/20 dark:bg-red-950/10 hover:border-red-500 hover:shadow-lg',
-                    isAvailable && 'border-green-300 dark:border-green-900/60 hover:border-green-500 hover:shadow-lg',
-                    isReserved && 'border-yellow-400/80 bg-yellow-50/20 dark:bg-yellow-950/10 hover:border-yellow-500 hover:shadow-lg'
+                    'card p-2.5 sm:p-3 transition-all duration-200 cursor-pointer border-2 relative overflow-hidden flex flex-col justify-between group min-h-[105px] sm:min-h-[112px]',
+                    isOccupied && 'border-red-400/80 bg-red-50/25 dark:bg-red-950/15 hover:border-red-500 hover:shadow-md',
+                    isAvailable && 'border-green-300 dark:border-green-900/50 bg-green-50/10 dark:bg-green-950/10 hover:border-green-500 hover:shadow-md',
+                    isReserved && 'border-yellow-400/80 bg-yellow-50/25 dark:bg-yellow-950/15 hover:border-yellow-500 hover:shadow-md'
                   )}
                 >
                   {/* Top table info */}
                   <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-lg text-gray-900 dark:text-white group-hover:text-brand-600 transition-colors">
-                          {table.tableNumber}
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-                          <Users className="w-3 h-3" />
-                          {table.capacity}
-                        </span>
-                      </div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-black text-sm sm:text-base text-gray-900 dark:text-white group-hover:text-brand-600 transition-colors truncate">
+                        {table.tableNumber}
+                      </span>
 
                       {/* Status Badge */}
                       <div>
-                        {isAvailable && <span className="badge-green text-xs font-semibold">Available</span>}
-                        {isOccupied && (
-                          <span className="badge-red text-xs font-semibold flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                            Occupied
+                        {isAvailable && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-100/80 dark:bg-green-950/50 px-1.5 py-0.5 rounded-full">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                            <span className="hidden min-[380px]:inline">Avail</span>
                           </span>
                         )}
-                        {isReserved && <span className="badge-yellow text-xs font-semibold">Reserved</span>}
+                        {isOccupied && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 dark:text-red-400 bg-red-100/80 dark:bg-red-950/50 px-1.5 py-0.5 rounded-full">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                            <span className="hidden min-[380px]:inline">Occupied</span>
+                          </span>
+                        )}
+                        {isReserved && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-yellow-700 dark:text-yellow-400 bg-yellow-100/80 dark:bg-yellow-950/50 px-1.5 py-0.5 rounded-full">
+                            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                            <span className="hidden min-[380px]:inline">Reserved</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    {/* Middle: Order Status or Seating helper */}
-                    <div className="mt-3">
+                    {/* Middle: Order Status & KOT Elapsed Time or Helper */}
+                    <div className="mt-1.5">
                       {isOccupied && order ? (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">Status:</span>
-                            <span
-                              className={cn(
-                                'font-medium uppercase tracking-wider text-[10px] px-1.5 py-0.5 rounded',
-                                order.status === 'billed' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
-                                order.status === 'served' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' :
-                                'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                              )}
-                            >
-                              {order.status}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">Items:</span>
-                            <span className="font-semibold text-gray-700 dark:text-gray-300">
-                              {order.items?.filter((i) => i.status !== 'cancelled').length || 0} items
-                            </span>
+                        <div className="space-y-1">
+                          {/* Time passed since KOT creation badge */}
+                          {(() => {
+                            const kotMins = getKotElapsedMinutes(order);
+                            if (kotMins === null) return null;
+                            const isLongWait = kotMins >= 30;
+                            const isMediumWait = kotMins >= 15 && kotMins < 30;
+                            return (
+                              <div className="flex items-center justify-between gap-1 text-[10px]">
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-bold tracking-tight',
+                                    isLongWait
+                                      ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-800'
+                                      : isMediumWait
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                                      : 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                  )}
+                                  title={`KOT dispatched ${kotMins} minute${kotMins === 1 ? '' : 's'} ago`}
+                                >
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{kotMins <= 0 ? '< 1m' : `${kotMins}m`}</span>
+                                </span>
+
+                                <span
+                                  className={cn(
+                                    'font-bold uppercase text-[9px] px-1 py-0.5 rounded',
+                                    order.status === 'billed' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
+                                    order.status === 'served' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' :
+                                    'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                                  )}
+                                >
+                                  {order.status}
+                                </span>
+                              </div>
+                            );
+                          })()}
+
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                            {order.items?.filter((i) => i.status !== 'cancelled').length || 0} item{(order.items?.filter((i) => i.status !== 'cancelled').length || 0) === 1 ? '' : 's'}
                           </div>
                         </div>
                       ) : isAvailable ? (
-                        <div className="text-xs text-gray-400 flex items-center gap-1.5 py-2">
-                          <Utensils className="w-3.5 h-3.5 text-green-500" />
-                          <span>Tap to open order & seat guests</span>
+                        <div className="text-[10px] text-gray-400 dark:text-gray-500 py-0.5 flex items-center gap-1">
+                          <Utensils className="w-3 h-3 text-green-500/70" />
+                          <span className="truncate">Tap to seat</span>
                         </div>
                       ) : (
-                        <div className="text-xs text-gray-400 py-2">Table currently reserved</div>
+                        <div className="text-[10px] text-gray-400 py-0.5 truncate">Reserved</div>
                       )}
                     </div>
                   </div>
 
                   {/* Bottom: Total / Actions */}
-                  <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                  <div className="mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-800/80 flex items-center justify-between">
                     {isOccupied && order ? (
-                      <div>
-                        <span className="text-[10px] text-gray-400 uppercase">Running Total</span>
-                        <p className="text-base font-bold text-gray-900 dark:text-white">
-                          {formatCurrency(order.total)}
-                        </p>
-                      </div>
+                      <span className="text-xs sm:text-sm font-black text-gray-900 dark:text-white">
+                        {formatCurrency(order.total)}
+                      </span>
                     ) : (
-                      <span className="text-xs text-gray-400">Ready for service</span>
+                      <span className="text-[10px] text-gray-400">Ready</span>
                     )}
 
                     {isAdmin && (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             openEditTable(table);
                           }}
-                          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded"
+                          className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
                           title="Edit Table"
                         >
-                          <Users className="w-3.5 h-3.5" />
+                          <Pencil className="w-3 h-3" />
                         </button>
                         {!isOccupied && (
                           <button
@@ -928,10 +1187,10 @@ export default function TablesPage() {
                               e.stopPropagation();
                               deleteTable(table);
                             }}
-                            className="p-1 text-gray-400 hover:text-red-500 rounded"
+                            className="p-1 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 dark:hover:bg-red-950/40"
                             title="Delete Table"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         )}
                       </div>
@@ -952,7 +1211,7 @@ export default function TablesPage() {
         onClose={closeOrderModal}
         title={
           selectedTable
-            ? `${selectedTable.tableNumber} (${selectedTable.capacity} Seats) — ${
+            ? `${selectedTable.tableNumber} — ${
                 selectedTable.status === 'occupied' ? 'Live Dine-In Order' : 'New Order'
               }`
             : ''
@@ -975,7 +1234,7 @@ export default function TablesPage() {
                       Table is Available — Select items to generate KOT &amp; Seat Guests
                     </span>
                   </div>
-                  {selectedTable.status === 'reserved' && isAdmin && (
+                  {selectedTable.status === 'reserved' && canManageOrders && (
                     <button
                       onClick={async () => {
                         await tablesApi.update(selectedTable._id, { status: 'available' });
@@ -989,10 +1248,10 @@ export default function TablesPage() {
                   )}
                 </div>
 
-                {!isAdmin && (
+                {!canManageOrders && (
                   <div className="flex items-center gap-2.5 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-lg text-xs text-amber-800 dark:text-amber-300">
                     <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600" />
-                    <span><strong>Admin Permission Required:</strong> Order handling is allowed through Admin accounts only. You can browse the menu and cart preview, but opening orders and sending KOTs is restricted.</span>
+                    <span><strong>Manager or Admin Permission Required:</strong> Order handling is allowed through Manager and Admin accounts only. You can browse the menu and cart preview, but opening orders and sending KOTs is restricted.</span>
                   </div>
                 )}
 
@@ -1055,7 +1314,14 @@ export default function TablesPage() {
                           return true;
                         })
                         .map((item) => {
-                          const inCart = cart[item._id]?.quantity || 0;
+                          const applicableAddons = getItemApplicableAddons(item);
+                          const hasVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
+                          const isCustomizable = hasVariants || applicableAddons.length > 0;
+
+                          const inCartQty = Object.values(cart)
+                            .filter((c) => c.menuItemId === item._id)
+                            .reduce((sum, c) => sum + c.quantity, 0);
+
                           return (
                             <div key={item._id} className="pt-2 flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
@@ -1068,28 +1334,53 @@ export default function TablesPage() {
                                   <span className={cn('w-1.5 h-1.5 rounded-full', item.isVeg ? 'bg-green-600' : 'bg-red-600')} />
                                 </span>
                                 <div>
-                                  <p className="text-xs font-semibold text-gray-900 dark:text-white leading-tight">{item.name}</p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="text-xs font-semibold text-gray-900 dark:text-white leading-tight">{item.name}</p>
+                                    {hasVariants && (
+                                      <span className="text-[9px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold px-1 rounded">
+                                        Variants
+                                      </span>
+                                    )}
+                                    {applicableAddons.length > 0 && (
+                                      <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold px-1 rounded">
+                                        Addons
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-[11px] text-gray-500 font-medium">
                                     {formatCurrency(item.price)} <span className="text-gray-400">+{item.taxPercent}%</span>
                                   </p>
                                 </div>
                               </div>
 
-                              {/* Cart +/- */}
+                              {/* Cart Actions */}
                               <div className="flex items-center gap-1.5">
-                                {inCart > 0 ? (
+                                {isCustomizable ? (
+                                  <button
+                                    onClick={() => handleItemClick(item, 'cart')}
+                                    className={cn(
+                                      'px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors flex items-center gap-1',
+                                      inCartQty > 0
+                                        ? 'bg-brand-50 border-brand-300 text-brand-700 dark:bg-brand-950/40 dark:border-brand-700 dark:text-brand-300'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:text-brand-500'
+                                    )}
+                                  >
+                                    <Sparkles className="w-3 h-3 text-brand-500" />
+                                    {inCartQty > 0 ? `${inCartQty} in order · +` : '+ Customize'}
+                                  </button>
+                                ) : inCartQty > 0 ? (
                                   <div className="flex items-center gap-1.5 bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800/60 rounded-lg p-0.5">
-                                    <button onClick={() => updateCartQty(item._id, -1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
+                                    <button onClick={() => updateDirectCartQty(item, 'cart', -1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
                                       <MinusCircle className="w-3.5 h-3.5" />
                                     </button>
-                                    <span className="text-xs font-bold text-brand-600 px-1">{inCart}</span>
-                                    <button onClick={() => updateCartQty(item._id, +1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
+                                    <span className="text-xs font-bold text-brand-600 px-1">{inCartQty}</span>
+                                    <button onClick={() => updateDirectCartQty(item, 'cart', 1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
                                       <PlusCircle className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => updateCartQty(item._id, 1)}
+                                    onClick={() => updateDirectCartQty(item, 'cart', 1)}
                                     className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:text-brand-500 transition-colors"
                                   >
                                     + Add
@@ -1118,31 +1409,47 @@ export default function TablesPage() {
                         </div>
                       ) : (
                         <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                          {Object.entries(cart).map(([itemId, d]) => {
-                            const item = menuItems.find((i) => i._id === itemId);
+                          {Object.entries(cart).map(([cartKey, d]) => {
+                            const item = menuItems.find((i) => i._id === d.menuItemId);
                             if (!item) return null;
                             return (
-                              <div key={itemId} className="text-xs bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium text-gray-900 dark:text-white">{item.name}</span>
-                                  <span className="font-semibold">{formatCurrency(item.price * d.quantity)}</span>
+                              <div key={cartKey} className="text-xs bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 space-y-1.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                                      <span>{item.name}</span>
+                                      {d.variant?.name && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
+                                          {d.variant.name}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {d.selectedAddons && d.selectedAddons.length > 0 && (
+                                      <p className="text-[10px] text-gray-500 font-medium mt-0.5">
+                                        + {d.selectedAddons.map((a) => `${a.name} (₹${a.price})`).join(', ')}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <span className="font-bold text-gray-900 dark:text-white shrink-0">
+                                    {formatCurrency(d.unitPrice * d.quantity)}
+                                  </span>
                                 </div>
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2 pt-1">
                                   <div className="flex items-center gap-1.5">
-                                    <button onClick={() => updateCartQty(itemId, -1)} className="text-gray-400 hover:text-red-500">
+                                    <button onClick={() => updateCartEntryQty(cartKey, -1, 'cart')} className="text-gray-400 hover:text-red-500">
                                       <MinusCircle className="w-3.5 h-3.5" />
                                     </button>
                                     <span className="font-bold text-xs">{d.quantity}</span>
-                                    <button onClick={() => updateCartQty(itemId, 1)} className="text-gray-400 hover:text-green-500">
+                                    <button onClick={() => updateCartEntryQty(cartKey, 1, 'cart')} className="text-gray-400 hover:text-green-500">
                                       <PlusCircle className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
                                   <input
                                     type="text"
                                     value={d.notes || ''}
-                                    onChange={(e) => updateCartNotes(itemId, e.target.value)}
-                                    placeholder="Add kitchen note (e.g. less spicy)..."
-                                    className="input text-[11px] py-0.5 px-2 w-44"
+                                    onChange={(e) => updateCartEntryNotes(cartKey, e.target.value, 'cart')}
+                                    placeholder="Add kitchen note..."
+                                    className="input text-[11px] py-0.5 px-2 w-40"
                                   />
                                 </div>
                               </div>
@@ -1169,12 +1476,12 @@ export default function TablesPage() {
 
                       <button
                         onClick={handleOpenOrder}
-                        disabled={!isAdmin || cartSummary.itemCount === 0 || actionLoading}
+                        disabled={!canManageOrders || cartSummary.itemCount === 0 || actionLoading}
                         className="btn-primary w-full mt-3 flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
                         <ChefHat className="w-4 h-4" />
-                        {!isAdmin
-                          ? 'Admin Access Required to Open Order'
+                        {!canManageOrders
+                          ? 'Staff Mode (Read-Only)'
                           : actionLoading
                           ? 'Creating Order...'
                           : 'Open Order & Send KOT'}
@@ -1186,10 +1493,10 @@ export default function TablesPage() {
             ) : (
               /* ── CASE 2: Table is Occupied -> Live Order, KOT Rounds, Billing & Payment ── */
               <div className="space-y-5">
-                {!isAdmin && (
+                {!canManageOrders && (
                   <div className="flex items-center gap-2.5 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl text-xs text-blue-800 dark:text-blue-300">
                     <ShieldAlert className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                    <span><strong>Staff Mode (Read-Only Order View):</strong> You can review items and print customer receipts/KOTs. Adding KOT rounds, discounts, billing, and settlements are restricted to Administrators.</span>
+                    <span><strong>Staff Mode (Read-Only Order View):</strong> You can review items and print customer receipts/KOTs. Adding KOT rounds, discounts, billing, and settlements are restricted to Managers and Administrators.</span>
                   </div>
                 )}
 
@@ -1265,7 +1572,7 @@ export default function TablesPage() {
                       <Printer className="w-3.5 h-3.5" />
                       {isPrintStation ? 'Print KOT' : 'Send KOT to Printer'}
                     </button>
-                    {isAdmin && activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && (
+                    {canManageOrders && activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && (
                       <button
                         onClick={() => setShowAddRound(!showAddRound)}
                         className={cn(
@@ -1313,23 +1620,54 @@ export default function TablesPage() {
                               return true;
                             })
                             .map((item) => {
-                              const qty = roundCart[item._id]?.quantity || 0;
+                              const applicableAddons = getItemApplicableAddons(item);
+                              const hasVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
+                              const isCustomizable = hasVariants || applicableAddons.length > 0;
+
+                              const inRoundQty = Object.values(roundCart)
+                                .filter((c) => c.menuItemId === item._id)
+                                .reduce((sum, c) => sum + c.quantity, 0);
+
                               return (
                                 <div key={item._id} className="pt-1.5 flex items-center justify-between text-xs">
-                                  <span>{item.name} ({formatCurrency(item.price)})</span>
+                                  <div>
+                                    <span className="font-medium text-gray-900 dark:text-white">{item.name}</span>
+                                    <span className="text-gray-500 text-[11px] ml-1">({formatCurrency(item.price)})</span>
+                                    {hasVariants && (
+                                      <span className="text-[9px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold px-1 rounded ml-1">
+                                        Variants
+                                      </span>
+                                    )}
+                                    {applicableAddons.length > 0 && (
+                                      <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold px-1 rounded ml-1">
+                                        Addons
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="flex items-center gap-1">
-                                    {qty > 0 ? (
+                                    {isCustomizable ? (
+                                      <button
+                                        onClick={() => handleItemClick(item, 'roundCart')}
+                                        className={cn(
+                                          'btn-secondary text-[10px] py-0.5 px-2 flex items-center gap-1 font-semibold',
+                                          inRoundQty > 0 && 'bg-brand-50 border-brand-300 text-brand-700 dark:bg-brand-950/40'
+                                        )}
+                                      >
+                                        <Sparkles className="w-2.5 h-2.5 text-brand-500" />
+                                        {inRoundQty > 0 ? `${inRoundQty} in round · +` : '+ Customize'}
+                                      </button>
+                                    ) : inRoundQty > 0 ? (
                                       <div className="flex items-center gap-1 bg-white dark:bg-gray-900 px-1 py-0.5 rounded border">
-                                        <button onClick={() => updateRoundQty(item._id, -1)} className="text-gray-500 hover:text-red-500">
+                                        <button onClick={() => updateDirectCartQty(item, 'roundCart', -1)} className="text-gray-500 hover:text-red-500">
                                           <MinusCircle className="w-3 h-3" />
                                         </button>
-                                        <span className="font-bold text-xs">{qty}</span>
-                                        <button onClick={() => updateRoundQty(item._id, 1)} className="text-gray-500 hover:text-green-500">
+                                        <span className="font-bold text-xs">{inRoundQty}</span>
+                                        <button onClick={() => updateDirectCartQty(item, 'roundCart', 1)} className="text-gray-500 hover:text-green-500">
                                           <PlusCircle className="w-3 h-3" />
                                         </button>
                                       </div>
                                     ) : (
-                                      <button onClick={() => updateRoundQty(item._id, 1)} className="btn-secondary text-[10px] py-0.5 px-2">
+                                      <button onClick={() => updateDirectCartQty(item, 'roundCart', 1)} className="btn-secondary text-[10px] py-0.5 px-2">
                                         + Add
                                       </button>
                                     )}
@@ -1342,26 +1680,48 @@ export default function TablesPage() {
 
                       {/* Selected Round Items Preview & Confirm */}
                       <div className="bg-white dark:bg-gray-900 p-3 rounded-lg border flex flex-col justify-between">
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                           <p className="text-[11px] font-semibold text-gray-500 uppercase">Selected for this round:</p>
                           {Object.keys(roundCart).length === 0 ? (
                             <p className="text-xs text-gray-400 py-3 text-center">No items chosen yet</p>
                           ) : (
-                            Object.entries(roundCart).map(([itemId, d]) => {
-                              const item = menuItems.find((i) => i._id === itemId);
+                            Object.entries(roundCart).map(([cartKey, d]) => {
+                              const item = menuItems.find((i) => i._id === d.menuItemId);
                               return (
-                                <div key={itemId} className="text-xs space-y-1 border-b pb-1">
+                                <div key={cartKey} className="text-xs space-y-1 border-b pb-1">
                                   <div className="flex justify-between font-medium">
-                                    <span>{item?.name} x {d.quantity}</span>
-                                    <span>{formatCurrency((item?.price || 0) * d.quantity)}</span>
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span>{item?.name}</span>
+                                      {d.variant?.name && (
+                                        <span className="text-[9px] font-bold px-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                                          {d.variant.name}
+                                        </span>
+                                      )}
+                                      <span className="text-gray-500 font-bold">x {d.quantity}</span>
+                                    </div>
+                                    <span className="font-bold">{formatCurrency(d.unitPrice * d.quantity)}</span>
                                   </div>
-                                  <input
-                                    type="text"
-                                    value={d.notes || ''}
-                                    onChange={(e) => updateRoundNotes(itemId, e.target.value)}
-                                    placeholder="Round notes (optional)..."
-                                    className="input text-[10px] py-0.5 px-1.5 w-full"
-                                  />
+                                  {d.selectedAddons && d.selectedAddons.length > 0 && (
+                                    <p className="text-[10px] text-gray-500 font-medium">
+                                      + {d.selectedAddons.map((a) => `${a.name} (₹${a.price})`).join(', ')}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center gap-1 pt-0.5">
+                                    <button onClick={() => updateCartEntryQty(cartKey, -1, 'roundCart')} className="text-gray-400 hover:text-red-500">
+                                      <MinusCircle className="w-3 h-3" />
+                                    </button>
+                                    <span className="font-bold text-[11px] px-1">{d.quantity}</span>
+                                    <button onClick={() => updateCartEntryQty(cartKey, 1, 'roundCart')} className="text-gray-400 hover:text-green-500">
+                                      <PlusCircle className="w-3 h-3" />
+                                    </button>
+                                    <input
+                                      type="text"
+                                      value={d.notes || ''}
+                                      onChange={(e) => updateCartEntryNotes(cartKey, e.target.value, 'roundCart')}
+                                      placeholder="Round notes (optional)..."
+                                      className="input text-[10px] py-0.5 px-1.5 w-full ml-1"
+                                    />
+                                  </div>
                                 </div>
                               );
                             })
@@ -1425,7 +1785,7 @@ export default function TablesPage() {
                             <td className="table-td">
                               {isCancelled ? (
                                 <span className="badge-red text-[10px]">Cancelled</span>
-                              ) : !isAdmin ? (
+                              ) : !canManageOrders ? (
                                 <span
                                   className={cn(
                                     'text-[11px] font-semibold py-1 px-2 rounded-md border inline-block uppercase tracking-wider',
@@ -1454,7 +1814,7 @@ export default function TablesPage() {
                               )}
                             </td>
                             <td className="table-td text-right">
-                              {!isCancelled && activeOrder.status !== 'paid' && isAdmin ? (
+                              {!isCancelled && activeOrder.status !== 'paid' && canManageOrders ? (
                                 <button
                                   onClick={() => handleCancelItem(item._id, item.name)}
                                   className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors"
@@ -1479,7 +1839,7 @@ export default function TablesPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="label text-xs font-semibold">Apply Discount</label>
-                      {isAdmin && (
+                      {canManageOrders && (
                         <div className="inline-flex rounded-lg bg-gray-200 dark:bg-gray-700 p-0.5 text-[11px] font-semibold">
                           <button
                             type="button"
@@ -1509,7 +1869,7 @@ export default function TablesPage() {
                       )}
                     </div>
 
-                    {isAdmin ? (
+                    {canManageOrders ? (
                       <div className="flex gap-2">
                         <div className="relative flex-1">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-xs font-semibold">
@@ -1535,7 +1895,7 @@ export default function TablesPage() {
                       </div>
                     ) : (
                       <p className="text-xs text-gray-500 italic py-1">
-                        Discounts can only be configured by Administrators.
+                        Discounts can only be configured by Managers and Administrators.
                       </p>
                     )}
 
@@ -1582,8 +1942,8 @@ export default function TablesPage() {
                   {/* Secondary actions row & Finalize Bill */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                     <div className="flex items-center gap-2 w-full sm:w-auto">
-                      {/* Cancel order button (allowed only for admin unless paid) */}
-                      {activeOrder.status !== 'paid' && isAdmin && (
+                      {/* Cancel order button (allowed for manager/admin unless paid) */}
+                      {activeOrder.status !== 'paid' && canManageOrders && (
                         <button
                           onClick={handleCancelOrder}
                           disabled={actionLoading}
@@ -1605,7 +1965,7 @@ export default function TablesPage() {
                     </div>
 
                     {/* Flow 1: Not Billed -> "Finalize Bill" */}
-                    {activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && isAdmin && (
+                    {activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && canManageOrders && (
                       <button
                         onClick={handleFinalizeBill}
                         disabled={actionLoading}
@@ -1619,7 +1979,7 @@ export default function TablesPage() {
 
                   {/* Flow 2: Once Billed -> Settlement Box & Payment Collection */}
                   {activeOrder.status === 'billed' && (
-                    isAdmin ? (
+                    canManageOrders ? (
                       <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl space-y-3">
                         {/* Settlement Input & Waived Indicator */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1672,52 +2032,221 @@ export default function TablesPage() {
                         </div>
 
                         {/* Payment Mode Selector & Collect Button */}
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-amber-200/60 dark:border-amber-900/30">
-                          {/* Payment mode buttons - 2x2 grid on mobile, flex row on sm+ */}
-                          <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-white dark:bg-gray-900 p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 w-full sm:w-auto">
-                            {[
-                              { id: 'cash', label: 'Cash', icon: Wallet },
-                              { id: 'upi', label: 'UPI', icon: Smartphone },
-                              { id: 'card', label: 'Card', icon: CreditCard },
-                              { id: 'other', label: 'Other', icon: Building2 },
-                            ].map(({ id, label, icon: Icon }) => (
-                              <button
-                                key={id}
-                                type="button"
-                                onClick={() => setPaymentMethod(id as any)}
-                                className={cn(
-                                  'px-3 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center gap-1 transition-colors',
-                                  paymentMethod === id
-                                    ? 'bg-brand-600 text-white shadow-sm'
-                                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-                                )}
-                              >
-                                <Icon className="w-3.5 h-3.5" />
-                                {label}
-                              </button>
-                            ))}
+                        <div className="space-y-3 pt-2 border-t border-amber-200/60 dark:border-amber-900/30">
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                            {/* Payment mode buttons - 2x3 grid on mobile, flex row on sm+ */}
+                            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 bg-white dark:bg-gray-900 p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 w-full sm:w-auto">
+                              {[
+                                { id: 'cash', label: 'Cash', icon: Wallet },
+                                { id: 'upi', label: 'UPI', icon: Smartphone },
+                                { id: 'card', label: 'Card', icon: CreditCard },
+                                { id: 'other', label: 'Other', icon: Building2 },
+                                { id: 'part', label: 'Part Payment', icon: Layers },
+                              ].map(({ id, label, icon: Icon }) => (
+                                <button
+                                  key={id}
+                                  type="button"
+                                  onClick={() => setPaymentMethod(id as any)}
+                                  className={cn(
+                                    'px-3 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center gap-1 transition-colors',
+                                    paymentMethod === id
+                                      ? 'bg-brand-600 text-white shadow-sm'
+                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
+                                  )}
+                                >
+                                  <Icon className="w-3.5 h-3.5" />
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+
+                            <button
+                              onClick={handleCollectPayment}
+                              disabled={actionLoading || (paymentMethod === 'part' && totalPartAllocated <= 0)}
+                              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto ml-auto"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              {actionLoading
+                                ? 'Settling...'
+                                : paymentMethod === 'part'
+                                ? `Collect Part: ${formatCurrency(totalPartAllocated)}`
+                                : `Collect ${formatCurrency(
+                                    settlementInput.trim() !== '' && !isNaN(Number(settlementInput))
+                                      ? Number(settlementInput)
+                                      : activeOrder.total
+                                  )}`}
+                            </button>
                           </div>
 
-                          <button
-                            onClick={handleCollectPayment}
-                            disabled={actionLoading}
-                            className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto ml-auto"
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                            {actionLoading
-                              ? 'Settling...'
-                              : `Collect ${formatCurrency(
-                                  settlementInput.trim() !== '' && !isNaN(Number(settlementInput))
-                                    ? Number(settlementInput)
-                                    : activeOrder.total
-                                )}`}
-                          </button>
+                          {/* Split Payment Allocation Box */}
+                          {paymentMethod === 'part' && (
+                            <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-amber-300 dark:border-amber-800/80 shadow-sm space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-1 border-b border-gray-100 dark:border-gray-800">
+                                <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                                  <Layers className="w-4 h-4 text-amber-600" />
+                                  Part Payment Split Breakdown
+                                </span>
+                                <div className="text-xs text-gray-600 dark:text-gray-400">
+                                  Total Bill: <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(activeOrder.total)}</span>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                                {/* Cash */}
+                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    <span className="flex items-center gap-1">
+                                      <Wallet className="w-3.5 h-3.5 text-emerald-600" /> Cash Counter
+                                    </span>
+                                    {partDifference > 0 && numPartCash === 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPartCash(String(partDifference))}
+                                        className="text-[10px] text-brand-600 hover:underline font-bold"
+                                      >
+                                        + Fill {formatCurrency(partDifference)}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={partCash}
+                                      onChange={(e) => setPartCash(e.target.value)}
+                                      placeholder="0.00"
+                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* UPI */}
+                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    <span className="flex items-center gap-1">
+                                      <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / QR
+                                    </span>
+                                    {partDifference > 0 && numPartUpi === 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPartUpi(String(partDifference))}
+                                        className="text-[10px] text-brand-600 hover:underline font-bold"
+                                      >
+                                        + Fill {formatCurrency(partDifference)}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={partUpi}
+                                      onChange={(e) => setPartUpi(e.target.value)}
+                                      placeholder="0.00"
+                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Card */}
+                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    <span className="flex items-center gap-1">
+                                      <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> Card / POS
+                                    </span>
+                                    {partDifference > 0 && numPartCard === 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPartCard(String(partDifference))}
+                                        className="text-[10px] text-brand-600 hover:underline font-bold"
+                                      >
+                                        + Fill {formatCurrency(partDifference)}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={partCard}
+                                      onChange={(e) => setPartCard(e.target.value)}
+                                      placeholder="0.00"
+                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Other */}
+                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                    <span className="flex items-center gap-1">
+                                      <Building2 className="w-3.5 h-3.5 text-purple-600" /> Other / Bank
+                                    </span>
+                                    {partDifference > 0 && numPartOther === 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPartOther(String(partDifference))}
+                                        className="text-[10px] text-brand-600 hover:underline font-bold"
+                                      >
+                                        + Fill {formatCurrency(partDifference)}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={partOther}
+                                      onChange={(e) => setPartOther(e.target.value)}
+                                      placeholder="0.00"
+                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Part Payment Live Status */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800/80 border border-gray-200/80 dark:border-gray-700/80 text-xs">
+                                <div className="text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                                  <span>Total Allocated: <span className="font-bold text-gray-900 dark:text-white text-sm">{formatCurrency(totalPartAllocated)}</span></span>
+                                  {numPartCash > 0 && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Cash: {formatCurrency(numPartCash)}</span>}
+                                  {(numPartUpi + numPartCard + numPartOther) > 0 && (
+                                    <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">Digital: {formatCurrency(numPartUpi + numPartCard + numPartOther)}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  {partDifference === 0 && totalPartAllocated > 0 ? (
+                                    <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                      ✓ Exact match with bill
+                                    </span>
+                                  ) : partDifference > 0 ? (
+                                    <span className="text-amber-700 dark:text-amber-400 font-semibold">
+                                      {formatCurrency(partDifference)} unallocated (will be recorded as waived off)
+                                    </span>
+                                  ) : (
+                                    <span className="text-red-600 dark:text-red-400 font-bold">
+                                      ⚠ Over-allocated by {formatCurrency(Math.abs(partDifference))}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
                       <div className="p-4 bg-purple-50/80 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
                         <div className="text-xs text-purple-900 dark:text-purple-300 text-center sm:text-left">
-                          <span className="font-bold">Bill Finalized ({formatCurrency(activeOrder.total)}).</span> Waiting for an Administrator to collect payment settlement and clear Table {selectedTable?.tableNumber}.
+                          <span className="font-bold">Bill Finalized ({formatCurrency(activeOrder.total)}).</span> Waiting for a Manager or Administrator to collect payment settlement and clear Table {selectedTable?.tableNumber}.
                         </div>
                         <button
                           onClick={() => handlePrintCustomerBill()}
@@ -1758,18 +2287,6 @@ export default function TablesPage() {
           </div>
 
           <div>
-            <label className="label">Seating Capacity</label>
-            <input
-              type="number"
-              min="1"
-              className="input"
-              value={tableForm.capacity}
-              onChange={(e) => setTableForm({ ...tableForm, capacity: Math.max(1, +e.target.value) })}
-              placeholder="4"
-            />
-          </div>
-
-          <div>
             <label className="label">Initial Status</label>
             <select
               className="input"
@@ -1790,6 +2307,245 @@ export default function TablesPage() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* Item Customization Pop-Up Modal (Variants & Add-ons) */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={!!customizingItem}
+        onClose={() => setCustomizingItem(null)}
+        title={customizingItem ? `Customize: ${customizingItem.name}` : ''}
+        size="md"
+      >
+        {customizingItem && (() => {
+          const applicableAddons = getItemApplicableAddons(customizingItem);
+          const hasVariants = Boolean(customizingItem.hasVariants && customizingItem.variants && customizingItem.variants.length > 0);
+          const basePrice = selectedVariant ? selectedVariant.price : customizingItem.price;
+          const chosenAddons = applicableAddons.filter((a) => selectedAddonIds.includes(a._id));
+          const addonsPrice = chosenAddons.reduce((sum, a) => sum + a.price, 0);
+          const unitPrice = basePrice + addonsPrice;
+          const lineTotal = unitPrice * customizingQty;
+
+          return (
+            <div className="space-y-4">
+              {/* Item Overview & Veg / Non-Veg */}
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-800">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={cn(
+                      'w-4 h-4 border-2 flex items-center justify-center rounded-xs shrink-0',
+                      customizingItem.isVeg ? 'border-green-600' : 'border-red-600'
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'w-2 h-2 rounded-full',
+                        customizingItem.isVeg ? 'bg-green-600' : 'bg-red-600'
+                      )}
+                    />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                      {customizingItem.name}
+                    </h4>
+                    {customizingItem.description && (
+                      <p className="text-xs text-gray-500 line-clamp-1">{customizingItem.description}</p>
+                    )}
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                  {hasVariants ? 'Select Portion' : formatCurrency(customizingItem.price)}
+                </span>
+              </div>
+
+              {/* Section 1: Variants (Portion Sizes) */}
+              {hasVariants && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                      <span>Portion / Variant</span>
+                      <span className="text-[10px] text-brand-600 font-semibold bg-brand-50 dark:bg-brand-950/40 px-1.5 py-0.5 rounded">Required</span>
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {customizingItem.variants!.map((variant, idx) => {
+                      const isSelected = selectedVariant?.name === variant.name;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setSelectedVariant(variant)}
+                          className={cn(
+                            'flex items-center justify-between p-3 rounded-xl border-2 text-left transition-all',
+                            isSelected
+                              ? 'border-brand-500 bg-brand-50/60 dark:bg-brand-950/30 text-brand-900 dark:text-brand-200 shadow-xs'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={cn(
+                                'w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors',
+                                isSelected ? 'border-brand-600 bg-brand-600' : 'border-gray-300 dark:border-gray-600'
+                              )}
+                            >
+                              {isSelected && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                            </div>
+                            <span className="text-xs font-bold">{variant.name}</span>
+                          </div>
+                          <span className="text-xs font-black text-gray-900 dark:text-white">
+                            {formatCurrency(variant.price)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 2: Add-ons */}
+              {applicableAddons.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                      <span>Add-ons / Extras</span>
+                      <span className="text-[10px] text-gray-400 font-normal">Optional</span>
+                    </label>
+                    {selectedAddonIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAddonIds([])}
+                        className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        Clear Add-ons
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {applicableAddons.map((addon) => {
+                      const isSelected = selectedAddonIds.includes(addon._id);
+                      return (
+                        <button
+                          key={addon._id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAddonIds((prev) =>
+                              isSelected ? prev.filter((id) => id !== addon._id) : [...prev, addon._id]
+                            );
+                          }}
+                          className={cn(
+                            'flex items-center justify-between p-2.5 rounded-xl border text-left transition-all',
+                            isSelected
+                              ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/20 text-brand-900 dark:text-brand-200'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={cn(
+                                'w-4 h-4 rounded border flex items-center justify-center transition-colors',
+                                isSelected ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300 dark:border-gray-600'
+                              )}
+                            >
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-medium">{addon.name}</span>
+                              <div
+                                className={cn(
+                                  'w-2.5 h-2.5 border flex items-center justify-center rounded-2xs shrink-0',
+                                  addon.isVeg ? 'border-green-600' : 'border-red-600'
+                                )}
+                              >
+                                <div className={cn('w-1 h-1 rounded-full', addon.isVeg ? 'bg-green-600' : 'bg-red-600')} />
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-gray-900 dark:text-white">
+                            +{formatCurrency(addon.price)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 3: Kitchen Notes */}
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-1">
+                  Kitchen Instruction / Special Request
+                </label>
+                <input
+                  type="text"
+                  value={customizingNotes}
+                  onChange={(e) => setCustomizingNotes(e.target.value)}
+                  placeholder="e.g. Extra spicy, no onion, separate dressing..."
+                  className="input text-xs py-2 w-full"
+                />
+              </div>
+
+              {/* Section 4: Quantity & Pricing Summary */}
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
+                {/* Quantity Stepper */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-500">Qty:</span>
+                  <div className="flex items-center border border-gray-200 dark:border-gray-700 rounded-lg p-0.5 bg-white dark:bg-gray-900">
+                    <button
+                      type="button"
+                      onClick={() => setCustomizingQty((q) => Math.max(1, q - 1))}
+                      disabled={customizingQty <= 1}
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 rounded"
+                    >
+                      <MinusCircle className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                    </button>
+                    <span className="w-8 text-center text-xs font-bold text-gray-900 dark:text-white">
+                      {customizingQty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomizingQty((q) => q + 1)}
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                    >
+                      <PlusCircle className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Price Calculation Display */}
+                <div className="text-right">
+                  <div className="text-[11px] text-gray-500">
+                    {formatCurrency(unitPrice)} × {customizingQty}
+                  </div>
+                  <div className="text-base font-black text-brand-600">
+                    {formatCurrency(lineTotal)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCustomizingItem(null)}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCustomization}
+                  disabled={hasVariants && !selectedVariant}
+                  className="btn-primary flex-2 text-xs py-2.5 font-bold shadow-md flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add to Order • {formatCurrency(lineTotal)}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </AppLayout>
   );

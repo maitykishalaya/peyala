@@ -37,6 +37,7 @@ app.use('/api/owner-note', require('./routes/ownerNote'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/menu', require('./routes/menu'));
+app.use('/api/addons', require('./routes/addons'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/orders', require('./routes/orders'));
 

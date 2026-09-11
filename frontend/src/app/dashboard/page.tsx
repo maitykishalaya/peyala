@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import StatCard from '@/components/dashboard/StatCard';
 import { dashboardApi, ownerNoteApi } from '@/lib/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown } from 'lucide-react';
+import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, PieChart, Pie, Cell, Legend, BarChart, Bar
@@ -32,28 +32,41 @@ function writeCache(data: any) {
   }
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — reuse cache as-is within this window, no network call at all
-
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ownerNote, setOwnerNote] = useState<string>('');
+
+  const fetchFresh = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    try {
+      const r = await dashboardApi.summary();
+      setData(r.data);
+      writeCache(r.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     const cached = readCache();
-    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-    if (cached) {
+    if (cached?.data) {
       setData(cached.data);
+      if (cached.savedAt) {
+        setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
       setLoading(false);
+      // Only fetch upon manually clicking refresh; otherwise only show browser storage data
+      return;
     }
-    // Only hit the server if we had nothing cached, or the cache has gone stale.
-    if (!cached || isStale) {
-      dashboardApi.summary().then(r => {
-        setData(r.data);
-        setLoading(false);
-        writeCache(r.data);
-      }).catch(() => setLoading(false));
-    }
+    // Only hit server on initial load if no cache exists
+    fetchFresh();
     ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
   }, []);
 
@@ -94,14 +107,28 @@ export default function DashboardPage() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{formatDate(new Date())} · Peyala Café</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+              <span>{formatDate(new Date())} · Peyala Café</span>
+              {lastUpdated && <span className="text-xs text-gray-400">· Cached ({lastUpdated})</span>}
+            </p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Open Hours</p>
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">1:00 PM – 11:00 PM</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => fetchFresh(true)}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch fresh dashboard data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-gray-400">Open Hours</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">1:00 PM – 11:00 PM</p>
+            </div>
           </div>
         </div>
 

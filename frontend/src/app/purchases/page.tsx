@@ -25,8 +25,8 @@ import Modal from '@/components/ui/Modal';
 import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
-import { formatCurrency, formatDate, today, UNITS } from '@/lib/utils';
-import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle } from 'lucide-react';
+import { formatCurrency, formatDate, today, UNITS, cn } from '@/lib/utils';
+import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle, RefreshCw } from 'lucide-react';
 
 const REFDATA_CACHE_KEY = 'peyala_purchases_refdata_cache_v1';
 const LIST_CACHE_KEY = 'peyala_purchases_list_cache_v1';
@@ -154,6 +154,8 @@ export default function PurchasesPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [filters, setFilters] = useState({ startDate: '', endDate: '', supplier: '' });
 
   // ── Modal state ─────────────────────────────────────────────────
@@ -187,29 +189,50 @@ export default function PurchasesPage() {
   // ── Form state ──────────────────────────────────────────────────
   const [form, setForm] = useState<any>(blankPurchaseForm());
 
-  const load = async () => {
+  const loadRefData = async () => {
+    try {
+      const [s, i, a, c] = await Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()]);
+      setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
+      writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
+    } catch (e) {
+      console.error('Failed to load purchase ref data:', e);
+    }
+  };
+
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
     const params: any = { page, limit: 20 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
     if (filters.supplier) params.supplier = filters.supplier;
-    const res = await purchasesApi.list(params);
-    setPurchases(res.data.purchases);
-    setTotal(res.data.total);
-    setLoading(false);
-    if (isDefaultView) writeCache(LIST_CACHE_KEY, { purchases: res.data.purchases, total: res.data.total });
+    try {
+      const fetchPurchases = purchasesApi.list(params);
+      const fetchRef = isManual ? loadRefData() : Promise.resolve();
+      const [res] = await Promise.all([fetchPurchases, fetchRef]);
+      setPurchases(res.data.purchases);
+      setTotal(res.data.total);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      if (isDefaultView) writeCache(LIST_CACHE_KEY, { purchases: res.data.purchases, total: res.data.total });
+    } catch (err) {
+      console.error('Failed to load purchases:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
     if (isDefaultView) {
       const cached = readCache(LIST_CACHE_KEY);
-      if (cached) {
+      if (cached?.purchases) {
         setPurchases(cached.purchases || []);
         setTotal(cached.total || 0);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
         setLoading(false);
-        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-        if (isStale) load(); // quietly refresh only if the cache is old
         return;
       }
     }
@@ -218,21 +241,14 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     const cached = readCache(REFDATA_CACHE_KEY);
-    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-    if (cached) {
+    if (cached?.suppliers && cached?.items) {
       setSuppliers(cached.suppliers || []);
       setItems(cached.items || []);
       setAccounts(cached.accounts || []);
       setCategories(cached.categories || []);
+      return;
     }
-    // Only hit the server if we had nothing cached, or the cache has gone stale.
-    if (!cached || isStale) {
-      Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()])
-        .then(([s, i, a, c]) => {
-          setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
-          writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
-        });
-    }
+    loadRefData();
   }, []);
 
   // ── Handle account change → update allowed payment modes ────────
@@ -467,9 +483,30 @@ export default function PurchasesPage() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Raw Material Purchases</h1>
             <p className="text-sm text-gray-500">{total} entries · inventory auto-updated</p>
           </div>
-          <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
-            <Plus className="w-4 h-4" /> New Purchase
-          </button>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(LIST_CACHE_KEY);
+                localStorage.removeItem(REFDATA_CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
+              <Plus className="w-4 h-4" /> New Purchase
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

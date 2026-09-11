@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { attendanceApi, staffApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatDate, getInitials } from '@/lib/utils';
-import { CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info } from 'lucide-react';
+import { CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info, RefreshCw } from 'lucide-react';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -74,6 +74,27 @@ function normalizeStatusValue(status?: string): StatusKey {
   return 'present';
 }
 
+const STAFF_CACHE_KEY = 'peyala_attendance_staff_cache_v1';
+const getAttendanceCacheKey = (y: number, m: number) => `peyala_attendance_${y}_${m}_v1`;
+
+function readCache(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, data: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const today = new Date();
@@ -88,6 +109,33 @@ export default function AttendancePage() {
   const [selected, setSelected] = useState<any>(null);
   const [form, setForm] = useState({ status: 'present' as StatusKey, note: '' });
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const todayColRef = useRef<HTMLTableCellElement>(null);
+
+  const scrollToToday = () => {
+    if (todayColRef.current) {
+      todayColRef.current.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    } else if (tableContainerRef.current) {
+      const targetDay = today.getDate();
+      const approxOffset = Math.max(0, (targetDay - 2) * 40);
+      tableContainerRef.current.scrollTo({ left: approxOffset, behavior: 'smooth' });
+    }
+  };
+
+  const scrollToSummary = () => {
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTo({ left: tableContainerRef.current.scrollWidth, behavior: 'smooth' });
+    }
+  };
+
+  const scrollToStaff = () => {
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+    }
+  };
 
   const activeStaff = useMemo(() => staff.filter((member) => member.status === 'active'), [staff]);
   const canEdit = useMemo(() => ['admin', 'manager'].includes(user?.role || ''), [user]);
@@ -125,41 +173,76 @@ export default function AttendancePage() {
     return entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [activeStaff, summaries]);
 
-  const loadStaff = async () => {
-    const res = await staffApi.list();
-    setStaff(res.data || []);
+  const loadData = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    setLoading(true);
+    try {
+      let currentStaff = staff;
+      if (!currentStaff.length || isManual) {
+        const staffRes = await staffApi.list();
+        currentStaff = staffRes.data || [];
+        setStaff(currentStaff);
+        writeCache(STAFF_CACHE_KEY, { staff: currentStaff });
+      }
+
+      const active = currentStaff.filter((member: any) => member.status === 'active');
+
+      const [attRes, sumList] = await Promise.all([
+        attendanceApi.getMonthly(month, year),
+        Promise.all(active.map(async (member: any) => {
+          const res = await attendanceApi.getSummary(member._id, month, year);
+          return { staffId: member._id, summary: res.data };
+        }))
+      ]);
+
+      const attData = attRes.data || [];
+      const sumMap = Object.fromEntries(sumList.map((item: any) => [item.staffId, item.summary]));
+
+      setAttendance(attData);
+      setSummaries(sumMap);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache(getAttendanceCacheKey(year, month), { attendance: attData, summaries: sumMap });
+    } catch (err) {
+      console.error('Failed to load attendance:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  const loadAttendance = async () => {
-    const res = await attendanceApi.getMonthly(month, year);
-    setAttendance(res.data || []);
-  };
+  useEffect(() => {
+    let currentStaff = staff;
+    if (!currentStaff.length) {
+      const cachedStaff = readCache(STAFF_CACHE_KEY);
+      if (cachedStaff?.staff) {
+        currentStaff = cachedStaff.staff;
+        setStaff(currentStaff);
+      }
+    }
 
-  const loadSummaries = async () => {
-    if (activeStaff.length === 0) {
-      setSummaries({});
+    const cacheKey = getAttendanceCacheKey(year, month);
+    const cachedAtt = readCache(cacheKey);
+    if (cachedAtt?.attendance && currentStaff.length) {
+      setAttendance(cachedAtt.attendance);
+      setSummaries(cachedAtt.summaries || {});
+      if (cachedAtt.savedAt) {
+        setLastUpdated(new Date(cachedAtt.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
+      setLoading(false);
       return;
     }
 
-    const list = await Promise.all(activeStaff.map(async (member) => {
-      const res = await attendanceApi.getSummary(member._id, month, year);
-      return { staffId: member._id, summary: res.data };
-    }));
-
-    setSummaries(Object.fromEntries(list.map((item) => [item.staffId, item.summary])));
-  };
+    loadData();
+  }, [month, year]);
 
   useEffect(() => {
-    loadStaff();
-  }, []);
-
-  useEffect(() => {
-    if (activeStaff.length) {
-      setLoading(true);
-      Promise.all([loadAttendance(), loadSummaries()])
-        .finally(() => setLoading(false));
+    if (today.getMonth() + 1 === month && today.getFullYear() === year) {
+      const timer = setTimeout(() => {
+        scrollToToday();
+      }, 350);
+      return () => clearTimeout(timer);
     }
-  }, [activeStaff, month, year]);
+  }, [month, year, attendance.length]);
 
   const openCell = (member: any, day: number) => {
     if (!canEdit) return;
@@ -194,7 +277,7 @@ export default function AttendancePage() {
     }
 
     setModalOpen(false);
-    await Promise.all([loadAttendance(), loadSummaries()]);
+    await loadData(true);
   };
 
   const bulkMarkPresentForDay = async (day: number) => {
@@ -211,7 +294,7 @@ export default function AttendancePage() {
       staffIds: activeStaff.map((member) => member._id),
     });
 
-    await Promise.all([loadAttendance(), loadSummaries()]);
+    await loadData(true);
   };
 
   return (
@@ -277,6 +360,24 @@ export default function AttendancePage() {
             >
               <ChevronRight className="w-5 h-5 stroke-[2.5]" />
             </button>
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline ml-1">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(getAttendanceCacheKey(year, month));
+                loadData(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
         </div>
 
@@ -284,12 +385,42 @@ export default function AttendancePage() {
         <div className="grid gap-6 lg:grid-cols-[1.85fr_0.75fr] items-start">
           {/* Attendance Table Card */}
           <div className="card border-2 border-gray-300 dark:border-gray-700 overflow-hidden p-0 shadow-md">
-            <div className="overflow-x-auto">
+            {/* Mobile quick scroll & navigation bar */}
+            <div className="lg:hidden flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-brand-50/80 dark:bg-gray-800/80 border-b-2 border-gray-200 dark:border-gray-700 text-xs">
+              <span className="text-gray-600 dark:text-gray-400 font-medium text-[11px] sm:text-xs">
+                👈 <strong className="text-brand-600 dark:text-brand-400">Swipe</strong> to scroll days 👉
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={scrollToStaff}
+                  className="px-2 py-1 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded text-[11px] font-bold shadow-2xs hover:bg-gray-100"
+                >
+                  Staff
+                </button>
+                <button
+                  type="button"
+                  onClick={scrollToToday}
+                  className="px-2 py-1 bg-brand-500 hover:bg-brand-600 text-white rounded text-[11px] font-bold shadow-2xs"
+                >
+                  📅 Today ({today.getDate()})
+                </button>
+                <button
+                  type="button"
+                  onClick={scrollToSummary}
+                  className="px-2 py-1 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded text-[11px] font-bold shadow-2xs hover:bg-gray-100"
+                >
+                  Summary 📊
+                </button>
+              </div>
+            </div>
+
+            <div ref={tableContainerRef} className="overflow-x-auto scroll-smooth">
               <table className="min-w-full border-separate border-spacing-0 text-sm">
                 <thead>
                   <tr className="bg-gray-100 dark:bg-gray-800">
-                    {/* Sticky Staff Column Header */}
-                    <th className="sticky left-0 z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-r-2 border-gray-300 dark:border-gray-700 px-4 py-3 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-[220px] shadow-[2px_0_5px_rgba(0,0,0,0.04)]">
+                    {/* Sticky Staff Column Header — compact on mobile */}
+                    <th className="sticky left-0 z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-r-2 border-gray-300 dark:border-gray-700 px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-28 sm:w-40 md:w-56 shadow-[2px_0_5px_rgba(0,0,0,0.06)]">
                       Staff Member
                     </th>
 
@@ -305,10 +436,11 @@ export default function AttendancePage() {
                       return (
                         <th
                           key={day}
+                          ref={isToday ? todayColRef : undefined}
                           className={cn(
-                            'text-center px-1.5 py-2.5 sticky top-0 border-b-2 border-gray-300 dark:border-gray-700 transition-colors',
+                            'text-center px-1 sm:px-1.5 py-2 sm:py-2.5 sticky top-0 border-b-2 border-gray-300 dark:border-gray-700 transition-colors min-w-[36px] sm:min-w-[42px]',
                             isToday
-                              ? 'bg-amber-100/70 dark:bg-amber-950/40 border-b-amber-500 text-amber-900 dark:text-amber-200'
+                              ? 'bg-amber-100/80 dark:bg-amber-950/50 border-b-amber-500 text-amber-900 dark:text-amber-200'
                               : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'
                           )}
                         >
@@ -339,8 +471,8 @@ export default function AttendancePage() {
                       );
                     })}
 
-                    {/* Sticky Summary Column Header */}
-                    <th className="sticky right-0 z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-l-2 border-gray-300 dark:border-gray-700 px-3 py-2.5 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-44 min-w-[150px] shadow-[-2px_0_5px_rgba(0,0,0,0.04)]">
+                    {/* Summary Column Header — only sticky on desktop (lg:) so mobile scroll is never blocked */}
+                    <th className="lg:sticky lg:right-0 z-10 lg:z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-l-2 border-gray-300 dark:border-gray-700 px-3 py-2.5 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-36 sm:w-44 min-w-[130px] sm:min-w-[150px] lg:shadow-[-2px_0_5px_rgba(0,0,0,0.06)]">
                       Summary
                     </th>
                   </tr>
@@ -351,17 +483,17 @@ export default function AttendancePage() {
                       key={member._id}
                       className="hover:bg-brand-50/20 dark:hover:bg-gray-800/40 transition-colors"
                     >
-                      {/* Sticky Staff Info */}
-                      <td className="sticky left-0 z-10 bg-white dark:bg-gray-900 border-r-2 border-gray-300 dark:border-gray-700 px-4 py-3 shadow-[2px_0_5px_rgba(0,0,0,0.04)]">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
+                      {/* Sticky Staff Info — responsive width on mobile */}
+                      <td className="sticky left-0 z-10 bg-white dark:bg-gray-900 border-r-2 border-gray-300 dark:border-gray-700 px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 shadow-[2px_0_5px_rgba(0,0,0,0.06)] w-28 sm:w-40 md:w-56 max-w-[115px] sm:max-w-none">
+                        <div className="flex items-center gap-1.5 sm:gap-3">
+                          <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-[10px] sm:text-xs shadow-xs shrink-0">
                             {getInitials(member.name)}
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-xs sm:text-sm text-gray-900 dark:text-white truncate leading-tight">
                               {member.name}
                             </div>
-                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 truncate">
+                            <div className="text-[10px] sm:text-xs font-semibold text-gray-500 dark:text-gray-400 truncate hidden sm:block">
                               {member.position}
                             </div>
                           </div>
@@ -378,7 +510,7 @@ export default function AttendancePage() {
                         const config = STATUS_CONFIG[recordStatus];
 
                         return (
-                          <td key={day} className="px-1 py-2 text-center align-middle">
+                          <td key={day} className="px-0.5 sm:px-1 py-1.5 sm:py-2 text-center align-middle min-w-[36px] sm:min-w-[42px]">
                             <button
                               type="button"
                               disabled={!canEdit || isFuture}
@@ -405,29 +537,29 @@ export default function AttendancePage() {
                         );
                       })}
 
-                      {/* Sticky Summary Cell */}
-                      <td className="sticky right-0 z-10 bg-white dark:bg-gray-900 border-l-2 border-gray-300 dark:border-gray-700 px-3 py-2 shadow-[-2px_0_5px_rgba(0,0,0,0.04)] w-44 min-w-[150px]">
-                        <div className="space-y-1 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-gray-700 dark:text-gray-300">P</span>
+                      {/* Summary Cell — only sticky on desktop (lg:) so mobile scroll is never blocked */}
+                      <td className="lg:sticky lg:right-0 z-10 bg-white dark:bg-gray-900 border-l-2 border-gray-300 dark:border-gray-700 px-2.5 sm:px-3 py-2 lg:shadow-[-2px_0_5px_rgba(0,0,0,0.06)] w-36 sm:w-44 min-w-[130px] sm:min-w-[150px]">
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400">P:</span>
                             <span className="font-bold text-gray-900 dark:text-white">
                               {summaries[member._id]?.presentMonth ?? 0}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-gray-700 dark:text-gray-300">A</span>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-rose-700 dark:text-rose-400">A:</span>
                             <span className="font-bold text-red-600 dark:text-red-400">
                               {summaries[member._id]?.absentMonth ?? 0}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-gray-700 dark:text-gray-300">H</span>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-blue-700 dark:text-blue-400">H:</span>
                             <span className="font-bold text-blue-600 dark:text-blue-400">
                               {summaries[member._id]?.halfDayMonth ?? 0}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-gray-700 dark:text-gray-300">Leaves</span>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-amber-700 dark:text-amber-400">L:</span>
                             <span className="font-bold text-amber-600 dark:text-amber-400">
                               {summaries[member._id]?.leavesRemainingMonth ?? summaries[member._id]?.leavesRemaining ?? 0}
                             </span>

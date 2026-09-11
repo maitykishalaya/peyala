@@ -1,11 +1,30 @@
 import api from './api';
 
+export interface Addon {
+  _id: string;
+  name: string;
+  price: number;
+  isVeg: boolean;
+  isActive: boolean;
+  sortOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MenuItemVariant {
+  _id?: string;
+  name: string;
+  price: number;
+  isVeg?: boolean;
+}
+
 export interface MenuCategory {
   _id: string;
   name: string;
   description?: string;
   sortOrder: number;
   isActive: boolean;
+  defaultAddons?: Addon[] | string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -19,6 +38,9 @@ export interface MenuItem {
   taxPercent: number;
   description?: string;
   isAvailable: boolean;
+  hasVariants?: boolean;
+  variants?: MenuItemVariant[];
+  addons?: Addon[] | string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -31,6 +53,8 @@ export interface OrderItem {
   taxPercent: number;
   quantity: number;
   notes?: string;
+  variant?: { name: string; price: number };
+  selectedAddons?: Array<{ addon?: string; name: string; price: number }>;
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
 }
 
@@ -42,6 +66,8 @@ export interface KotRound {
     name: string;
     quantity: number;
     notes?: string;
+    variantName?: string;
+    addons?: string[];
   }>;
   printed: boolean;
   printedAt?: string | null;
@@ -69,7 +95,13 @@ export interface Order {
   total: number;
   settledAmount?: number | null;
   waivedAmount?: number;
-  paymentMethod?: 'cash' | 'card' | 'upi' | 'other' | null;
+  paymentMethod?: 'cash' | 'card' | 'upi' | 'other' | 'part' | null;
+  paymentBreakdown?: {
+    cash?: number;
+    upi?: number;
+    card?: number;
+    other?: number;
+  };
   paidAt?: string | null;
   createdBy?: { _id: string; name: string };
   createdAt: string;
@@ -116,6 +148,20 @@ export const menuApi = {
 };
 
 // ─────────────────────────────────────────────────────────────────
+// Addons API
+// ─────────────────────────────────────────────────────────────────
+export const addonsApi = {
+  list: (params?: { includeInactive?: boolean }) =>
+    api.get<Addon[]>('/addons', { params }),
+  create: (data: Partial<Addon>) =>
+    api.post<Addon>('/addons', data),
+  update: (id: string, data: Partial<Addon>) =>
+    api.put<Addon>(`/addons/${id}`, data),
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/addons/${id}`),
+};
+
+// ─────────────────────────────────────────────────────────────────
 // Tables API
 // ─────────────────────────────────────────────────────────────────
 export const tablesApi = {
@@ -145,12 +191,41 @@ export interface PendingKotJob {
     name: string;
     quantity: number;
     notes?: string;
+    variantName?: string;
+    addons?: string[];
   }>;
+}
+
+export interface OrderInputItem {
+  menuItemId: string;
+  quantity: number;
+  notes?: string;
+  variant?: { name: string; price: number };
+  selectedAddons?: Array<{ addonId?: string; name: string; price: number }>;
 }
 
 // ─────────────────────────────────────────────────────────────────
 // Orders API
 // ─────────────────────────────────────────────────────────────────
+export interface UpdateSettledOrderPayload {
+  items?: Array<{
+    menuItem?: string;
+    name: string;
+    price: number;
+    quantity: number;
+    taxPercent?: number;
+    notes?: string;
+    variant?: { name: string; price: number };
+    selectedAddons?: Array<{ addon?: string; name: string; price: number }>;
+    status?: string;
+  }>;
+  discountType?: 'flat' | 'percentage';
+  discountValue?: number;
+  paymentMethod?: 'cash' | 'card' | 'upi' | 'other' | 'part';
+  paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number };
+  settlementAmount?: number;
+}
+
 export const ordersApi = {
   list: (params?: { status?: string; page?: number; limit?: number }) =>
     api.get<Order[]>('/orders', { params }),
@@ -158,9 +233,9 @@ export const ordersApi = {
     api.get<Order>(`/orders/${id}`),
   getActiveForTable: (tableId: string) =>
     api.get<Order | null>(`/orders/table/${tableId}/active`),
-  create: (data: { tableId: string; items: Array<{ menuItemId: string; quantity: number; notes?: string }> }) =>
+  create: (data: { tableId: string; items: OrderInputItem[] }) =>
     api.post<Order>('/orders', data),
-  addItems: (id: string, items: Array<{ menuItemId: string; quantity: number; notes?: string }>) =>
+  addItems: (id: string, items: OrderInputItem[]) =>
     api.post<Order>(`/orders/${id}/items`, { items }),
   updateItem: (id: string, itemId: string, data: { status?: string; quantity?: number; notes?: string }) =>
     api.patch<Order>(`/orders/${id}/items/${itemId}`, data),
@@ -170,8 +245,13 @@ export const ordersApi = {
     api.patch<Order>(`/orders/${id}/discount`, data),
   bill: (id: string) =>
     api.post<Order>(`/orders/${id}/bill`),
-  pay: (id: string, paymentMethod: 'cash' | 'card' | 'upi' | 'other', settlementAmount?: number) =>
-    api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount }),
+  pay: (
+    id: string,
+    paymentMethod: 'cash' | 'card' | 'upi' | 'other' | 'part',
+    settlementAmount?: number,
+    paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number }
+  ) =>
+    api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount, paymentBreakdown }),
   cancel: (id: string) =>
     api.post<Order>(`/orders/${id}/cancel`),
   getPendingKots: () =>
@@ -182,4 +262,8 @@ export const ordersApi = {
     api.post<{ success: boolean; message: string; roundId: string }>(`/orders/${orderId}/rounds/${roundId}/reprint`),
   reprintOrderKot: (orderId: string) =>
     api.post<{ success: boolean; message: string }>(`/orders/${orderId}/reprint`),
+  updateSettled: (id: string, data: UpdateSettledOrderPayload) =>
+    api.put<Order>(`/orders/${id}/settled`, data),
+  deleteSettled: (id: string) =>
+    api.delete<{ message: string; deletedOrderNumber?: number }>(`/orders/${id}/settled`),
 };

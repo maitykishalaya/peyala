@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const Table = require('../models/Table');
-const { auth, adminOnly } = require('../middleware/auth');
+const { auth, adminOnly, managerOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
 router.use(auth);
@@ -79,7 +79,7 @@ router.post('/', adminOnly, async (req, res) => {
 });
 
 // PUT /api/tables/:id
-router.put('/:id', adminOnly, async (req, res) => {
+router.put('/:id', managerOrAdmin, async (req, res) => {
   try {
     const { tableNumber, capacity, status } = req.body;
     const table = await Table.findById(req.params.id);

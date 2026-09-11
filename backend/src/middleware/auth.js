@@ -19,9 +19,16 @@ const auth = async (req, res, next) => {
 
 const adminOnly = (req, res, next) => {
   if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Admin access required. Order handling and management is restricted to administrators.' });
+    return res.status(403).json({ message: 'Admin access required.' });
   }
   next();
 };
 
-module.exports = { auth, adminOnly };
+const managerOrAdmin = (req, res, next) => {
+  if (!req.user || !['admin', 'manager'].includes(req.user.role)) {
+    return res.status(403).json({ message: 'Access restricted to managers and administrators.' });
+  }
+  next();
+};
+
+module.exports = { auth, adminOnly, managerOrAdmin };

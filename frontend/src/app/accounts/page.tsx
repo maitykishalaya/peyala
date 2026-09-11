@@ -13,9 +13,9 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import AccountLedger from '@/components/ui/AccountLedger';
 import { accountsApi, transfersApi } from '@/lib/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
-import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2 } from 'lucide-react';
+import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2, RefreshCw } from 'lucide-react';
 
 const ACCOUNTS_CACHE_KEY = 'peyala_accounts_cache_v1';
 
@@ -37,62 +37,58 @@ function writeCache(data: any) {
   }
 }
 
-const CACHE_TTL_MS = 30 * 1000; // 30s — reuse cache as-is within this window, no network call at all
-
 // ── Icon mapping for account types ───────────────────────────────
 const TYPE_ICONS = {
   cash: Wallet,
   bank: Building2,
   digital: Smartphone,
-  other: MoreHorizontal
+  other: MoreHorizontal,
 };
 
-// ── Badge colour for account type label ──────────────────────────
+// ── Badge colors for account types ───────────────────────────────
 const TYPE_COLORS = {
-  cash: 'bg-green-100 text-green-600',
-  bank: 'bg-blue-100 text-blue-600',
-  digital: 'bg-purple-100 text-purple-600',
-  other: 'bg-gray-100 text-gray-600'
+  cash: 'badge-green',
+  bank: 'badge-blue',
+  digital: 'badge-purple',
+  other: 'badge-gray',
 };
 
-// ── Smart defaults per account type ──────────────────────────────
-// When user creates/changes account type, we suggest sensible defaults.
-// User can override these in the Payment Mode Settings tab.
+// ── Suggested default payment modes per account type ─────────────
 const TYPE_DEFAULTS: Record<string, { allowed: string[]; default: string }> = {
-  cash:    { allowed: ['cash'],                                  default: 'cash' },
-  bank:    { allowed: ['bank_transfer', 'cheque', 'card', 'upi'], default: 'bank_transfer' },
-  digital: { allowed: ['upi', 'card'],                           default: 'upi' },
-  other:   { allowed: ['cash', 'upi', 'card', 'bank_transfer', 'cheque'], default: 'cash' },
+  cash:    { allowed: ['cash'], default: 'cash' },
+  bank:    { allowed: ['neft', 'rtgs', 'cheque', 'bank_transfer'], default: 'neft' },
+  digital: { allowed: ['upi', 'card', 'qr_pay'], default: 'upi' },
+  other:   { allowed: ALL_PAYMENT_MODES.map(m => m.value), default: 'other' },
 };
 
 export default function AccountsPage() {
-  // ── State ───────────────────────────────────────────────────────
-  const [accounts, setAccounts] = useState<any[]>([]);        // all accounts from API
-  const [transfers, setTransfers] = useState<any[]>([]);      // recent transfers from API
-  const [modal, setModal] = useState<'create' | 'edit' | 'transfer' | null>(null);
-  const [selected, setSelected] = useState<any>(null);        // account being edited
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [ledgerAccount, setLedgerAccount] = useState<any>(null); // account whose ledger is open
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  // Tab inside the Edit/Create modal
-  // 'basic' = name/type/balance, 'payment' = payment mode config
+  // ── Modal state ─────────────────────────────────────────────────
+  const [modal, setModal] = useState<'create' | 'edit' | 'transfer' | null>(null);
   const [modalTab, setModalTab] = useState<'basic' | 'payment'>('basic');
+  const [selected, setSelected] = useState<any>(null);
+  const [ledgerAccount, setLedgerAccount] = useState<any>(null); // account currently viewed in ledger modal
 
-  // ── Form state for create/edit ──────────────────────────────────
+  // ── Account create / edit form ──────────────────────────────────
   const [form, setForm] = useState({
     name: '',
-    type: 'cash',
+    type: 'bank',
     openingBalance: 0,
+    currentBalance: 0,
     bankName: '',
     accountNumber: '',
     color: '#6366f1',
     notes: '',
-    // Payment mode config fields (NEW)
-    allowedPaymentModes: ['cash'] as string[],  // which modes are allowed
-    defaultPaymentMode: 'cash',                  // which mode is pre-selected
+    allowedPaymentModes: ['neft', 'rtgs', 'cheque', 'bank_transfer'] as string[],
+    defaultPaymentMode: 'neft',
   });
 
-  // ── Transfer form state ─────────────────────────────────────────
+  // ── Transfer form ───────────────────────────────────────────────
   const [transferForm, setTransferForm] = useState({
     fromAccount: '',
     toAccount: '',
@@ -102,24 +98,36 @@ export default function AccountsPage() {
   });
 
   // ── Load all accounts and recent transfers ──────────────────────
-  const load = async () => {
-    const [a, t] = await Promise.all([accountsApi.list(), transfersApi.list()]);
-    setAccounts(a.data);
-    setTransfers(t.data);
-    setLoading(false);
-    writeCache({ accounts: a.data, transfers: t.data });
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    try {
+      const [a, t] = await Promise.all([accountsApi.list(), transfersApi.list()]);
+      setAccounts(a.data);
+      setTransfers(t.data);
+      writeCache({ accounts: a.data, transfers: t.data });
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  // Run load() once when component mounts — show cache instantly first if we have it
+  // Run load() on mount — show cache from browser storage, only fetch on initial visit or manual refresh
   useEffect(() => {
     const cached = readCache();
-    const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-    if (cached) {
+    if (cached?.accounts) {
       setAccounts(cached.accounts || []);
       setTransfers(cached.transfers || []);
+      if (cached.savedAt) {
+        setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
       setLoading(false);
+      // Only fetch upon manually clicking refresh; otherwise only show browser storage data
+      return;
     }
-    if (!cached || isStale) load(); // only hit the server if nothing cached, or it's gone stale
+    load();
   }, []);
 
   // ── When account type changes, auto-suggest payment modes ───────
@@ -162,6 +170,7 @@ export default function AccountsPage() {
       name: acc.name,
       type: acc.type,
       openingBalance: acc.openingBalance,
+      currentBalance: acc.currentBalance || 0,
       bankName: acc.bankName || '',
       accountNumber: acc.accountNumber || '',
       color: acc.color || '#6366f1',
@@ -182,6 +191,7 @@ export default function AccountsPage() {
       name: '',
       type: 'cash',
       openingBalance: 0,
+      currentBalance: 0,
       bankName: '',
       accountNumber: '',
       color: '#6366f1',
@@ -226,14 +236,28 @@ export default function AccountsPage() {
       <div className="space-y-6 pb-24">
 
         {/* ── Page Header ────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Accounts</h1>
-            <p className="text-sm text-gray-500">
-              Total Balance: <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(totalBalance)}</span>
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <span>Total Balance: <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(totalBalance)}</span></span>
+              {lastUpdated && <span className="text-xs text-gray-400">· Cached ({lastUpdated})</span>}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(ACCOUNTS_CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch fresh account balances from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
             <button onClick={() => setModal('transfer')} className="btn-secondary flex items-center gap-2">
               <ArrowRightLeft className="w-4 h-4" /> Transfer
             </button>

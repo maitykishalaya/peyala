@@ -23,8 +23,8 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
-import { formatCurrency, formatDate, today } from '@/lib/utils';
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info, RefreshCw } from 'lucide-react';
 
 const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
 const SALES_ACCOUNTS_CACHE_KEY = 'peyala_sales_accounts_cache_v1';
@@ -121,33 +121,59 @@ export default function SalesPage() {
     (form.fatafat?.netSettlement || 0) +
     (form.otherSales || 0);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
   // ── Load sales list ─────────────────────────────────────────────
-  const load = async () => {
+  const load = async (isManual: boolean = false) => {
+    if (isManual) setRefreshing(true);
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
     const params: any = { page, limit: 30 };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
-    const r = await salesApi.list(params);
-    setSales(r.data.sales);
-    setTotal(r.data.total);
-    setLoading(false);
-    if (isDefaultView) writeCache(SALES_LIST_CACHE_KEY, { sales: r.data.sales, total: r.data.total });
+    try {
+      const r = await salesApi.list(params);
+      setSales(r.data.sales);
+      setTotal(r.data.total);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      if (isDefaultView) writeCache(SALES_LIST_CACHE_KEY, { sales: r.data.sales, total: r.data.total });
+    } catch (err) {
+      console.error('Failed to load sales:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
     if (isDefaultView) {
       const cached = readCache(SALES_LIST_CACHE_KEY);
-      if (cached) {
-        setSales(cached.sales || []);
+      if (cached && Array.isArray(cached.sales)) {
+        setSales(cached.sales);
         setTotal(cached.total || 0);
         setLoading(false);
-        const isStale = !cached.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
-        if (isStale) load(); // quietly refresh only if the cache is old
+        // Valid cache exists — serve from browser storage with 0 network calls to save free tier hosting limits!
+        // Only makes a network call when:
+        // 1. First visit (no cache)
+        // 2. An order payment is settled (which deletes SALES_LIST_CACHE_KEY)
+        // 3. User clicks manual "Refresh" button
+        // 4. Filters or page numbers change
         return;
       }
     }
     load();
+  }, [page, filters]);
+
+  // When a POS payment is collected in this session, immediately fetch fresh data
+  useEffect(() => {
+    const handleSalesUpdate = () => {
+      load();
+    };
+    window.addEventListener('peyala_sales_updated', handleSalesUpdate);
+    return () => {
+      window.removeEventListener('peyala_sales_updated', handleSalesUpdate);
+    };
   }, [page, filters]);
 
   useEffect(() => {
@@ -363,14 +389,32 @@ export default function SalesPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Sales</h1>
-            <p className="text-sm text-gray-500">{total} entries</p>
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <span>{total} entries</span>
+              {lastUpdated && <span className="text-xs text-gray-400">· Last fetched {lastUpdated}</span>}
+            </p>
           </div>
-          <button
-            onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}
-            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
-          >
-            <Plus className="w-4 h-4" /> Add Sales Entry
-          </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(SALES_LIST_CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center justify-center gap-1.5 flex-1 sm:flex-initial"
+              title="Fetch latest sales numbers from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}
+              className="btn-primary flex items-center justify-center gap-2 flex-1 sm:flex-initial"
+            >
+              <Plus className="w-4 h-4" /> Add Sales Entry
+            </button>
+          </div>
         </div>
 
         {/* ── Filters ──────────────────────────────────────────── */}

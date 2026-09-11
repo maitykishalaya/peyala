@@ -43,6 +43,8 @@ export interface KOTItem {
   name: string;
   quantity: number;
   notes?: string;
+  variantName?: string;
+  addons?: string[];
 }
 
 export interface KOTPrintData {
@@ -61,6 +63,8 @@ export interface BillItem {
   quantity: number;
   price: number;
   taxPercent?: number;
+  variantName?: string;
+  addons?: Array<{ name: string; price: number }>;
 }
 
 export interface BillPrintData {
@@ -82,6 +86,7 @@ export interface BillPrintData {
   settledAmount?: number;
   waivedAmount?: number;
   paymentMethod?: string;
+  paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number };
   isPaid?: boolean;
 }
 
@@ -151,8 +156,16 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
   const rows = data.items
     .map((item, idx) => {
+      const variantHtml = item.variantName?.trim()
+        ? ` <span style="font-size: 11.5px; font-weight: 700; color: #333;">(${escapeHtml(item.variantName.trim())})</span>`
+        : '';
+      const addonsHtml = item.addons && item.addons.length > 0
+        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: 700; color: #222; margin-top: 1px;">
+             + ${item.addons.map(escapeHtml).join(', ')}
+           </div>`
+        : '';
       const notesHtml = item.notes?.trim()
-        ? `<div style="padding-left: 20px; font-size: 11px; font-weight: bold; color: #111; margin-top: 2px;">
+        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: bold; color: #111; margin-top: 2px;">
              &gt;&gt; NOTE: ${escapeHtml(item.notes.trim())}
            </div>`
         : '';
@@ -161,7 +174,8 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <tr>
           <td style="width: 28px; vertical-align: top; font-weight: bold; font-size: 13px;">${idx + 1}.</td>
           <td style="vertical-align: top; font-size: 13px; font-weight: 600;">
-            ${escapeHtml(item.name)}
+            ${escapeHtml(item.name)}${variantHtml}
+            ${addonsHtml}
             ${notesHtml}
           </td>
           <td style="width: 45px; text-align: right; vertical-align: top; font-size: 15px; font-weight: 900;">
@@ -331,10 +345,21 @@ export function generateBillHtml(data: BillPrintData): string {
   const rows = data.items
     .map((item, idx) => {
       const lineTotal = item.price * item.quantity;
+      const variantHtml = item.variantName?.trim()
+        ? `<div style="font-size: 10px; color: #444; font-weight: 600;">(${escapeHtml(item.variantName.trim())})</div>`
+        : '';
+      const addonsHtml = item.addons && item.addons.length > 0
+        ? `<div style="font-size: 9.5px; color: #555;">+ ${item.addons.map((a) => `${escapeHtml(a.name)} (₹${a.price})`).join(', ')}</div>`
+        : '';
+
       return `
         <tr>
           <td style="width: 22px; vertical-align: top;">${idx + 1}.</td>
-          <td style="vertical-align: top; padding-right: 4px;">${escapeHtml(item.name)}</td>
+          <td style="vertical-align: top; padding-right: 4px;">
+            ${escapeHtml(item.name)}
+            ${variantHtml}
+            ${addonsHtml}
+          </td>
           <td style="width: 26px; text-align: right; vertical-align: top;">${item.quantity}</td>
           <td style="width: 48px; text-align: right; vertical-align: top;">${item.price}</td>
           <td style="width: 48px; text-align: right; vertical-align: top;">${lineTotal}</td>
@@ -525,10 +550,22 @@ export function generateBillHtml(data: BillPrintData): string {
         ` : ''}
 
         ${data.isPaid && data.paymentMethod ? `
-          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-bottom: 4px;">
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-bottom: 2px;">
             <span>Payment Mode:</span>
-            <span style="font-weight: bold; text-transform: uppercase;">${data.paymentMethod} (PAID)</span>
+            <span style="font-weight: bold; text-transform: uppercase;">
+              ${data.paymentMethod === 'part' ? 'PART PAYMENT' : data.paymentMethod} (PAID)
+            </span>
           </div>
+          ${data.paymentMethod === 'part' && data.paymentBreakdown ? `
+            <div style="font-size: 9px; color: #444; text-align: right; margin-bottom: 4px; line-height: 1.3;">
+              ${[
+                data.paymentBreakdown.cash ? `Cash: &#8377;${Number(data.paymentBreakdown.cash).toFixed(2)}` : null,
+                data.paymentBreakdown.upi ? `UPI: &#8377;${Number(data.paymentBreakdown.upi).toFixed(2)}` : null,
+                data.paymentBreakdown.card ? `Card: &#8377;${Number(data.paymentBreakdown.card).toFixed(2)}` : null,
+                data.paymentBreakdown.other ? `Other: &#8377;${Number(data.paymentBreakdown.other).toFixed(2)}` : null,
+              ].filter(Boolean).join(' | ')}
+            </div>
+          ` : ''}
         ` : ''}
 
         <!-- Secondary Legal info below total -->

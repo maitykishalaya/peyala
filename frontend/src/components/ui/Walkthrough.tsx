@@ -45,7 +45,7 @@ const STEPS = [
   {
     icon: <Wallet className="w-10 h-10 text-purple-500" />,
     title: 'Accounts & Payments',
-    description: 'Track Cash Counter, Current Account, Petty Cash, and UPI. Every purchase and payment automatically deducts from the chosen account. Receipts add to it.',
+    description: 'Track Cash Counter, Current Account, Petty Cash, and UPI. Every purchase and payment automatically deducts from the chosen account.',
     highlight: 'Balances always stay accurate.',
     tip: 'Use Transfers to move money between accounts (e.g. deposit cash into bank).',
   },

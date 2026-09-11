@@ -22,18 +22,40 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { balanceSheetApi, accountsApi } from '@/lib/api';
-import { formatCurrency, formatDate, today } from '@/lib/utils';
+import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
 import {
   Scale, Plus, Pencil, Trash2, RefreshCw,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronUp, History, IndianRupee
 } from 'lucide-react';
 
+const CACHE_KEY = 'peyala_balancesheet_cache_v1';
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: { bs: any; allAccounts: any[] }) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+
 export default function BalanceSheetPage() {
   // ── Data state ──────────────────────────────────────────────────
   const [bs, setBs] = useState<any>(null);                // full balance sheet from API
   const [allAccounts, setAllAccounts] = useState<any[]>([]); // all accounts for picker
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // ── UI state ────────────────────────────────────────────────────
@@ -52,8 +74,8 @@ export default function BalanceSheetPage() {
   const [gstPayForm, setGstPayForm] = useState({ amount: 0, paidFrom: '', date: today(), notes: '' });
 
   // ── Load balance sheet and all accounts ─────────────────────────
-  const load = async () => {
-    setLoading(true);
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
       const [bsRes, accRes] = await Promise.all([
         balanceSheetApi.get(),
@@ -61,13 +83,29 @@ export default function BalanceSheetPage() {
       ]);
       setBs(bsRes.data);
       setAllAccounts(accRes.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache({ bs: bsRes.data, allAccounts: accRes.data });
     } catch (err) {
       console.error('Failed to load balance sheet:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-    setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const cached = readCache();
+    if (cached?.bs) {
+      setBs(cached.bs);
+      setAllAccounts(cached.allAccounts || []);
+      if (cached.savedAt) {
+        setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
+      setLoading(false);
+      return;
+    }
+    load();
+  }, []);
 
   // ── Save balance sheet config changes ───────────────────────────
   const save = async (updates: any) => {
@@ -188,9 +226,26 @@ export default function BalanceSheetPage() {
               {bs?.lastUpdatedBy && <span className="text-gray-400"> by {bs.lastUpdatedBy}</span>}
             </p>
           </div>
-          <button onClick={load} className="btn-secondary flex items-center justify-center gap-2 w-full sm:w-auto">
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem(CACHE_KEY);
+                load(true);
+              }}
+              disabled={refreshing}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {/* ── Summary Bar ──────────────────────────────────────── */}

@@ -7,6 +7,15 @@ const orderItemSchema = new mongoose.Schema({
   taxPercent: { type: Number, default: 5, min: 0 },
   quantity: { type: Number, required: true, min: 1, default: 1 },
   notes: { type: String, trim: true },
+  variant: {
+    name: { type: String, trim: true },
+    price: { type: Number, min: 0 },
+  },
+  selectedAddons: [{
+    addon: { type: mongoose.Schema.Types.ObjectId, ref: 'Addon' },
+    name: { type: String, required: true, trim: true },
+    price: { type: Number, required: true, min: 0 },
+  }],
   status: {
     type: String,
     enum: ['pending', 'preparing', 'served', 'cancelled'],
@@ -21,6 +30,8 @@ const kotRoundSchema = new mongoose.Schema({
     name: { type: String, required: true },
     quantity: { type: Number, required: true, default: 1 },
     notes: { type: String, default: '' },
+    variantName: { type: String, default: '' },
+    addons: [{ type: String }],
   }],
   printed: { type: Boolean, default: false },
   printedAt: { type: Date, default: null },
@@ -52,8 +63,14 @@ const orderSchema = new mongoose.Schema({
   waivedAmount: { type: Number, default: 0, min: 0 },
   paymentMethod: {
     type: String,
-    enum: ['cash', 'card', 'upi', 'other', null],
+    enum: ['cash', 'card', 'upi', 'other', 'part', null],
     default: null,
+  },
+  paymentBreakdown: {
+    cash: { type: Number, default: 0 },
+    upi: { type: Number, default: 0 },
+    card: { type: Number, default: 0 },
+    other: { type: Number, default: 0 },
   },
   paidAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

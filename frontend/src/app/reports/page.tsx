@@ -2,16 +2,41 @@
 import React, { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import { reportsApi } from '@/lib/api';
+import { ordersApi, menuApi, MenuItem } from '@/lib/pos-api';
+import { useAuth } from '@/lib/auth';
 import { formatCurrency, monthStart, today, cn } from '@/lib/utils';
 import {
   BarChart3, TrendingUp, TrendingDown, FileText, Calendar,
   Download, Search, Filter, ChevronDown, ChevronUp, Clock,
   Receipt, CheckCircle, AlertTriangle, Wallet, Smartphone,
-  CreditCard, Building2, UtensilsCrossed, RefreshCw
+  CreditCard, Building2, UtensilsCrossed, RefreshCw,
+  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
 } from 'recharts';
+
+const SALES_CACHE_KEY = 'peyala_reports_sales_cache_v1';
+const DAILY_CACHE_KEY = 'peyala_reports_daily_cache_v1';
+const PNL_CACHE_KEY = 'peyala_reports_pnl_cache_v1';
+
+function readCache(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, data: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
 
 export default function ReportsPage() {
   const [pnl, setPnl] = useState<any>(null);
@@ -30,24 +55,311 @@ export default function ReportsPage() {
   const [salesData, setSalesData] = useState<any>(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const loadPnl = async () => {
-    setLoading(true);
-    const r = await reportsApi.pnl(range.start, range.end);
-    setPnl(r.data);
-    const ir = await reportsApi.inventoryPurchases(range.start, range.end);
-    setInventoryReport(ir.data);
-    setLoading(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
+  // Settled Bill Edit & Delete Admin States
+  const [editOrder, setEditOrder] = useState<any | null>(null);
+  const [deleteOrder, setDeleteOrder] = useState<any | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuLoading, setMenuLoading] = useState(false);
+
+  // Edit Modal internal form states
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editDiscountType, setEditDiscountType] = useState<'flat' | 'percentage'>('flat');
+  const [editDiscountValue, setEditDiscountValue] = useState<number | ''>(0);
+  const [editPaymentMethod, setEditPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'other' | 'part'>('cash');
+  const [editSettlementAmount, setEditSettlementAmount] = useState<number | ''>('');
+  const [editPartCash, setEditPartCash] = useState<string>('');
+  const [editPartUpi, setEditPartUpi] = useState<string>('');
+  const [editPartCard, setEditPartCard] = useState<string>('');
+  const [editPartOther, setEditPartOther] = useState<string>('');
+
+  // Add item selector inside Edit Modal
+  const [selectedMenuItemId, setSelectedMenuItemId] = useState<string>('');
+  const [selectedVariantName, setSelectedVariantName] = useState<string>('');
+  const [addItemQty, setAddItemQty] = useState<number>(1);
+
+  const invalidateFinancialCaches = () => {
+    try {
+      const keys = [
+        SALES_CACHE_KEY,
+        DAILY_CACHE_KEY,
+        PNL_CACHE_KEY,
+        'peyala_sales_list_cache_v1',
+        'peyala_accounts_cache_v1',
+        'peyala_balancesheet_cache_v1',
+        'peyala_dashboard_cache_v1',
+      ];
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {
+      console.error('Failed to invalidate financial caches:', e);
+    }
   };
 
-  const loadDaily = async () => {
-    setLoading(true);
-    const r = await reportsApi.daily(dailyDate);
-    setDaily(r.data);
-    setLoading(false);
+  const openEditModal = async (o: any) => {
+    setEditOrder(o);
+    const mappedItems = (o.items || []).map((it: any) => ({
+      _id: it._id,
+      menuItem: it.menuItem?._id || it.menuItem || it.menuItemId,
+      name: it.name,
+      price: it.price,
+      quantity: it.quantity,
+      taxPercent: it.taxPercent !== undefined ? it.taxPercent : 5,
+      notes: it.notes || '',
+      variant: it.variant ? { name: it.variant.name, price: it.variant.price } : undefined,
+      selectedAddons: it.selectedAddons || [],
+      status: it.status || 'served',
+    }));
+    setEditItems(mappedItems);
+    setEditDiscountType(o.discountType === 'percentage' ? 'percentage' : 'flat');
+    setEditPaymentMethod((o.paymentMethod || 'cash').toLowerCase() as any);
+    const pb = o.paymentBreakdown || {};
+    setEditPartCash(pb.cash ? String(pb.cash) : '');
+    setEditPartUpi(pb.upi ? String(pb.upi) : '');
+    setEditPartCard(pb.card ? String(pb.card) : '');
+    setEditPartOther(pb.other ? String(pb.other) : '');
+    const settled = o.settledAmount !== null && o.settledAmount !== undefined ? o.settledAmount : o.total;
+    setEditSettlementAmount(settled);
+
+    setSelectedMenuItemId('');
+    setSelectedVariantName('');
+    setAddItemQty(1);
+
+    if (menuItems.length === 0) {
+      try {
+        setMenuLoading(true);
+        const res = await menuApi.listItems();
+        setMenuItems(res.data);
+      } catch (err) {
+        console.error('Failed to load menu items:', err);
+      } finally {
+        setMenuLoading(false);
+      }
+    }
   };
 
-  const loadSales = async () => {
+  const handleAddItemToEdit = () => {
+    if (!selectedMenuItemId) return;
+    const item = menuItems.find((m) => m._id === selectedMenuItemId);
+    if (!item) return;
+
+    let itemPrice = item.price;
+    let variantObj: { name: string; price: number } | undefined = undefined;
+
+    if (item.hasVariants && item.variants && item.variants.length > 0) {
+      const selectedVar = item.variants.find((v) => v.name === selectedVariantName) || item.variants[0];
+      if (selectedVar) {
+        itemPrice = selectedVar.price;
+        variantObj = { name: selectedVar.name, price: selectedVar.price };
+      }
+    }
+
+    const newItem = {
+      menuItem: item._id,
+      name: variantObj ? `${item.name} (${variantObj.name})` : item.name,
+      price: itemPrice,
+      quantity: Math.max(1, addItemQty),
+      taxPercent: item.taxPercent !== undefined ? item.taxPercent : 5,
+      notes: '',
+      variant: variantObj,
+      selectedAddons: [],
+      status: 'served',
+    };
+
+    setEditItems((prev) => [...prev, newItem]);
+    setSelectedMenuItemId('');
+    setSelectedVariantName('');
+    setAddItemQty(1);
+  };
+
+  const handleRemoveItemFromEdit = (index: number) => {
+    setEditItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUpdateItemQty = (index: number, newQty: number) => {
+    if (newQty <= 0) {
+      handleRemoveItemFromEdit(index);
+      return;
+    }
+    setEditItems((prev) =>
+      prev.map((it, idx) => (idx === index ? { ...it, quantity: newQty } : it))
+    );
+  };
+
+  // Derived calculations for Edit Modal
+  const activeEditItems = editItems.filter((it) => it.status !== 'cancelled');
+  const editSubtotal = activeEditItems.reduce(
+    (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 0),
+    0
+  );
+  const editTaxAmount = activeEditItems.reduce((sum, it) => {
+    const lineTotal = (Number(it.price) || 0) * (Number(it.quantity) || 0);
+    const taxPct = it.taxPercent !== undefined ? Number(it.taxPercent) : 5;
+    return sum + (lineTotal * taxPct) / 100;
+  }, 0);
+
+  const numDiscountValue = Math.max(0, Number(editDiscountValue) || 0);
+  const editDiscountAmount = editDiscountType === 'percentage'
+    ? Math.round(((editSubtotal * numDiscountValue) / 100) * 100) / 100
+    : Math.min(editSubtotal, numDiscountValue);
+
+  const editGrandTotal = Math.max(0, Math.round((editSubtotal - editDiscountAmount + editTaxAmount) * 100) / 100);
+
+  const numEditPartCash = Math.max(0, parseFloat(editPartCash) || 0);
+  const numEditPartUpi = Math.max(0, parseFloat(editPartUpi) || 0);
+  const numEditPartCard = Math.max(0, parseFloat(editPartCard) || 0);
+  const numEditPartOther = Math.max(0, parseFloat(editPartOther) || 0);
+  const totalEditPartAllocated = Math.round((numEditPartCash + numEditPartUpi + numEditPartCard + numEditPartOther) * 100) / 100;
+
+  const numEditSettled = editPaymentMethod === 'part'
+    ? totalEditPartAllocated
+    : (editSettlementAmount === '' ? editGrandTotal : Math.max(0, Number(editSettlementAmount) || 0));
+  const editWaived = Math.max(0, Math.round((editGrandTotal - numEditSettled) * 100) / 100);
+  const editPartDifference = Math.round((editGrandTotal - totalEditPartAllocated) * 100) / 100;
+
+  // Snapshot comparisons against original order
+  const origSettled = editOrder
+    ? (editOrder.settledAmount !== null && editOrder.settledAmount !== undefined
+      ? editOrder.settledAmount
+      : editOrder.total)
+    : 0;
+  const origMethod = (editOrder?.paymentMethod || 'other').toLowerCase();
+  const origTax = editOrder?.taxAmount > 0
+    ? editOrder.taxAmount
+    : Math.round(origSettled * 0.0477 * 100) / 100;
+
+  const diffSettled = Math.round((numEditSettled - origSettled) * 100) / 100;
+  const diffTax = Math.round((editTaxAmount - origTax) * 100) / 100;
+
+  // Split account reconciliation for preview
+  const origBreakdown = editOrder?.paymentBreakdown || {};
+  const origCash = origMethod === 'part'
+    ? (origBreakdown.cash || 0)
+    : (origMethod === 'cash' ? origSettled : 0);
+  const origDigital = origMethod === 'part'
+    ? ((origBreakdown.upi || 0) + (origBreakdown.card || 0) + (origBreakdown.other || 0))
+    : (origMethod !== 'cash' ? origSettled : 0);
+
+  const newCash = editPaymentMethod === 'part'
+    ? numEditPartCash
+    : (editPaymentMethod === 'cash' ? numEditSettled : 0);
+  const newDigital = editPaymentMethod === 'part'
+    ? (numEditPartUpi + numEditPartCard + numEditPartOther)
+    : (editPaymentMethod !== 'cash' ? numEditSettled : 0);
+
+  const diffCash = Math.round((newCash - origCash) * 100) / 100;
+  const diffDigital = Math.round((newDigital - origDigital) * 100) / 100;
+
+  const handleSaveEditSettled = async () => {
+    if (!editOrder) return;
+    if (activeEditItems.length === 0) {
+      alert('The bill must contain at least one active item.');
+      return;
+    }
+    if (editPaymentMethod === 'part' && totalEditPartAllocated <= 0) {
+      alert('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await ordersApi.updateSettled(editOrder._id, {
+        items: editItems.map((it) => ({
+          menuItem: it.menuItem,
+          name: it.name,
+          price: it.price,
+          quantity: it.quantity,
+          taxPercent: it.taxPercent,
+          notes: it.notes,
+          variant: it.variant,
+          selectedAddons: it.selectedAddons,
+          status: it.status,
+        })),
+        discountType: editDiscountType,
+        discountValue: numDiscountValue,
+        paymentMethod: editPaymentMethod,
+        settlementAmount: numEditSettled,
+        paymentBreakdown: editPaymentMethod === 'part' ? {
+          cash: numEditPartCash,
+          upi: numEditPartUpi,
+          card: numEditPartCard,
+          other: numEditPartOther,
+        } : undefined,
+      });
+
+      invalidateFinancialCaches();
+      setEditOrder(null);
+      await loadSales(true);
+    } catch (err: any) {
+      console.error('Failed to update settled order:', err);
+      alert(err?.response?.data?.message || err.message || 'Failed to update settled order');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteSettled = async () => {
+    if (!deleteOrder) return;
+    setActionLoading(true);
+    try {
+      await ordersApi.deleteSettled(deleteOrder._id);
+      invalidateFinancialCaches();
+      setDeleteOrder(null);
+      if (expandedOrderId === deleteOrder._id) {
+        setExpandedOrderId(null);
+      }
+      await loadSales(true);
+    } catch (err: any) {
+      console.error('Failed to delete settled order:', err);
+      alert(err?.response?.data?.message || err.message || 'Failed to delete settled order');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const loadPnl = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    setLoading(true);
+    try {
+      const [r, ir] = await Promise.all([
+        reportsApi.pnl(range.start, range.end),
+        reportsApi.inventoryPurchases(range.start, range.end)
+      ]);
+      setPnl(r.data);
+      setInventoryReport(ir.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache(PNL_CACHE_KEY, { pnl: r.data, inventoryReport: ir.data });
+    } catch (err) {
+      console.error('Failed to load PnL report:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const loadDaily = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    setLoading(true);
+    try {
+      const r = await reportsApi.daily(dailyDate);
+      setDaily(r.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache(DAILY_CACHE_KEY, { daily: r.data });
+    } catch (err) {
+      console.error('Failed to load daily report:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const loadSales = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     setSalesLoading(true);
     try {
       const res = await reportsApi.sales({
@@ -59,18 +371,63 @@ export default function ReportsPage() {
         limit: 300,
       });
       setSalesData(res.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      writeCache(SALES_CACHE_KEY, { salesData: res.data });
     } catch (err) {
       console.error('Failed to load detailed sales report:', err);
     } finally {
       setSalesLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    if (tab === 'pnl') loadPnl();
-    else if (tab === 'daily') loadDaily();
-    else if (tab === 'sales') loadSales();
+    if (tab === 'sales') {
+      const cached = readCache(SALES_CACHE_KEY);
+      if (cached?.salesData) {
+        setSalesData(cached.salesData);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+        return;
+      }
+      loadSales();
+    } else if (tab === 'daily') {
+      const cached = readCache(DAILY_CACHE_KEY);
+      if (cached?.daily) {
+        setDaily(cached.daily);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+        return;
+      }
+      loadDaily();
+    } else if (tab === 'pnl') {
+      const cached = readCache(PNL_CACHE_KEY);
+      if (cached?.pnl) {
+        setPnl(cached.pnl);
+        setInventoryReport(cached.inventoryReport || null);
+        if (cached.savedAt) {
+          setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+        return;
+      }
+      loadPnl();
+    }
   }, [tab]);
+
+  const handleRefresh = () => {
+    if (tab === 'sales') {
+      localStorage.removeItem(SALES_CACHE_KEY);
+      loadSales(true);
+    } else if (tab === 'daily') {
+      localStorage.removeItem(DAILY_CACHE_KEY);
+      loadDaily(true);
+    } else if (tab === 'pnl') {
+      localStorage.removeItem(PNL_CACHE_KEY);
+      loadPnl(true);
+    }
+  };
 
   const exportSalesCsv = () => {
     if (!salesData || !salesData.orders || salesData.orders.length === 0) {
@@ -156,8 +513,27 @@ export default function ReportsPage() {
     <AppLayout>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Reports & Sales</h1>
-          <div className="flex flex-wrap gap-2">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Reports & Sales</h1>
+            <p className="text-sm text-gray-500">Analytics, sales history and performance reports</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Cached ({lastUpdated})
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing || loading || salesLoading}
+              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+              title="Fetch latest data from server"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <div className="h-5 w-[1px] bg-gray-200 dark:bg-gray-700 hidden sm:block mx-1" />
             <button onClick={() => setTab('sales')} className={tab === 'sales' ? 'btn-primary' : 'btn-secondary'}>Detailed Sales Report</button>
             <button onClick={() => setTab('daily')} className={tab === 'daily' ? 'btn-primary' : 'btn-secondary'}>Daily Report</button>
             <button onClick={() => setTab('pnl')} className={tab === 'pnl' ? 'btn-primary' : 'btn-secondary'}>P&L Statement</button>
@@ -180,7 +556,7 @@ export default function ReportsPage() {
                   <button key={l} onClick={() => setRange({ start: s, end: e })} className="btn-secondary text-xs px-2 py-1">{l}</button>
                 ))}
               </div>
-              <button onClick={loadPnl} className="btn-primary">Generate Report</button>
+              <button onClick={() => loadPnl(true)} className="btn-primary">Generate Report</button>
             </div>
 
             {loading ? <div className="text-center py-16 text-gray-400">Generating...</div> : pnl && (
@@ -321,7 +697,7 @@ export default function ReportsPage() {
           <>
             <div className="card p-4 flex gap-3 items-end">
               <div><label className="label">Date</label><input type="date" className="input" value={dailyDate} onChange={e => setDailyDate(e.target.value)} /></div>
-              <button onClick={loadDaily} className="btn-primary">Load Report</button>
+              <button onClick={() => loadDaily(true)} className="btn-primary">Load Report</button>
             </div>
 
             {loading ? <div className="text-center py-16 text-gray-400">Loading...</div> : daily && (
@@ -473,6 +849,7 @@ export default function ReportsPage() {
                     <option value="upi">UPI</option>
                     <option value="card">Card</option>
                     <option value="other">Other / Bank</option>
+                    <option value="part">Part Payment</option>
                   </select>
                 </div>
 
@@ -503,7 +880,7 @@ export default function ReportsPage() {
                 </div>
 
                 <button
-                  onClick={loadSales}
+                  onClick={() => loadSales(true)}
                   disabled={salesLoading}
                   className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 whitespace-nowrap w-full sm:w-auto"
                 >
@@ -629,7 +1006,7 @@ export default function ReportsPage() {
                             <th className="py-3 px-3 text-right">Settled Amount</th>
                             <th className="py-3 px-3 text-center">Payment Mode</th>
                             <th className="py-3 px-3 text-center">Status</th>
-                            <th className="py-3 px-3 text-center">Details</th>
+                            <th className="py-3 px-3 text-center">{isAdmin ? 'Actions / Details' : 'Details'}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -734,12 +1111,27 @@ export default function ReportsPage() {
                                       } else if (m === 'card') {
                                         color = 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200 dark:border-blue-800';
                                         Icon = CreditCard;
+                                      } else if (m === 'part') {
+                                        color = 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-300 dark:border-amber-800';
+                                        Icon = Layers;
                                       }
                                       return (
-                                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold uppercase', color)}>
-                                          <Icon className="w-3 h-3" />
-                                          {m}
-                                        </span>
+                                        <div className="inline-flex flex-col items-center">
+                                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold uppercase', color)}>
+                                            <Icon className="w-3 h-3" />
+                                            {m}
+                                          </span>
+                                          {m === 'part' && o.paymentBreakdown && (
+                                            <span className="text-[10px] text-gray-500 font-medium mt-0.5 whitespace-nowrap">
+                                              {[
+                                                o.paymentBreakdown.cash > 0 ? `C:₹${o.paymentBreakdown.cash}` : null,
+                                                o.paymentBreakdown.upi > 0 ? `U:₹${o.paymentBreakdown.upi}` : null,
+                                                o.paymentBreakdown.card > 0 ? `Cr:₹${o.paymentBreakdown.card}` : null,
+                                                o.paymentBreakdown.other > 0 ? `O:₹${o.paymentBreakdown.other}` : null,
+                                              ].filter(Boolean).join(' ')}
+                                            </span>
+                                          )}
+                                        </div>
                                       );
                                     })()}
                                   </td>
@@ -774,14 +1166,38 @@ export default function ReportsPage() {
                                     })()}
                                   </td>
 
-                                  {/* Expand Chevron */}
-                                  <td className="py-3 px-3 text-center">
-                                    <button
-                                      type="button"
-                                      className="p-1 text-gray-400 hover:text-gray-600 rounded"
-                                    >
-                                      {isExpanded ? <ChevronUp className="w-4 h-4 text-brand-600" /> : <ChevronDown className="w-4 h-4" />}
-                                    </button>
+                                  {/* Actions & Expand Chevron */}
+                                  <td className="py-3 px-3 text-center whitespace-nowrap">
+                                    <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                      {isAdmin && o.status === 'paid' && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => openEditModal(o)}
+                                            title="Edit Settled Bill (Admin)"
+                                            className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-md transition-colors"
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setDeleteOrder(o)}
+                                            title="Delete Settled Bill & Reverse Financials (Admin)"
+                                            className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/50 rounded-md transition-colors"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedOrderId(isExpanded ? null : o._id)}
+                                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded"
+                                        title={isExpanded ? 'Collapse' : 'Expand'}
+                                      >
+                                        {isExpanded ? <ChevronUp className="w-4 h-4 text-brand-600" /> : <ChevronDown className="w-4 h-4" />}
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
 
@@ -803,14 +1219,35 @@ export default function ReportsPage() {
                                               Staff: <strong>{o.createdBy?.name || 'Staff'}</strong>
                                             </span>
                                           </div>
-                                          <div className="text-xs text-gray-500 flex items-center gap-4">
-                                            <span>
-                                              Created: <strong>{new Date(o.createdAt).toLocaleString('en-IN')}</strong>
-                                            </span>
-                                            {o.updatedAt && o.updatedAt !== o.createdAt && (
+                                          <div className="flex items-center gap-3">
+                                            <div className="text-xs text-gray-500 flex items-center gap-4">
                                               <span>
-                                                Last Change: <strong>{new Date(o.updatedAt).toLocaleTimeString('en-IN')}</strong>
+                                                Created: <strong>{new Date(o.createdAt).toLocaleString('en-IN')}</strong>
                                               </span>
+                                              {o.updatedAt && o.updatedAt !== o.createdAt && (
+                                                <span>
+                                                  Last Change: <strong>{new Date(o.updatedAt).toLocaleTimeString('en-IN')}</strong>
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {isAdmin && o.status === 'paid' && (
+                                              <div className="flex items-center gap-2 pl-3 border-l border-gray-200 dark:border-gray-700">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openEditModal(o)}
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 rounded-lg transition-colors shadow-sm"
+                                                >
+                                                  <Pencil className="w-3.5 h-3.5" /> Edit Bill
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setDeleteOrder(o)}
+                                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-800 rounded-lg transition-colors shadow-sm"
+                                                >
+                                                  <Trash2 className="w-3.5 h-3.5" /> Delete & Reverse
+                                                </button>
+                                              </div>
                                             )}
                                           </div>
                                         </div>
@@ -904,6 +1341,19 @@ export default function ReportsPage() {
                                               <span>Payment Method:</span>
                                               <span className="uppercase text-brand-600">{o.paymentMethod || 'OTHER'}</span>
                                             </div>
+                                            {o.paymentMethod === 'part' && o.paymentBreakdown && (
+                                              <div className="p-2 bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 rounded-lg text-[11px] space-y-1">
+                                                <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                                                  <Layers className="w-3 h-3" /> Split Breakdown:
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-gray-700 dark:text-gray-300">
+                                                  {o.paymentBreakdown.cash > 0 && <div>Cash: <span className="font-bold">{formatCurrency(o.paymentBreakdown.cash)}</span></div>}
+                                                  {o.paymentBreakdown.upi > 0 && <div>UPI: <span className="font-bold">{formatCurrency(o.paymentBreakdown.upi)}</span></div>}
+                                                  {o.paymentBreakdown.card > 0 && <div>Card: <span className="font-bold">{formatCurrency(o.paymentBreakdown.card)}</span></div>}
+                                                  {o.paymentBreakdown.other > 0 && <div>Other: <span className="font-bold">{formatCurrency(o.paymentBreakdown.other)}</span></div>}
+                                                </div>
+                                              </div>
+                                            )}
                                             <div className="flex justify-between text-green-600 font-bold text-sm">
                                               <span>Settled Amount Received:</span>
                                               <span>{formatCurrency(settled)}</span>
@@ -935,6 +1385,680 @@ export default function ReportsPage() {
               </div>
             )}
           </>
+        )}
+
+        {/* ───────────────────────────────────────────────────────────── */}
+        {/* Edit Settled Bill Modal (Admin Only) */}
+        {/* ───────────────────────────────────────────────────────────── */}
+        {editOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="relative w-full max-w-3xl my-8 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-gray-850">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-xl">
+                    <Pencil className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      Edit Settled Bill
+                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40 text-blue-600 border border-blue-200 dark:border-blue-800">
+                        #{editOrder.orderNumber || editOrder._id.slice(-6)}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Table {editOrder.table?.tableNumber || 'Takeaway'} • Settled {new Date(editOrder.paidAt || editOrder.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} at {new Date(editOrder.paidAt || editOrder.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditOrder(null)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+                {/* Admin Reversal Notice */}
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                    <strong className="font-bold">Automatic Accounting Reconciliation:</strong> Modifying this settled bill will automatically reconcile account balances (Cash counter / Current Account), adjust the Daily Sales register for {new Date(editOrder.paidAt || editOrder.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}, and adjust output GST liabilities.
+                  </div>
+                </div>
+
+                {/* 1. Line Items Editor */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
+                      <UtensilsCrossed className="w-4 h-4 text-brand-600" />
+                      Bill Line Items ({editItems.length})
+                    </h4>
+                  </div>
+
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
+                    {editItems.map((item, idx) => (
+                      <div key={idx} className="p-3 flex items-center justify-between gap-3 bg-white dark:bg-gray-900 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-xs text-gray-900 dark:text-white truncate">
+                            {item.name}
+                          </div>
+                          <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
+                            <span>Rate: {formatCurrency(item.price)}</span>
+                            <span>•</span>
+                            <span>GST: {item.taxPercent || 5}%</span>
+                          </div>
+                        </div>
+
+                        {/* Quantity Controls */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateItemQty(idx, item.quantity - 1)}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center text-xs font-bold text-gray-900 dark:text-white">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateItemQty(idx, item.quantity + 1)}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {/* Line Total */}
+                        <div className="w-20 text-right font-bold text-xs text-gray-900 dark:text-white">
+                          {formatCurrency((item.price || 0) * (item.quantity || 1))}
+                        </div>
+
+                        {/* Remove Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItemFromEdit(idx)}
+                          className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors"
+                          title="Remove item"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {editItems.length === 0 && (
+                      <div className="p-4 text-center text-xs text-red-500 font-medium">
+                        No items in bill. Please add at least one item below.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Add Item Bar */}
+                  <div className="p-3 bg-gray-50 dark:bg-gray-850 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedMenuItemId}
+                      onChange={(e) => {
+                        setSelectedMenuItemId(e.target.value);
+                        setSelectedVariantName('');
+                      }}
+                      disabled={menuLoading}
+                      className="flex-1 min-w-[200px] text-xs p-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">{menuLoading ? 'Loading menu...' : 'Select item from menu to add...'}</option>
+                      {menuItems.map((m) => (
+                        <option key={m._id} value={m._id}>
+                          {m.name} — ₹{m.price}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Variant selector if item has variants */}
+                    {(() => {
+                      const item = menuItems.find((m) => m._id === selectedMenuItemId);
+                      if (item?.hasVariants && item.variants && item.variants.length > 0) {
+                        return (
+                          <select
+                            value={selectedVariantName || item.variants[0].name}
+                            onChange={(e) => setSelectedVariantName(e.target.value)}
+                            className="text-xs p-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                          >
+                            {item.variants.map((v) => (
+                              <option key={v.name} value={v.name}>
+                                {v.name} (₹{v.price})
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      }
+                      return null;
+                    })()}
+
+                    <input
+                      type="number"
+                      min="1"
+                      value={addItemQty}
+                      onChange={(e) => setAddItemQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-16 text-xs p-2 text-center rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                      title="Quantity"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={handleAddItemToEdit}
+                      disabled={!selectedMenuItemId}
+                      className="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Item
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Discounts & Pricing */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                      Discount Adjustment
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="flex rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setEditDiscountType('flat')}
+                          className={cn(
+                            'px-3 py-1.5 text-xs font-bold transition-colors',
+                            editDiscountType === 'flat'
+                              ? 'bg-brand-600 text-white'
+                              : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300'
+                          )}
+                        >
+                          Flat ₹
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditDiscountType('percentage')}
+                          className={cn(
+                            'px-3 py-1.5 text-xs font-bold transition-colors',
+                            editDiscountType === 'percentage'
+                              ? 'bg-brand-600 text-white'
+                              : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300'
+                          )}
+                        >
+                          %
+                        </button>
+                      </div>
+
+                      <input
+                        type="number"
+                        min="0"
+                        value={editDiscountValue}
+                        onChange={(e) => setEditDiscountValue(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                        placeholder={editDiscountType === 'percentage' ? 'e.g. 10%' : 'e.g. 50'}
+                        className="flex-1 text-xs p-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pricing breakdown summary */}
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                      <span>Items Subtotal:</span>
+                      <span className="font-semibold">{formatCurrency(editSubtotal)}</span>
+                    </div>
+                    {editDiscountAmount > 0 && (
+                      <div className="flex justify-between text-green-600 font-semibold">
+                        <span>Discount ({editDiscountType === 'percentage' ? `${numDiscountValue}%` : 'Flat'}):</span>
+                        <span>−{formatCurrency(editDiscountAmount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                      <span>Tax / GST:</span>
+                      <span className="font-semibold">{formatCurrency(editTaxAmount)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-700">
+                      <span>Calculated Grand Total:</span>
+                      <span className="text-sm text-brand-600">{formatCurrency(editGrandTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Payment Method & Settlement Amount */}
+                <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                        Settlement Payment Method
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {(['cash', 'upi', 'card', 'other', 'part'] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setEditPaymentMethod(m)}
+                            className={cn(
+                              'py-2 px-3 rounded-lg text-xs font-bold uppercase transition-all flex items-center justify-center gap-1.5 border',
+                              editPaymentMethod === m
+                                ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                            )}
+                          >
+                            {m === 'cash' && <Wallet className="w-3.5 h-3.5" />}
+                            {m === 'upi' && <Smartphone className="w-3.5 h-3.5" />}
+                            {m === 'card' && <CreditCard className="w-3.5 h-3.5" />}
+                            {m === 'other' && <Building2 className="w-3.5 h-3.5" />}
+                            {m === 'part' && <Layers className="w-3.5 h-3.5" />}
+                            {m === 'part' ? 'Part' : m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {editPaymentMethod !== 'part' ? (
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                            Amount Received / Settled (₹)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setEditSettlementAmount(editGrandTotal)}
+                            className="text-[11px] font-semibold text-brand-600 hover:underline"
+                          >
+                            Match Grand Total ({formatCurrency(editGrandTotal)})
+                          </button>
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editSettlementAmount}
+                          onChange={(e) => setEditSettlementAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                          placeholder="Settled Amount"
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white font-bold focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                        {editWaived > 0 && (
+                          <div className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold mt-1 flex items-center justify-between">
+                            <span>Waived Off / Short Settlement:</span>
+                            <span>{formatCurrency(editWaived)}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col justify-center text-xs text-gray-500">
+                        <div className="font-semibold text-gray-800 dark:text-gray-200">
+                          Part Payment Mode Selected
+                        </div>
+                        <p className="text-[11px] mt-0.5">
+                          Allocate split amounts below across Cash, UPI, Card, and Other.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Part Payment Split Input Grid */}
+                  {editPaymentMethod === 'part' && (
+                    <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-amber-300 dark:border-amber-800 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs pb-1 border-b border-gray-100 dark:border-gray-800">
+                        <span className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                          <Layers className="w-4 h-4 text-amber-600" />
+                          Split Allocation (Target: {formatCurrency(editGrandTotal)})
+                        </span>
+                        <div className="text-[11px] text-gray-500">
+                          Allocated: <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(totalEditPartAllocated)}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                        {/* Cash */}
+                        <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
+                          <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                            <span className="flex items-center gap-1">
+                              <Wallet className="w-3.5 h-3.5 text-emerald-600" /> Cash Counter
+                            </span>
+                            {editPartDifference > 0 && numEditPartCash === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditPartCash(String(editPartDifference))}
+                                className="text-[10px] text-brand-600 hover:underline font-bold"
+                              >
+                                + Fill
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={editPartCash}
+                              onChange={(e) => setEditPartCash(e.target.value)}
+                              placeholder="0.00"
+                              className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
+                            />
+                          </div>
+                        </div>
+
+                        {/* UPI */}
+                        <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
+                          <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                            <span className="flex items-center gap-1">
+                              <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / QR
+                            </span>
+                            {editPartDifference > 0 && numEditPartUpi === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditPartUpi(String(editPartDifference))}
+                                className="text-[10px] text-brand-600 hover:underline font-bold"
+                              >
+                                + Fill
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={editPartUpi}
+                              onChange={(e) => setEditPartUpi(e.target.value)}
+                              placeholder="0.00"
+                              className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Card */}
+                        <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
+                          <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                            <span className="flex items-center gap-1">
+                              <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> Card / POS
+                            </span>
+                            {editPartDifference > 0 && numEditPartCard === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditPartCard(String(editPartDifference))}
+                                className="text-[10px] text-brand-600 hover:underline font-bold"
+                              >
+                                + Fill
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={editPartCard}
+                              onChange={(e) => setEditPartCard(e.target.value)}
+                              placeholder="0.00"
+                              className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Other */}
+                        <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
+                          <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                            <span className="flex items-center gap-1">
+                              <Building2 className="w-3.5 h-3.5 text-purple-600" /> Other / Bank
+                            </span>
+                            {editPartDifference > 0 && numEditPartOther === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditPartOther(String(editPartDifference))}
+                                className="text-[10px] text-brand-600 hover:underline font-bold"
+                              >
+                                + Fill
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={editPartOther}
+                              onChange={(e) => setEditPartOther(e.target.value)}
+                              placeholder="0.00"
+                              className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] px-2.5 py-1 rounded bg-gray-100 dark:bg-gray-800">
+                        {editPartDifference === 0 && totalEditPartAllocated > 0 ? (
+                          <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                            ✓ Matches Calculated Grand Total exactly
+                          </span>
+                        ) : editPartDifference > 0 ? (
+                          <span className="text-amber-700 dark:text-amber-400 font-semibold">
+                            {formatCurrency(editPartDifference)} unallocated (will be recorded as waived off)
+                          </span>
+                        ) : (
+                          <span className="text-red-600 dark:text-red-400 font-bold">
+                            ⚠ Over-allocated by {formatCurrency(Math.abs(editPartDifference))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Live Financial Reconciliation Diff Preview */}
+                <div className="p-4 bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl space-y-2">
+                  <h5 className="text-xs font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Accounting Impact Preview (On Save)
+                  </h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/50">
+                      <div className="text-gray-400 text-[11px]">Settlement Amount</div>
+                      <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5 mt-0.5">
+                        <span>{formatCurrency(origSettled)}</span>
+                        <ArrowRight className="w-3 h-3 text-gray-400" />
+                        <span className="text-brand-600 font-black">{formatCurrency(numEditSettled)}</span>
+                      </div>
+                      <div className={cn('text-[10px] font-bold mt-1', diffSettled >= 0 ? 'text-green-600' : 'text-red-500')}>
+                        Net Change: {diffSettled >= 0 ? `+${formatCurrency(diffSettled)}` : `−${formatCurrency(Math.abs(diffSettled))}`}
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/50">
+                      <div className="text-gray-400 text-[11px]">Account Adjustments</div>
+                      <div className="space-y-0.5 text-[11px] mt-0.5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">Cash Counter:</span>
+                          <span className={cn('font-bold', diffCash > 0 ? 'text-green-600' : diffCash < 0 ? 'text-red-500' : 'text-gray-500')}>
+                            {diffCash > 0 ? `+${formatCurrency(diffCash)}` : diffCash < 0 ? `−${formatCurrency(Math.abs(diffCash))}` : '₹0.00'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">Bank / Digital:</span>
+                          <span className={cn('font-bold', diffDigital > 0 ? 'text-green-600' : diffDigital < 0 ? 'text-red-500' : 'text-gray-500')}>
+                            {diffDigital > 0 ? `+${formatCurrency(diffDigital)}` : diffDigital < 0 ? `−${formatCurrency(Math.abs(diffDigital))}` : '₹0.00'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-1">
+                        Live net ledger adjustment
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/50">
+                      <div className="text-gray-400 text-[11px]">GST Liability Impact</div>
+                      <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5 mt-0.5">
+                        <span>{formatCurrency(origTax)}</span>
+                        <ArrowRight className="w-3 h-3 text-gray-400" />
+                        <span className="font-black">{formatCurrency(editTaxAmount)}</span>
+                      </div>
+                      <div className={cn('text-[10px] font-bold mt-1', diffTax >= 0 ? 'text-blue-600' : 'text-amber-600')}>
+                        GST Diff: {diffTax >= 0 ? `+${formatCurrency(diffTax)}` : `−${formatCurrency(Math.abs(diffTax))}`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-3 bg-gray-50/50 dark:bg-gray-850">
+                <button
+                  type="button"
+                  onClick={() => setEditOrder(null)}
+                  disabled={actionLoading}
+                  className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditSettled}
+                  disabled={actionLoading || activeEditItems.length === 0 || (editPaymentMethod === 'part' && totalEditPartAllocated <= 0)}
+                  className="px-5 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {actionLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving & Reconciling...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" /> Save & Reconcile Bill
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ───────────────────────────────────────────────────────────── */}
+        {/* Delete Settled Bill Modal (Admin Only) */}
+        {/* ───────────────────────────────────────────────────────────── */}
+        {deleteOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="relative w-full max-w-lg my-8 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+              <div className="p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-2xl">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                      Delete Settled Bill & Reverse Financials
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Order #{deleteOrder.orderNumber || deleteOrder._id.slice(-6)} • Table {deleteOrder.table?.tableNumber || 'Takeaway'}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                  Are you sure you want to delete this settled bill? This is an <strong className="text-red-600 font-bold">Admin-only permanent action</strong> that will reverse all associated accounting entries:
+                </p>
+
+                <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-xl space-y-2 text-xs">
+                  {(() => {
+                    const settled = deleteOrder.settledAmount !== null && deleteOrder.settledAmount !== undefined
+                      ? deleteOrder.settledAmount
+                      : deleteOrder.total;
+                    const method = (deleteOrder.paymentMethod || 'other').toLowerCase();
+                    const tax = deleteOrder.taxAmount > 0
+                      ? deleteOrder.taxAmount
+                      : Math.round(settled * 0.0477 * 100) / 100;
+                    const pb = deleteOrder.paymentBreakdown || {};
+                    const cashAmt = method === 'part' ? (pb.cash || 0) : (method === 'cash' ? settled : 0);
+                    const digitalAmt = method === 'part'
+                      ? ((pb.upi || 0) + (pb.card || 0) + (pb.other || 0))
+                      : (method !== 'cash' ? settled : 0);
+                    const dateStr = new Date(deleteOrder.paidAt || deleteOrder.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+                    return (
+                      <>
+                        {method === 'part' ? (
+                          <>
+                            {cashAmt > 0 && (
+                              <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                                <span className="font-black text-red-600">•</span>
+                                <span>
+                                  Deduct <strong>{formatCurrency(cashAmt)}</strong> from <strong>Cash Counter</strong>.
+                                </span>
+                              </div>
+                            )}
+                            {digitalAmt > 0 && (
+                              <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                                <span className="font-black text-red-600">•</span>
+                                <span>
+                                  Deduct <strong>{formatCurrency(digitalAmt)}</strong> from <strong>Current Account / Bank</strong>.
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                            <span className="font-black text-red-600">•</span>
+                            <span>
+                              Deduct <strong>{formatCurrency(settled)}</strong> from <strong>{method === 'cash' ? 'Cash Counter' : 'Current Account / Bank'}</strong>.
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                          <span className="font-black text-red-600">•</span>
+                          <span>
+                            Reverse <strong>{formatCurrency(tax)}</strong> from GST Liability ledger.
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                          <span className="font-black text-red-600">•</span>
+                          <span>
+                            Reduce <strong>{method === 'part' ? 'PART PAYMENT' : method.toUpperCase()}</strong> daily sales for <strong>{dateStr}</strong> by <strong>{formatCurrency(settled)}</strong>.
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-2 text-red-900 dark:text-red-300">
+                          <span className="font-black text-red-600">•</span>
+                          <span>
+                            Order record will be permanently erased.
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-3 bg-gray-50/50 dark:bg-gray-850">
+                <button
+                  type="button"
+                  onClick={() => setDeleteOrder(null)}
+                  disabled={actionLoading}
+                  className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSettled}
+                  disabled={actionLoading}
+                  className="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {actionLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Deleting & Reversing...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" /> Confirm Delete & Reversal
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </AppLayout>
