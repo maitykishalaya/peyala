@@ -57,12 +57,12 @@ export default function ReceiptsPage() {
   return (
     <AppLayout>
       <div className="space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Receipts</h1>
             <p className="text-sm text-gray-500">{total} entries · Shown: <span className="font-medium text-green-600">{formatCurrency(totalShown)}</span></p>
           </div>
-          <button onClick={() => { setForm(blank()); setModal(true); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> New Receipt</button>
+          <button onClick={() => { setForm(blank()); setModal(true); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> New Receipt</button>
         </div>
 
         <div className="card p-4 flex gap-3 flex-wrap items-end">
@@ -72,40 +72,42 @@ export default function ReceiptsPage() {
         </div>
 
         <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-800/50">
-              <tr>
-                <th className="table-th">Date</th>
-                <th className="table-th">Source</th>
-                <th className="table-th">Category</th>
-                <th className="table-th">Received In</th>
-                <th className="table-th">Description</th>
-                <th className="table-th">Entered By</th>
-                <th className="table-th">Amount</th>
-                <th className="table-th"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-              {loading ? (
-                <tr><td colSpan={8} className="table-td text-center py-12 text-gray-400">Loading...</td></tr>
-              ) : receipts.length === 0 ? (
-                <tr><td colSpan={8} className="table-td text-center py-12 text-gray-400">No receipts found</td></tr>
-              ) : receipts.map((r: any) => (
-                <tr key={r._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer" onClick={() => setDetail(r)}>
-                  <td className="table-td">{formatDate(r.date)}</td>
-                  <td className="table-td font-medium">{r.source}</td>
-                  <td className="table-td"><span className="badge-green text-xs">{catLabel(r.category)}</span></td>
-                  <td className="table-td text-gray-400">{r.receivedIn?.name || '-'}</td>
-                  <td className="table-td text-gray-400 max-w-xs truncate">{r.description || '-'}</td>
-                  <td className="table-td text-xs text-gray-400">{r.createdBy?.name || '—'}</td>
-                  <td className="table-td font-semibold text-green-600">{formatCurrency(r.amount)}</td>
-                  <td className="table-td" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => del(r._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
-                  </td>
+          <div className="table-responsive">
+            <table className="w-full min-w-max">
+              <thead className="bg-gray-50 dark:bg-gray-800/50">
+                <tr>
+                  <th className="table-th">Date</th>
+                  <th className="table-th">Source</th>
+                  <th className="table-th">Category</th>
+                  <th className="table-th">Received In</th>
+                  <th className="table-th">Description</th>
+                  <th className="table-th">Entered By</th>
+                  <th className="table-th">Amount</th>
+                  <th className="table-th"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                {loading ? (
+                  <tr><td colSpan={8} className="table-td text-center py-12 text-gray-400">Loading...</td></tr>
+                ) : receipts.length === 0 ? (
+                  <tr><td colSpan={8} className="table-td text-center py-12 text-gray-400">No receipts found</td></tr>
+                ) : receipts.map((r: any) => (
+                  <tr key={r._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer" onClick={() => setDetail(r)}>
+                    <td className="table-td">{formatDate(r.date)}</td>
+                    <td className="table-td font-medium">{r.source}</td>
+                    <td className="table-td"><span className="badge-green text-xs">{catLabel(r.category)}</span></td>
+                    <td className="table-td text-gray-400">{r.receivedIn?.name || '-'}</td>
+                    <td className="table-td text-gray-400 max-w-xs truncate">{r.description || '-'}</td>
+                    <td className="table-td text-xs text-gray-400">{r.createdBy?.name || '—'}</td>
+                    <td className="table-td font-semibold text-green-600">{formatCurrency(r.amount)}</td>
+                    <td className="table-td" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => del(r._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {pages > 1 && (
             <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <p className="text-xs text-gray-400">Page {page} of {pages}</p>
@@ -120,7 +122,7 @@ export default function ReceiptsPage() {
 
       <Modal open={modal} onClose={() => setModal(false)} title="New Receipt">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Date *</label><input type="date" className="input" value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
             <div><label className="label">Amount (₹) *</label><input type="number" className="input" value={form.amount || ''} onChange={e => setForm({...form, amount: +e.target.value})} /></div>
           </div>
@@ -154,7 +156,7 @@ export default function ReceiptsPage() {
       >
         {detail && (
           <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><span className="text-gray-400">Date:</span> <span className="font-medium">{formatDate(detail.date)}</span></div>
               <div><span className="text-gray-400">Amount:</span> <span className="font-bold text-green-600">{formatCurrency(detail.amount)}</span></div>
               <div><span className="text-gray-400">Source:</span> <span className="font-medium">{detail.source}</span></div>
@@ -162,7 +164,7 @@ export default function ReceiptsPage() {
               <div><span className="text-gray-400">Category:</span> <span className="font-medium">{catLabel(detail.category)}</span></div>
               {detail.referenceNumber && <div><span className="text-gray-400">Ref:</span> <span className="font-medium">{detail.referenceNumber}</span></div>}
               {detail.createdBy?.name && (
-                <div className="col-span-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                <div className="col-span-1 sm:col-span-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                   <span className="text-gray-400">Entered by:</span>{' '}
                   <span className="font-semibold text-brand-600">{detail.createdBy.name}</span>
                 </div>

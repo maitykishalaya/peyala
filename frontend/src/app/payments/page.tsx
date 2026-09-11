@@ -180,10 +180,10 @@ export default function PaymentsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5 pb-24">
+      <div className="space-y-5">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Payments</h1>
             <p className="text-sm text-gray-500">
@@ -191,7 +191,7 @@ export default function PaymentsPage() {
             </p>
           </div>
           <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
-            className="btn-primary flex items-center gap-2">
+            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
             <Plus className="w-4 h-4" /> New Payment
           </button>
         </div>
@@ -276,7 +276,7 @@ export default function PaymentsPage() {
 
       {/* Create / Edit Modal */}
       <Modal open={modal === 'create' || modal === 'edit'} onClose={() => setModal(null)} title={modal === 'edit' ? 'Edit Payment' : 'New Payment'} size="lg">        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Date *</label><input type="date" className="input" value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
             <div><label className="label">Amount (₹) *</label><input type="number" className="input" value={form.amount || ''} onChange={e => setForm({...form, amount: +e.target.value})} /></div>
           </div>
@@ -286,7 +286,7 @@ export default function PaymentsPage() {
           </div>
 
           {/* Category — from API (editable) */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="label">Category *</label>
               <select className="input" value={form.category} onChange={e => handleCategoryChange(e.target.value)}>
@@ -318,7 +318,7 @@ export default function PaymentsPage() {
           </div>
 
           {/* Account + Payment Mode (smart) */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="label">Paid From Account *</label>
               <select className="input" value={form.paidFrom} onChange={e => handleAccountChange(e.target.value)}>

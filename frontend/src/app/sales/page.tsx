@@ -267,7 +267,7 @@ export default function SalesPage() {
         {/* ── Expandable Content ────────────────────── */}
         {isOpen && (
           <div className="p-4 space-y-3 border-t border-gray-200 dark:border-gray-700">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Gross Sales */}
               <div>
                 <label className="label">Gross Sales (₹)</label>
@@ -357,17 +357,17 @@ export default function SalesPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5 pb-24">
+      <div className="space-y-5">
 
         {/* ── Page Header ──────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Sales</h1>
             <p className="text-sm text-gray-500">{total} entries</p>
           </div>
           <button
             onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
           >
             <Plus className="w-4 h-4" /> Add Sales Entry
           </button>
@@ -489,7 +489,7 @@ export default function SalesPage() {
             </div>
 
             {/* Payment mode breakdown */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">💵 Cash (₹)</label>
                 <input type="number" className="input"

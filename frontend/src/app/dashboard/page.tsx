@@ -119,7 +119,7 @@ export default function DashboardPage() {
           </p>
 
           {(yesterday.sales || yesterday.purchases?.count > 0) ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Sales side */}
               <div className="bg-white/10 rounded-lg p-3">
                 <p className="text-xs text-brand-200 mb-2">Sales</p>
@@ -182,7 +182,7 @@ export default function DashboardPage() {
         </div>
 
         {/* KPI Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard title="This Month Revenue" value={month.revenue || 0} icon={TrendingUp} accent="blue" subtitle={`Outlet + Zomato + Fatafat`} />
           <StatCard title="Month Expenses" value={month.expenses || 0} icon={ShoppingCart} accent="red" subtitle="All categories" />
           <StatCard title="Gross Profit" value={month.grossProfit || 0} icon={TrendingUp} accent="green" subtitle={`${month.revenue > 0 ? ((month.grossProfit / month.revenue) * 100).toFixed(1) : 0}% margin`} />
@@ -194,7 +194,7 @@ export default function DashboardPage() {
           {/* Accounts */}
           <div className="lg:col-span-2 card p-5">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Wallet className="w-4 h-4 text-brand-500" /> Account Balances</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {accounts.map((acc: any) => (
                 <div key={acc._id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <div className="flex items-center gap-2">

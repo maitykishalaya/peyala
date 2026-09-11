@@ -178,7 +178,7 @@ export default function BalanceSheetPage() {
       <div className="space-y-6 max-w-6xl">
 
         {/* ── Page Header ──────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Scale className="w-5 h-5 text-brand-500" /> Balance Sheet
@@ -188,13 +188,13 @@ export default function BalanceSheetPage() {
               {bs?.lastUpdatedBy && <span className="text-gray-400"> by {bs.lastUpdatedBy}</span>}
             </p>
           </div>
-          <button onClick={load} className="btn-secondary flex items-center gap-2">
+          <button onClick={load} className="btn-secondary flex items-center justify-center gap-2 w-full sm:w-auto">
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
 
         {/* ── Summary Bar ──────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           {/* Total Assets */}
           <div className="card p-5 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border-blue-100 dark:border-blue-900/30">
             <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">Total Assets</p>

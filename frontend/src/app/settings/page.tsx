@@ -52,7 +52,7 @@ export default function SettingsPage() {
 
         {/* Admin-only quick links */}
         {user?.role === 'admin' && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Link href="/settings/users" className="card p-4 flex items-center gap-3 hover:shadow-md transition-shadow group">
               <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center">
                 <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -92,7 +92,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 overflow-x-auto scrollbar-none pb-0.5">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id as any)}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === id ? 'border-brand-500 text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>

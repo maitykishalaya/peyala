@@ -33,7 +33,7 @@ export default function LoginPage() {
           <p className="text-gray-500 dark:text-gray-400 mt-1">Business Admin Portal</p>
         </div>
 
-        <div className="card p-8">
+        <div className="card p-5 sm:p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="label">Email Address</label>

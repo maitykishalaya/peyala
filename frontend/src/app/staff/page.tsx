@@ -134,7 +134,7 @@ export default function StaffPage() {
       <div className="space-y-5">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Staff</h1>
             <p className="text-sm text-gray-500">
@@ -144,7 +144,7 @@ export default function StaffPage() {
           </div>
           <button
             onClick={() => { setForm(blank()); setModal('create'); }}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
           >
             <Plus className="w-4 h-4" /> Add Staff
           </button>
@@ -239,15 +239,15 @@ export default function StaffPage() {
       {/* ── Create/Edit Modal ────────────────────────────────────────── */}
       <Modal open={modal === 'create' || modal === 'edit'} onClose={() => setModal(null)} title={modal === 'edit' ? 'Edit Staff Member' : 'Add Staff Member'}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Name *</label><input className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
             <div><label className="label">Position *</label><input className="input" value={form.position} onChange={e => setForm({...form, position: e.target.value})} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Phone</label><input className="input" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></div>
             <div><label className="label">Joining Date</label><input type="date" className="input" value={form.joiningDate} onChange={e => setForm({...form, joiningDate: e.target.value})} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Monthly Salary (₹)</label><input type="number" className="input" value={form.monthlySalary} onChange={e => setForm({...form, monthlySalary: +e.target.value})} /></div>
             <div><label className="label">Status</label>
               <select className="input" value={form.status} onChange={e => setForm({...form, status: e.target.value})}>
@@ -272,7 +272,7 @@ export default function StaffPage() {
           {/* Payment type selector */}
           <div>
             <label className="label">Payment Type *</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {PAYMENT_TYPES.map(pt => (
                 <button
                   key={pt.value}
@@ -293,7 +293,7 @@ export default function StaffPage() {
 
           {/* Staff salary summary */}
           {selected && (
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 grid grid-cols-3 gap-3 text-center">
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
               <div>
                 <p className="text-xs text-gray-400">Monthly</p>
                 <p className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(selected.monthlySalary)}</p>
@@ -326,7 +326,7 @@ export default function StaffPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="label">Paid From Account *</label>
               <select className="input" value={payForm.paidFrom} onChange={e => setPayForm({...payForm, paidFrom: e.target.value})}>

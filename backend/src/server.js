@@ -36,6 +36,9 @@ app.use('/api/balancesheet', require('./routes/balancesheet'));
 app.use('/api/owner-note', require('./routes/ownerNote'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/backup', require('./routes/backup'));
+app.use('/api/menu', require('./routes/menu'));
+app.use('/api/tables', require('./routes/tables'));
+app.use('/api/orders', require('./routes/orders'));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Peyala Business Admin' }));

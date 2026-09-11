@@ -462,12 +462,12 @@ export default function PurchasesPage() {
   return (
     <AppLayout>
       <div className="space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Raw Material Purchases</h1>
             <p className="text-sm text-gray-500">{total} entries · inventory auto-updated</p>
           </div>
-          <button onClick={openNewPurchase} className="btn-primary flex items-center gap-2">
+          <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
             <Plus className="w-4 h-4" /> New Purchase
           </button>
         </div>
@@ -568,7 +568,7 @@ export default function PurchasesPage() {
       {/* ── New Purchase Modal ───────────────────────────────────────── */}
       <Modal open={modal} onClose={() => { setModal(false); setEditingPurchase(null); }} title={editingPurchase ? 'Edit Purchase Entry' : 'New Purchase Entry'} size="xl">
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div><label className="label">Date *</label><input type="date" className="input" value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
             <div><label className="label">Supplier *</label>
               <select className="input" value={form.supplier} onChange={e => setForm({...form, supplier: e.target.value})}>
@@ -576,7 +576,7 @@ export default function PurchasesPage() {
                 {suppliers.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
               </select>
             </div>
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <label className="inline-flex items-center text-sm">
                 <input
                   type="checkbox"
@@ -679,7 +679,7 @@ export default function PurchasesPage() {
           </div>
 
           {/* Payment section */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className="label">Paid From Account</label>
               <select className="input" value={form.paidFrom} onChange={e => handleAccountChange(e.target.value)}>
@@ -740,7 +740,7 @@ export default function PurchasesPage() {
               {categories.map(c => <option key={c._id} value={c._id}>{c.icon} {c.name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="label">Unit *</label>
               <select className="input" value={quickAddForm.unit} onChange={e => setQuickAddForm({...quickAddForm, unit: e.target.value})}>
                 {UNITS.map(u => <option key={u} value={u}>{u}</option>)}

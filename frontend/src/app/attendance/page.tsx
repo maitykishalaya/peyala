@@ -5,26 +5,49 @@ import Modal from '@/components/ui/Modal';
 import { attendanceApi, staffApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn, formatDate, getInitials } from '@/lib/utils';
-import { CalendarCheck, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info } from 'lucide-react';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const STATUS_LABELS = {
-  present: { label: 'P', color: 'badge-green', text: 'Present' },
-  absent: { label: 'A', color: 'badge-red', text: 'Absent' },
-  leave: { label: 'L', color: 'badge-yellow', text: 'Leave' },
-  halfday: { label: 'H', color: 'badge-blue', text: 'Half Day' },
+export const STATUS_CONFIG = {
+  present: {
+    label: 'P',
+    text: 'Present',
+    cellActive: 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold border-emerald-700 shadow-xs',
+    pill: 'bg-emerald-100 text-emerald-900 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800',
+    modalActive: 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-600/30',
+    legendBadge: 'bg-emerald-600 text-white',
+  },
+  absent: {
+    label: 'A',
+    text: 'Absent',
+    cellActive: 'bg-rose-600 hover:bg-rose-700 text-white font-bold border-rose-700 shadow-xs',
+    pill: 'bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800',
+    modalActive: 'bg-rose-600 text-white border-rose-700 shadow-xs ring-2 ring-rose-600/30',
+    legendBadge: 'bg-rose-600 text-white',
+  },
+  leave: {
+    label: 'L',
+    text: 'Leave',
+    cellActive: 'bg-amber-500 hover:bg-amber-600 text-white font-bold border-amber-600 shadow-xs',
+    pill: 'bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+    modalActive: 'bg-amber-500 text-white border-amber-600 shadow-xs ring-2 ring-amber-500/30',
+    legendBadge: 'bg-amber-500 text-white',
+  },
+  halfday: {
+    label: 'H',
+    text: 'Half Day',
+    cellActive: 'bg-blue-600 hover:bg-blue-700 text-white font-bold border-blue-700 shadow-xs',
+    pill: 'bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800',
+    modalActive: 'bg-blue-600 text-white border-blue-700 shadow-xs ring-2 ring-blue-600/30',
+    legendBadge: 'bg-blue-600 text-white',
+  },
 } as const;
 
-const SELECTED_CLASSES: Record<keyof typeof STATUS_LABELS, string> = {
-  present: 'bg-green-600 text-white',
-  absent: 'bg-red-600 text-white',
-  leave: 'bg-yellow-600 text-white',
-  halfday: 'bg-blue-600 text-white',
-};
+type StatusKey = keyof typeof STATUS_CONFIG;
 
 const YEARS = (() => {
   const current = new Date().getFullYear();
@@ -45,7 +68,7 @@ function formatDateOnly(date: Date) {
   return `${y}-${pad(m)}-${pad(d)}`;
 }
 
-function normalizeStatusValue(status?: string): keyof typeof STATUS_LABELS {
+function normalizeStatusValue(status?: string): StatusKey {
   if (status === 'halfday' || status === 'holiday') return 'halfday';
   if (status === 'present' || status === 'absent' || status === 'leave') return status;
   return 'present';
@@ -63,7 +86,7 @@ export default function AttendancePage() {
   const [summaries, setSummaries] = useState<Record<string, any>>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<any>(null);
-  const [form, setForm] = useState({ status: 'present', note: '' });
+  const [form, setForm] = useState({ status: 'present' as StatusKey, note: '' });
   const [loading, setLoading] = useState(false);
 
   const activeStaff = useMemo(() => staff.filter((member) => member.status === 'active'), [staff]);
@@ -193,20 +216,22 @@ export default function AttendancePage() {
 
   return (
     <AppLayout>
-      <div className="space-y-5">
+      <div className="space-y-6">
+        {/* Header and Month Controls */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-2">
-              <CalendarDays className="w-4 h-4" />
-              <span>Attendance overview</span>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider font-bold text-brand-600 dark:text-brand-400 mb-1">
+              <CalendarDays className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>Attendance Management</span>
             </div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Staff Attendance</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-2xl">
-              Track attendance for your active staff. Click a day to mark present, absent, leave, or half day. Admins and managers can edit records.
+            <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Staff Attendance</h1>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400 max-w-2xl mt-0.5">
+              Daily staff presence tracking. Click any past cell to record or update attendance.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Month/Year Navigation */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -214,27 +239,29 @@ export default function AttendancePage() {
                 setMonth(next.getMonth() + 1);
                 setYear(next.getFullYear());
               }}
-              className="btn-secondary px-3 py-2"
+              title="Previous Month"
+              className="h-10 w-10 flex items-center justify-center rounded-lg border-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-xs transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-5 h-5 stroke-[2.5]" />
             </button>
-            <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2">
+            <div className="flex items-center gap-2 rounded-lg border-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 shadow-xs">
               <select
                 value={month}
                 onChange={(e) => setMonth(Number(e.target.value))}
-                className="input !px-2 !py-1 text-sm"
+                className="bg-transparent text-sm font-bold text-gray-900 dark:text-white cursor-pointer focus:outline-none"
               >
                 {MONTHS.map((label, index) => (
-                  <option key={label} value={index + 1}>{label}</option>
+                  <option key={label} value={index + 1} className="text-gray-900 dark:text-white bg-white dark:bg-gray-900">{label}</option>
                 ))}
               </select>
+              <span className="text-gray-400 font-bold">/</span>
               <select
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
-                className="input !px-2 !py-1 text-sm"
+                className="bg-transparent text-sm font-bold text-gray-900 dark:text-white cursor-pointer focus:outline-none"
               >
                 {YEARS.map((yearOption) => (
-                  <option key={yearOption} value={yearOption}>{yearOption}</option>
+                  <option key={yearOption} value={yearOption} className="text-gray-900 dark:text-white bg-white dark:bg-gray-900">{yearOption}</option>
                 ))}
               </select>
             </div>
@@ -245,105 +272,165 @@ export default function AttendancePage() {
                 setMonth(next.getMonth() + 1);
                 setYear(next.getFullYear());
               }}
-              className="btn-secondary px-3 py-2"
+              title="Next Month"
+              className="h-10 w-10 flex items-center justify-center rounded-lg border-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-xs transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-5 h-5 stroke-[2.5]" />
             </button>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.8fr_0.8fr]">
-          <div className="card overflow-hidden p-0">
+        {/* Main Grid: Attendance Table & Sidebar */}
+        <div className="grid gap-6 lg:grid-cols-[1.85fr_0.75fr] items-start">
+          {/* Attendance Table Card */}
+          <div className="card border-2 border-gray-300 dark:border-gray-700 overflow-hidden p-0 shadow-md">
             <div className="overflow-x-auto">
               <table className="min-w-full border-separate border-spacing-0 text-sm">
                 <thead>
-                  <tr>
-                    <th className="table-th sticky left-0 z-20 bg-white dark:bg-gray-900">Staff</th>
+                  <tr className="bg-gray-100 dark:bg-gray-800">
+                    {/* Sticky Staff Column Header */}
+                    <th className="sticky left-0 z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-r-2 border-gray-300 dark:border-gray-700 px-4 py-3 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-[220px] shadow-[2px_0_5px_rgba(0,0,0,0.04)]">
+                      Staff Member
+                    </th>
+
+                    {/* Day Headers */}
                     {days.map((day) => {
                       const date = new Date(year, month - 1, day);
                       const isFuture = date > today;
+                      const isToday =
+                        today.getFullYear() === year &&
+                        today.getMonth() + 1 === month &&
+                        today.getDate() === day;
+
                       return (
-                        <th key={day} className="table-th text-center px-2 py-2 sticky top-0 bg-white dark:bg-gray-900">
+                        <th
+                          key={day}
+                          className={cn(
+                            'text-center px-1.5 py-2.5 sticky top-0 border-b-2 border-gray-300 dark:border-gray-700 transition-colors',
+                            isToday
+                              ? 'bg-amber-100/70 dark:bg-amber-950/40 border-b-amber-500 text-amber-900 dark:text-amber-200'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'
+                          )}
+                        >
                           <div className="flex flex-col items-center gap-1">
-                            <span className="font-medium">{day}</span>
+                            <span className={cn('text-xs font-black', isToday ? 'text-amber-900 dark:text-amber-300' : 'text-gray-900 dark:text-gray-100')}>
+                              {day}
+                            </span>
                             {canEdit ? (
                               <button
                                 type="button"
                                 onClick={() => bulkMarkPresentForDay(day)}
                                 disabled={isFuture}
+                                title={isFuture ? 'Future date' : `Mark all present for Day ${day}`}
                                 className={cn(
-                                  'rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors',
-                                  isFuture ? 'border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-500 cursor-not-allowed' : 'border-brand-200 text-brand-700 hover:bg-brand-50 dark:border-brand-900 dark:text-brand-300 dark:hover:bg-brand-900/30'
+                                  'rounded px-1.5 py-0.5 text-[10px] font-black tracking-tight uppercase transition-all shadow-2xs',
+                                  isFuture
+                                    ? 'border border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600 cursor-not-allowed bg-gray-50/50 dark:bg-gray-900/50'
+                                    : 'border border-brand-500 bg-white hover:bg-brand-500 hover:text-white text-brand-700 dark:bg-gray-900 dark:border-brand-600 dark:text-brand-300 dark:hover:bg-brand-600 dark:hover:text-white'
                                 )}
                               >
                                 All
                               </button>
                             ) : (
-                              <span className="text-xs text-gray-400">—</span>
+                              <span className="text-[10px] text-gray-400 font-bold">—</span>
                             )}
                           </div>
                         </th>
                       );
                     })}
-                    <th className="table-th sticky right-0 bg-white dark:bg-gray-900">Summary</th>
+
+                    {/* Sticky Summary Column Header */}
+                    <th className="sticky right-0 z-20 bg-gray-100 dark:bg-gray-800 border-b-2 border-l-2 border-gray-300 dark:border-gray-700 px-3 py-2.5 text-left font-bold text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 w-44 min-w-[150px] shadow-[-2px_0_5px_rgba(0,0,0,0.04)]">
+                      Summary
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y-2 divide-gray-200 dark:divide-gray-800">
                   {activeStaff.map((member) => (
-                    <tr key={member._id} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-950/40">
-                      <td className="table-td sticky left-0 z-10 bg-white dark:bg-gray-900 w-[240px]">
+                    <tr
+                      key={member._id}
+                      className="hover:bg-brand-50/20 dark:hover:bg-gray-800/40 transition-colors"
+                    >
+                      {/* Sticky Staff Info */}
+                      <td className="sticky left-0 z-10 bg-white dark:bg-gray-900 border-r-2 border-gray-300 dark:border-gray-700 px-4 py-3 shadow-[2px_0_5px_rgba(0,0,0,0.04)]">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-700 dark:text-brand-300 font-bold">
+                          <div className="w-9 h-9 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
                             {getInitials(member.name)}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-semibold text-gray-900 dark:text-white truncate">{member.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{member.position}</div>
+                            <div className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                              {member.name}
+                            </div>
+                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 truncate">
+                              {member.position}
+                            </div>
                           </div>
                         </div>
                       </td>
+
+                      {/* Day Cells */}
                       {days.map((day) => {
                         const record = attendanceMap[member._id]?.[day];
                         const date = new Date(year, month - 1, day);
                         date.setHours(0, 0, 0, 0);
                         const isFuture = date > today;
                         const recordStatus = normalizeStatusValue(record?.status);
+                        const config = STATUS_CONFIG[recordStatus];
 
                         return (
-                          <td key={day} className="table-td px-1.5 py-1 text-center">
+                          <td key={day} className="px-1 py-2 text-center align-middle">
                             <button
                               type="button"
                               disabled={!canEdit || isFuture}
                               onClick={() => openCell(member, day)}
+                              title={
+                                isFuture
+                                  ? 'Future date'
+                                  : record
+                                  ? `${config.text}${record.note ? `: ${record.note}` : ''}`
+                                  : 'Click to mark attendance'
+                              }
                               className={cn(
-                                'mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors',
+                                'mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold transition-all',
                                 record
-                                  ? `${STATUS_LABELS[recordStatus].color} border-transparent text-white` : 'border-gray-200 bg-white dark:bg-gray-950 dark:border-gray-800 text-gray-400 hover:border-brand-300 dark:hover:border-brand-700',
-                                isFuture && 'cursor-not-allowed opacity-40'
+                                  ? config.cellActive
+                                  : isFuture
+                                  ? 'border border-gray-200 dark:border-gray-800 bg-gray-100/40 dark:bg-gray-900/30 text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-40'
+                                  : 'border-2 border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/60 text-gray-400 hover:border-brand-500 hover:bg-brand-50 hover:text-brand-600 cursor-pointer shadow-2xs'
                               )}
                             >
-                              {record ? STATUS_LABELS[recordStatus].label : ''}
+                              {record ? config.label : '·'}
                             </button>
                           </td>
                         );
                       })}
-                      <td className="table-td sticky right-0 z-10 bg-white dark:bg-gray-900 w-44">
-                        <div className="space-y-2 text-xs">
+
+                      {/* Sticky Summary Cell */}
+                      <td className="sticky right-0 z-10 bg-white dark:bg-gray-900 border-l-2 border-gray-300 dark:border-gray-700 px-3 py-2 shadow-[-2px_0_5px_rgba(0,0,0,0.04)] w-44 min-w-[150px]">
+                        <div className="space-y-1 text-xs">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-gray-500">P</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{summaries[member._id]?.presentMonth ?? 0}</span>
+                            <span className="font-bold text-gray-700 dark:text-gray-300">P</span>
+                            <span className="font-bold text-gray-900 dark:text-white">
+                              {summaries[member._id]?.presentMonth ?? 0}
+                            </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-gray-500">A</span>
-                            <span className="font-semibold text-red-600">{summaries[member._id]?.absentMonth ?? 0}</span>
+                            <span className="font-bold text-gray-700 dark:text-gray-300">A</span>
+                            <span className="font-bold text-red-600 dark:text-red-400">
+                              {summaries[member._id]?.absentMonth ?? 0}
+                            </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-gray-500">H</span>
-                            <span className="font-semibold text-blue-600">{summaries[member._id]?.halfDayMonth ?? 0}</span>
+                            <span className="font-bold text-gray-700 dark:text-gray-300">H</span>
+                            <span className="font-bold text-blue-600 dark:text-blue-400">
+                              {summaries[member._id]?.halfDayMonth ?? 0}
+                            </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-gray-500">Leaves</span>
-                            <span className="font-semibold text-yellow-600">{summaries[member._id]?.leavesRemainingMonth ?? summaries[member._id]?.leavesRemaining ?? 0}</span>
+                            <span className="font-bold text-gray-700 dark:text-gray-300">Leaves</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">
+                              {summaries[member._id]?.leavesRemainingMonth ?? summaries[member._id]?.leavesRemaining ?? 0}
+                            </span>
                           </div>
                         </div>
                       </td>
@@ -354,95 +441,177 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          <div className="card p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <CalendarCheck className="w-5 h-5 text-brand-600" />
-              <div>
-                <h2 className="font-semibold text-gray-900 dark:text-white">Attendance legend</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Tap a cell to mark attendance for that day.</p>
+          {/* Sidebar: Legend, Notes, Bulk Actions */}
+          <div className="space-y-5">
+            {/* Legend Card */}
+            <div className="card border-2 border-gray-300 dark:border-gray-700 p-5 shadow-sm space-y-4">
+              <div className="flex items-center gap-3 border-b-2 border-gray-200 dark:border-gray-800 pb-3">
+                <div className="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 dark:text-brand-400">
+                  <CalendarCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-900 dark:text-white">Attendance Legend</h2>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Click any open date to set status</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([status, meta]) => (
+                  <div
+                    key={status}
+                    className="flex items-center gap-2.5 p-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/50"
+                  >
+                    <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-black shadow-xs shrink-0', meta.legendBadge)}>
+                      {meta.label}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-gray-900 dark:text-white leading-tight capitalize">
+                        {meta.text}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="space-y-3">
-              {Object.entries(STATUS_LABELS).map(([status, meta]) => (
-                <div key={status} className="flex items-center gap-3">
-                  <span className={`${meta.color} inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold`}>{meta.label}</span>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white capitalize">{status}</div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{meta.text}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
 
-            <div className="rounded-lg bg-gray-50 dark:bg-gray-950 p-4 border border-gray-200 dark:border-gray-800">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400 font-semibold">Notes summary</div>
+            {/* Notes Summary Card */}
+            <div className="card border-2 border-gray-300 dark:border-gray-700 p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b-2 border-gray-200 dark:border-gray-800 pb-2.5">
+                <div className="text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 font-black flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-brand-600" />
+                  <span>Notes & Remarks</span>
+                </div>
+                <span className="text-xs font-bold text-gray-500 bg-gray-200 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+                  {notesSummary.length}
+                </span>
+              </div>
+
               {notesSummary.length === 0 ? (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No notes entered for this month yet.</p>
+                <p className="py-2 text-xs font-medium text-gray-500 dark:text-gray-400 text-center">
+                  No notes entered for this month yet.
+                </p>
               ) : (
-                <ul className="mt-3 space-y-3 text-sm text-gray-700 dark:text-gray-300">
-                  {notesSummary.slice(0, 6).map((note, index) => (
-                    <li key={`${note.date}-${note.staff}-${index}`} className="rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2">
-                      <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        <span>{note.date}</span>
-                        <span>{note.staff}</span>
-                      </div>
-                      <div className="mt-1 font-medium text-gray-900 dark:text-white">{normalizeStatusValue(note.status)} → {STATUS_LABELS[normalizeStatusValue(note.status)].text}</div>
-                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{note.note}</p>
-                    </li>
-                  ))}
+                <ul className="space-y-2.5 text-xs">
+                  {notesSummary.slice(0, 6).map((note, index) => {
+                    const statusKey = normalizeStatusValue(note.status);
+                    const meta = STATUS_CONFIG[statusKey];
+                    return (
+                      <li
+                        key={`${note.date}-${note.staff}-${index}`}
+                        className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-2.5 shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                          <span className="text-gray-700 dark:text-gray-300 font-bold">{note.date}</span>
+                          <span className="text-brand-700 dark:text-brand-400 font-bold">{note.staff}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-black uppercase shadow-2xs', meta.pill)}>
+                            {meta.text}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 p-2 rounded border border-gray-200 dark:border-gray-700">
+                          {note.note}
+                        </p>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
 
-            <div className="rounded-lg bg-gray-50 dark:bg-gray-950 p-4 border border-gray-200 dark:border-gray-800">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400 font-semibold">Bulk actions</div>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Click "All" in the day header to mark the entire active staff list present for that date.</p>
+            {/* Bulk Actions Card */}
+            <div className="rounded-xl bg-blue-50/80 dark:bg-blue-950/40 p-4 border-2 border-blue-200 dark:border-blue-900/60 shadow-xs">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-blue-950 dark:text-blue-200 font-black">
+                <Info className="w-4 h-4 text-blue-700 dark:text-blue-400" />
+                <span>Quick Bulk Action</span>
+              </div>
+              <p className="mt-1.5 text-xs font-medium text-blue-900 dark:text-blue-300 leading-relaxed">
+                Click <span className="font-bold text-brand-700 dark:text-brand-400 underline">"All"</span> at the top of any day column to instantly mark all active staff present for that date.
+              </p>
             </div>
+
             {loading && (
-              <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-4 text-sm text-gray-500 dark:text-gray-400">Loading attendance...</div>
+              <div className="rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 p-4 text-xs font-bold text-gray-500 dark:text-gray-400 text-center animate-pulse">
+                Updating attendance records...
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={selected ? `Mark attendance — ${selected.member.name}` : 'Mark attendance'} size="sm">
+      {/* Attendance Edit Modal */}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={selected ? `Mark Attendance — ${selected.member.name}` : 'Mark Attendance'}
+        size="sm"
+      >
         {selected && (
           <div className="space-y-4">
-            <div className="text-sm text-gray-500 dark:text-gray-400">
-              Date: <span className="font-medium text-gray-900 dark:text-white">{formatDate(new Date(selected.date))}</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(STATUS_LABELS).map(([status, meta]) => (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, status: status as keyof typeof STATUS_LABELS }))}
-                  className={cn(
-                    'rounded-lg border px-3 py-3 text-sm font-medium transition-colors',
-                    form.status === status
-                      ? `${SELECTED_CLASSES[status as keyof typeof STATUS_LABELS]} border-transparent`
-                      : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 text-gray-600 dark:text-gray-300 hover:border-brand-300 dark:hover:border-brand-700'
-                  )}
-                >
-                  <span className={`${meta.color} inline-flex items-center justify-center rounded-md mr-2`}>{meta.label}</span>
-                  <span>{meta.text}</span>
-                </button>
-              ))}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">Date:</span>
+              <span className="text-sm font-black text-gray-900 dark:text-white">
+                {formatDate(new Date(selected.date))}
+              </span>
             </div>
 
             <div>
-              <label className="label">Note</label>
+              <label className="label font-bold text-gray-900 dark:text-gray-200 mb-2">Select Status</label>
+              <div className="grid grid-cols-2 gap-2.5">
+                {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([status, meta]) => {
+                  const isSelected = form.status === status;
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, status }))}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-lg border-2 px-3 py-2.5 text-xs font-bold transition-all shadow-xs',
+                        isSelected
+                          ? meta.modalActive
+                          : 'border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-600'
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'inline-flex h-6 w-6 items-center justify-center rounded text-xs font-black',
+                          isSelected ? 'bg-white/20 text-white' : meta.legendBadge
+                        )}
+                      >
+                        {meta.label}
+                      </span>
+                      <span className="capitalize">{meta.text}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="label font-bold text-gray-900 dark:text-gray-200">Remarks / Note (Optional)</label>
               <textarea
-                className="input h-24"
+                className="input h-24 border-2 border-gray-300 dark:border-gray-700 font-medium text-gray-900 dark:text-white"
+                placeholder="Reason for leave, half-day shift note, etc."
                 value={form.note}
                 onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))}
               />
             </div>
 
             <div className="flex gap-3 pt-2">
-              <button type="button" onClick={saveAttendance} className="btn-primary flex-1">Save</button>
-              <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+              <button
+                type="button"
+                onClick={saveAttendance}
+                className="btn-primary flex-1 font-bold shadow-xs"
+              >
+                Save Attendance
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="btn-secondary font-bold"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}

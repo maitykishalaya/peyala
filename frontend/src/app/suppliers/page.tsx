@@ -37,12 +37,12 @@ export default function SuppliersPage() {
   return (
     <AppLayout>
       <div className="space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Suppliers</h1>
             <p className="text-sm text-gray-500">{suppliers.length} suppliers · Total dues: <span className="text-red-500 font-medium">{formatCurrency(totalDues)}</span></p>
           </div>
-          <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>
+          <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Add Supplier</button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -95,7 +95,7 @@ export default function SuppliersPage() {
       <Modal open={!!detail} onClose={() => setDetail(null)} title={detail?.supplier?.name || ''} size="lg">
         {detail && (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
               {[
                 { label: 'Total Purchased', value: formatCurrency(detail.supplier.totalPurchased), color: 'text-brand-600' },
                 { label: 'Total Paid', value: formatCurrency(detail.supplier.totalPaid), color: 'text-green-600' },
@@ -107,24 +107,26 @@ export default function SuppliersPage() {
                 </div>
               ))}
             </div>
-            <div className="pt-4">
+            <div className="pt-2">
               <button onClick={() => remove(detail.supplier)} className="btn-secondary text-red-600 hover:text-white hover:bg-red-600">Delete Supplier</button>
             </div>
             <h4 className="font-medium text-gray-800 dark:text-gray-200">Recent Purchases</h4>
             {detail.purchases?.length === 0 ? <p className="text-sm text-gray-400">No purchases yet</p> : (
-              <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 dark:bg-gray-800"><th className="table-th">Date</th><th className="table-th">Items</th><th className="table-th">Amount</th><th className="table-th">Status</th></tr></thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {detail.purchases.map((p: any) => (
-                    <tr key={p._id}>
-                      <td className="table-td">{formatDate(p.date)}</td>
-                      <td className="table-td">{p.items?.length} items</td>
-                      <td className="table-td font-medium">{formatCurrency(p.totalAmount)}</td>
-                      <td className="table-td"><span className={p.isPaid ? 'badge-green' : 'badge-yellow'}>{p.isPaid ? 'Paid' : 'Credit'}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-responsive">
+                <table className="w-full min-w-max text-sm">
+                  <thead><tr className="bg-gray-50 dark:bg-gray-800"><th className="table-th">Date</th><th className="table-th">Items</th><th className="table-th">Amount</th><th className="table-th">Status</th></tr></thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {detail.purchases.map((p: any) => (
+                      <tr key={p._id}>
+                        <td className="table-td">{formatDate(p.date)}</td>
+                        <td className="table-td">{p.items?.length} items</td>
+                        <td className="table-td font-medium">{formatCurrency(p.totalAmount)}</td>
+                        <td className="table-td"><span className={p.isPaid ? 'badge-green' : 'badge-yellow'}>{p.isPaid ? 'Paid' : 'Credit'}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
