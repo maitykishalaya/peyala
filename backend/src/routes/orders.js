@@ -60,6 +60,53 @@ router.get('/table/:tableId/active', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// GET /api/orders/pending-kots — List unprinted KOT rounds across active orders
+// Polled by the Print Station laptop to auto-print KOTs placed by mobiles
+// ─────────────────────────────────────────────────────────────────
+router.get('/pending-kots', async (req, res) => {
+  try {
+    const activeOrders = await Order.find({
+      status: { $nin: ['paid', 'cancelled'] },
+      'kotRounds.printed': false,
+    })
+      .populate('table', 'tableNumber')
+      .populate('createdBy', 'name')
+      .sort({ createdAt: 1 });
+
+    const pending = [];
+
+    for (const order of activeOrders) {
+      if (!Array.isArray(order.kotRounds)) continue;
+
+      for (const round of order.kotRounds) {
+        if (!round.printed) {
+          pending.push({
+            orderId: order._id,
+            roundId: round._id,
+            tableNumber: order.table ? order.table.tableNumber : 'N/A',
+            orderNumber: order.orderNumber,
+            kotNumber: `${order.orderNumber}-${round.roundNumber}`,
+            roundNumber: round.roundNumber,
+            roundTag: round.roundTag || (round.roundNumber === 1 ? '[INITIAL ORDER]' : `[ROUND ${round.roundNumber} - ADD-ON]`),
+            billerName: order.createdBy ? order.createdBy.name : 'Staff',
+            createdAt: round.createdAt || order.createdAt,
+            items: round.items.map((it) => ({
+              name: it.name,
+              quantity: it.quantity,
+              notes: it.notes || '',
+            })),
+          });
+        }
+      }
+    }
+
+    res.json(pending);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /api/orders/:id — get order by id
 // ─────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -128,11 +175,24 @@ router.post('/', adminOnly, async (req, res) => {
     const orderCount = await Order.countDocuments();
     const orderNumber = 4500 + orderCount + 1;
 
+    const initialKotRound = {
+      roundNumber: 1,
+      roundTag: '[INITIAL ORDER]',
+      items: snapshottedItems.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        notes: i.notes || '',
+      })),
+      printed: false,
+      createdAt: new Date(),
+    };
+
     const order = await Order.create({
       table: table._id,
       orderNumber,
       kotCount: 1,
       items: snapshottedItems,
+      kotRounds: [initialKotRound],
       status: 'open',
       subtotal: totals.subtotal,
       taxAmount: totals.taxAmount,
@@ -183,13 +243,14 @@ router.post('/:id/items', adminOnly, async (req, res) => {
     const menuItems = await MenuItem.find({ _id: { $in: itemIds } });
     const menuItemMap = new Map(menuItems.map((m) => [m._id.toString(), m]));
 
+    const newRoundItems = [];
     for (const it of items) {
       const mi = menuItemMap.get(String(it.menuItemId));
       if (!mi) {
         return res.status(400).json({ message: `Menu item with ID ${it.menuItemId} was not found` });
       }
 
-      order.items.push({
+      const itemObj = {
         menuItem: mi._id,
         name: mi.name,
         price: mi.price,
@@ -197,7 +258,9 @@ router.post('/:id/items', adminOnly, async (req, res) => {
         quantity: Math.max(1, Number(it.quantity) || 1),
         notes: it.notes ? String(it.notes).trim() : '',
         status: 'pending',
-      });
+      };
+      order.items.push(itemObj);
+      newRoundItems.push(itemObj);
     }
 
     // If order was billed, adding items re-opens it for billing updates
@@ -209,7 +272,25 @@ router.post('/:id/items', adminOnly, async (req, res) => {
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
     order.total = totals.total;
-    order.kotCount = (order.kotCount || 1) + 1;
+
+    const nextKotCount = (order.kotCount || 1) + 1;
+    order.kotCount = nextKotCount;
+
+    if (!Array.isArray(order.kotRounds)) {
+      order.kotRounds = [];
+    }
+
+    order.kotRounds.push({
+      roundNumber: nextKotCount,
+      roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
+      items: newRoundItems.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        notes: i.notes || '',
+      })),
+      printed: false,
+      createdAt: new Date(),
+    });
 
     await order.save();
 
@@ -562,6 +643,104 @@ router.post('/:id/cancel', adminOnly, async (req, res) => {
 
     const populated = await populateOrder(Order.findById(order._id));
     res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:orderId/rounds/:roundId/mark-printed — Acknowledge KOT printed
+// ─────────────────────────────────────────────────────────────────
+router.post('/:orderId/rounds/:roundId/mark-printed', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!Array.isArray(order.kotRounds)) {
+      return res.status(404).json({ message: 'No KOT rounds found on order' });
+    }
+
+    const round = order.kotRounds.id(req.params.roundId);
+    if (!round) {
+      return res.status(404).json({ message: 'KOT round not found' });
+    }
+
+    round.printed = true;
+    round.printedAt = new Date();
+    await order.save();
+
+    res.json({ success: true, message: 'KOT marked as printed', roundId: round._id });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:orderId/reprint — Queue full KOT reprint for print station
+// ─────────────────────────────────────────────────────────────────
+router.post('/:orderId/reprint', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const activeItems = order.items
+      .filter((i) => i.status !== 'cancelled')
+      .map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        notes: i.notes || '',
+      }));
+
+    if (activeItems.length === 0) {
+      return res.status(400).json({ message: 'No active items to reprint' });
+    }
+
+    if (!Array.isArray(order.kotRounds)) {
+      order.kotRounds = [];
+    }
+
+    const newRoundNumber = order.kotRounds.length + 1;
+    order.kotRounds.push({
+      roundNumber: newRoundNumber,
+      roundTag: '[KOT REPRINT]',
+      items: activeItems,
+      printed: false,
+    });
+
+    await order.save();
+    res.json({ success: true, message: 'Reprint KOT queued for print station' });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:orderId/rounds/:roundId/reprint — Re-queue KOT for print station
+// ─────────────────────────────────────────────────────────────────
+router.post('/:orderId/rounds/:roundId/reprint', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!Array.isArray(order.kotRounds)) {
+      return res.status(404).json({ message: 'No KOT rounds found on order' });
+    }
+
+    const round = order.kotRounds.id(req.params.roundId);
+    if (!round) {
+      return res.status(404).json({ message: 'KOT round not found' });
+    }
+
+    round.printed = false;
+    await order.save();
+
+    res.json({ success: true, message: 'KOT re-queued for print station', roundId: round._id });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }

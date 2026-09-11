@@ -14,9 +14,23 @@ const orderItemSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+const kotRoundSchema = new mongoose.Schema({
+  roundNumber: { type: Number, required: true },
+  roundTag: { type: String, default: '[INITIAL ORDER]' },
+  items: [{
+    name: { type: String, required: true },
+    quantity: { type: Number, required: true, default: 1 },
+    notes: { type: String, default: '' },
+  }],
+  printed: { type: Boolean, default: false },
+  printedAt: { type: Date, default: null },
+  createdAt: { type: Date, default: Date.now },
+}, { timestamps: true });
+
 const orderSchema = new mongoose.Schema({
   table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table', required: true },
   items: [orderItemSchema],
+  kotRounds: [kotRoundSchema],
   status: {
     type: String,
     enum: ['open', 'preparing', 'served', 'billed', 'paid', 'cancelled'],

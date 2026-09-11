@@ -81,10 +81,28 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - Expandable rows show complete itemized timelines, kitchen notes, soft-cancelled items, and KOT ranges (`KOT-xxx-1 to -x`).
 - **CSV Export**: Generates UTF-8 BOM formatted spreadsheets for Excel and Google Sheets.
 
-### 3.6 Thermal Printing: Test Mode vs Production Mode
-- **Test Mode (`'test'`)**: Shows an interactive 80mm receipt dialog (`ThermalPreviewModal.tsx`) with high-fidelity thermal paper styling (dashed tear lines, monospaced font, exact alignment), a **Print Ticket** action, and a **Download PDF** action.
-- **Production Mode (`'production'`)**: Bypasses the preview modal and dispatches silently to the thermal printer via hidden iframe printing (`window.print()`).
-- Preference is persisted in browser `localStorage` (`peyala_pos_print_mode`) and dispatches a window event (`peyala_pos_print_mode_changed`) so all tabs stay in sync.
+### 3.6 Multi-Device Distributed Thermal Printing Engine & Chrome Silent Auto-Print
+- **Multi-Device Distributed Architecture**:
+  - **Mobile Waiter Devices (Ordering Clients)**: Waiters create orders and add KOT rounds from smartphones/tablets. On mobile devices (`isPrintStation = false`), the POS suppresses local print dialogs, stores the order in MongoDB with `kotRounds` (`printed: false`), and alerts the waiter: *"KOT sent to Counter Printer 🖨️"*.
+  - **Counter Print Station (Windows Laptop with Thermal Printer)**: A designated laptop connected via USB to the 80mm thermal receipt printer runs Chrome in kiosk mode (`start-kiosk.bat`) with the POS `/tables` page open and **"Print Station"** mode toggled **ON** in the header.
+  - **Automated Database Reconciliation**: The Print Station polls `GET /api/orders/pending-kots` every 2.5 seconds. When new unprinted KOT rounds arrive from any device, it automatically formats and sends them silently to the thermal printer via `printKOT(job, 'production')`, then acknowledges each job with `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
+  - **Concurrency & Deduplication**: To avoid double printing during network latency, an in-memory lock (`inFlightKotsRef`) tracks round IDs currently printing.
+  - **Remote KOT Reprint**: Waiters can tap "Send KOT to Printer" on any active order to queue an immediate reprint on the counter printer (`POST /api/orders/:orderId/reprint`).
+- **Auto-Print Default (`'production'`)**: In Production Mode, KOTs and Bills bypass preview modals and immediately invoke `printThermalSlip(html)` via a hidden iframe.
+- **Bypassing Chrome Print Dialog (Zero-Click Kiosk Printing)**:
+  - Chrome requires `--kiosk-printing` to bypass its native print preview dialog.
+  - **Windows Kiosk Architecture**:
+    - `start-kiosk.bat`: Automatically detects Chrome, prompts & persists target URL in `kiosk-url.txt`, normalizes URL with `?printStation=true` (auto-activating print station & production mode), and launches Chrome in true fullscreen kiosk mode (`--kiosk --kiosk-printing --user-data-dir="%LOCALAPPDATA%\PeyalaPOSChrome"`). Supports `--windowed` flag for app-window mode.
+    - `create-windows-shortcut.bat`: VBScript-powered utility placing a 1-click "Peyala POS Station" shortcut on the Windows desktop.
+    - Press `Alt + F4` or `F11` to close or toggle fullscreen.
+  - **macOS**: `start-kiosk.sh` / `start-kiosk.command` launches Chrome with:
+    `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --kiosk-printing --user-data-dir="$HOME/Library/Application Support/PeyalaPOSChrome"`
+  - Isolated user data profiles ensure the POS kiosk runs side-by-side with personal browser sessions without conflict.
+- **Minimizing Top Whitespace in KOT & Bill PDFs**:
+  - In `generateKOTHtml` and `generateBillHtml`, set `@page { size: 80mm auto; margin: 0 !important; }` and zeroed out all top margins on `html, body`.
+  - Setting `@page { margin: 0 }` prevents Chrome from reserving 15-20mm of blank header space (used for page titles/dates) and guarantees receipt content starts immediately at the top edge of the thermal paper and PDF.
+- **Test Mode (`'test'`)**: Allows operators to review the visual slip in `ThermalPreviewModal.tsx` before printing.
+
 
 ### 3.7 Role-Based Access Control (Admin vs Staff)
 - **Admin**: Full read and write permissions across all modules.
@@ -115,7 +133,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | Model | File | Key Fields |
 |-------|------|------------|
 | **`Table`** | `backend/src/models/Table.js` | `tableNumber`, `capacity`, `status` (`available`, `occupied`, `reserved`), `activeOrder` (ref: Order). |
-| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `table` (ref: Table), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod`, `kotCount`, `createdBy`. |
+| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `table` (ref: Table), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod`, `kotCount`, `createdBy`. |
 | **`MenuItem`** | `backend/src/models/MenuItem.js` | `name`, `category` (ref: MenuCategory), `price`, `taxPercent`, `isVeg`, `isAvailable`, `description`. |
 | **`MenuCategory`** | `backend/src/models/MenuCategory.js` | `name`, `description`, `sortOrder`, `isActive`. |
 | **`SalesEntry`** | `backend/src/models/SalesEntry.js` | `date`, `outletSales`, `paymentBreakdown` (`cash`, `upi`, `card`, `bankTransfer`), `zomato` (gross, deductions, net, settled), `fatafat`, `otherSales`, `totalSales`, `gstTotal`. |

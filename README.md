@@ -53,10 +53,30 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - Every POS order settled throughout the day automatically updates and bifurcates into **one consolidated daily sales row** in Indian Standard Time (IST, UTC+05:30).
 - Cash collections flow into `paymentBreakdown.cash` and UPI/Card into their respective fields without polluting the database with hundreds of redundant rows.
 
-### 5. Dual Printing Modes (80mm Thermal Printer Support)
-- **🧪 Test Mode**: Renders a photorealistic, pixel-perfect 80mm thermal receipt preview in an interactive modal with direct **Download PDF** and **Print Preview** options.
-- **🚀 Production Mode**: Sends ESC/POS receipt commands silently to the connected thermal printer using silent browser printing (`window.print` / hidden iframe) without user interruption.
-- Toggle between modes on the fly via the POS header button.
+### 5. Multi-Device Distributed Print Station & Chrome Silent Auto-Print
+- **Multi-Device Architecture**:
+  - **Mobile Waiter Devices**: Waiters take orders on phones or tablets connected to the web app (hosted on Vercel or local network). When placing an initial order or adding a KOT round, the mobile device saves the order directly to the MongoDB database without popping open a local print dialog, displaying a confirmation toast: *"KOT sent to Counter Printer 🖨️"*.
+  - **Central Windows Counter Laptop**: Connected physically (via USB) to the 80mm thermal receipt printer. It runs Chrome with the POS page (`/tables`) open and the **"Print Station"** mode toggled **ON** in the header.
+  - **Automated Database Reconciliation**: The Print Station polls `GET /api/orders/pending-kots` every 2.5 seconds. Whenever a new KOT round is created or queued by any mobile device, the station immediately formats the 80mm slip, sends it silently to the Windows default thermal printer via `printKOT(job, 'production')`, and marks it as `printed: true` in the DB via `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
+  - **Remote KOT Reprint**: Waiters on mobile devices can tap "Send KOT to Printer" on any active order to queue an immediate reprint on the counter printer without leaving the guest's table.
+  - **In-Flight Deduplication**: Prevents duplicate concurrent prints during polling using in-memory job locking (`inFlightKotsRef`).
+- **🚀 Production Mode (Default)**: Automatically sends KOTs and Bills straight to the default thermal printer via a hidden print iframe without opening preview dialogs.
+- **Bypassing Chrome Print Dialog & True Kiosk Mode on Windows**:
+  - By default, standard Chrome security displays a print dialog and browser chrome (tabs, search bar).
+  - **On Windows Counter Laptop**:
+    1. Double-click [`start-kiosk.bat`](file:///Users/kishalaya/Downloads/peyala_v8/start-kiosk.bat) (or run with your Vercel URL):
+       ```cmd
+       start-kiosk.bat https://your-pos-app.vercel.app/tables
+       ```
+    2. The script prompts you for your POS URL on first run and saves it to `kiosk-url.txt` so every future launch is instant.
+    3. It launches Chrome in **True Full-Screen Kiosk Mode** (`--kiosk`) with **Silent Auto-Printing** (`--kiosk-printing`) and appends `?printStation=true` to automatically activate Print Station mode without any manual clicks.
+    4. **Create a Desktop Shortcut**: Run [`create-windows-shortcut.bat`](file:///Users/kishalaya/Downloads/peyala_v8/create-windows-shortcut.bat) to place a 1-click **"Peyala POS Station"** icon on the Windows desktop.
+    5. **Keyboard Shortcuts**: Press `Alt + F4` to close the kiosk, or `F11` to toggle fullscreen. To run in a clean app window with a title bar instead of fullscreen, run `start-kiosk.bat --windowed`.
+  - **On macOS**: Run `./start-kiosk.sh` or double-click `start-kiosk.command`.
+- **🧪 Test Mode**: Renders a photorealistic 80mm receipt preview in an interactive modal with direct print preview.
+- **Zero Top Whitespace in KOT & Bill PDFs**:
+  - `@page { margin: 0 !important; }` and zero user-agent CSS margins strip out Chrome's automatic 20mm print header space, ensuring KOTs and bills start right at the top of the thermal roll and PDF without wasted paper.
+
 
 ### 6. Role-Based Access Control (RBAC)
 - **Admin**: Full authority to create tables, open orders, add KOT rounds, adjust item status, apply discounts, finalize bills, collect payments, and manage users.
@@ -153,6 +173,10 @@ peyala_v8/
 ├── docker-compose.yml      # Container orchestration
 ├── install.sh              # One-step dependency installer & DB seeder
 ├── start.sh                # Concurrent background runner
+├── start-kiosk.bat         # Windows Chrome kiosk launcher for silent auto-printing
+├── create-windows-shortcut.bat # Windows Desktop 1-click shortcut generator
+├── start-kiosk.sh          # macOS/Linux Chrome kiosk launcher
+├── start-kiosk.command     # macOS Desktop double-clickable kiosk launcher
 │
 ├── backend/
 │   ├── src/
@@ -232,6 +256,10 @@ peyala_v8/
 | `DELETE` | `/api/tables/:id` | `adminOnly` | Remove unoccupied table |
 | `POST` | `/api/orders` | `adminOnly` | Open table order & generate Round 1 KOT |
 | `POST` | `/api/orders/:id/items` | `adminOnly` | Add items as subsequent KOT round |
+| `GET` | `/api/orders/pending-kots` | Authenticated | Poll unprinted KOT rounds for Counter Print Station |
+| `POST` | `/api/orders/:orderId/rounds/:roundId/mark-printed` | Authenticated | Acknowledge KOT round printed by Print Station |
+| `POST` | `/api/orders/:orderId/rounds/:roundId/reprint` | Authenticated | Re-queue specific KOT round for printing |
+| `POST` | `/api/orders/:orderId/reprint` | Authenticated | Re-queue full active order KOT for Counter Print Station |
 | `PATCH` | `/api/orders/:id/items/:itemId` | `adminOnly` | Update item status (`pending`, `preparing`, `served`) |
 | `DELETE` | `/api/orders/:id/items/:itemId` | `adminOnly` | Soft-cancel an ordered item with note |
 | `PATCH` | `/api/orders/:id/discount` | `adminOnly` | Apply Flat (₹) or Percentage (%) discount |

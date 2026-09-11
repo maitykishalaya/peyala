@@ -23,9 +23,9 @@ export interface SlipPreviewPayload {
 }
 
 export function getPrintMode(): PrintMode {
-  if (typeof window === 'undefined') return 'test';
+  if (typeof window === 'undefined') return 'production';
   const saved = localStorage.getItem('peyala_pos_print_mode');
-  return saved === 'production' ? 'production' : 'test';
+  return saved === 'test' ? 'test' : 'production';
 }
 
 export function setPrintMode(mode: PrintMode) {
@@ -118,7 +118,7 @@ export function printThermalSlip(html: string) {
     } catch (err) {
       console.error('Thermal print failed:', err);
     }
-  }, 300);
+  }, 150);
 }
 
 // ── Helper: Format Dates ──────────────────────────────────────────
@@ -179,65 +179,80 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <meta charset="utf-8">
         <title>KOT - ${data.tableNumber}</title>
         <style>
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
           @page {
             size: 80mm auto;
-            margin: 2mm 3mm;
+            margin: 0 !important;
           }
           @media print {
-            body { width: 74mm; margin: 0 auto; }
+            html, body {
+              width: 76mm !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              padding-top: 0.5mm !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          }
+          html {
+            margin: 0 !important;
+            padding: 0 !important;
           }
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             font-size: 12px;
-            line-height: 1.35;
+            line-height: 1.3;
             color: #000;
             background: #fff;
-            width: 74mm;
-            margin: 0 auto;
-            padding: 2mm 1mm;
-            box-sizing: border-box;
+            width: 76mm;
+            margin: 0 auto !important;
+            padding: 0.5mm 1.5mm 3mm 1.5mm !important;
           }
           .center { text-align: center; }
           .bold { font-weight: bold; }
-          .divider { border-top: 1px dashed #000; margin: 4px 0; }
-          .divider-solid { border-top: 2px solid #000; margin: 5px 0; }
+          .divider { border-top: 1px dashed #000; margin: 3px 0; }
+          .divider-solid { border-top: 2px solid #000; margin: 4px 0; }
           .table-box {
             border: 2.5px solid #000;
-            padding: 6px 4px;
-            margin: 6px 0;
+            padding: 4px 3px;
+            margin: 3px 0 4px 0;
             text-align: center;
             border-radius: 4px;
           }
           .table-title {
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 900;
             letter-spacing: 0.5px;
             line-height: 1.1;
           }
           .round-tag {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-top: 2px;
+            margin: 0;
           }
           table { width: 100%; border-collapse: collapse; }
-          th, td { padding: 3px 0; }
+          th, td { padding: 2.5px 0; }
         </style>
       </head>
       <body>
-        <div class="center" style="font-size: 15px; font-weight: 900; letter-spacing: 1px;">
+        <div class="center" style="font-size: 14px; font-weight: 900; letter-spacing: 0.5px; line-height: 1.1; margin: 0; padding: 0;">
           ${STORE_INFO.name}
         </div>
-        <div class="center" style="font-size: 12px; font-weight: 700; margin-top: 1px;">
+        <div class="center" style="font-size: 11px; font-weight: 700; margin: 1px 0 2px 0; letter-spacing: 0.5px;">
           KITCHEN ORDER TICKET (KOT)
         </div>
 
         <!-- Big & Bold Table + KOT Number Box -->
         <div class="table-box">
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 5px;">
-            <span style="font-size: 16px; font-weight: 900; letter-spacing: 0.5px;">KOT NO: #${escapeHtml(String(kotDisplay))}</span>
-            <span class="round-tag" style="margin: 0;">${escapeHtml(roundTag)}</span>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px;">
+            <span style="font-size: 15px; font-weight: 900; letter-spacing: 0.5px;">KOT NO: #${escapeHtml(String(kotDisplay))}</span>
+            <span class="round-tag">${escapeHtml(roundTag)}</span>
           </div>
           <div class="table-title">TABLE: ${escapeHtml(data.tableNumber)}</div>
         </div>
@@ -335,12 +350,28 @@ export function generateBillHtml(data: BillPrintData): string {
         <meta charset="utf-8">
         <title>Bill - ${data.orderNumber || data.tableNumber}</title>
         <style>
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
           @page {
             size: 80mm auto;
-            margin: 2mm 3mm;
+            margin: 0 !important;
           }
           @media print {
-            body { width: 74mm; margin: 0 auto; }
+            html, body {
+              width: 76mm !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              padding-top: 0.5mm !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          }
+          html {
+            margin: 0 !important;
+            padding: 0 !important;
           }
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -348,23 +379,22 @@ export function generateBillHtml(data: BillPrintData): string {
             line-height: 1.3;
             color: #000;
             background: #fff;
-            width: 74mm;
-            margin: 0 auto;
-            padding: 2mm 1mm;
-            box-sizing: border-box;
+            width: 76mm;
+            margin: 0 auto !important;
+            padding: 0.5mm 1.5mm 3mm 1.5mm !important;
           }
           .center { text-align: center; }
           .bold { font-weight: bold; }
-          .divider { border-top: 1px dashed #000; margin: 4px 0; }
-          .divider-solid { border-top: 1px solid #000; margin: 4px 0; }
+          .divider { border-top: 1px dashed #000; margin: 3px 0; }
+          .divider-solid { border-top: 1px solid #000; margin: 3px 0; }
           .store-box {
             border: 1px solid #999;
             border-radius: 4px;
-            padding: 5px;
-            margin: 6px 0;
+            padding: 4px;
+            margin: 4px 0;
             text-align: center;
             font-size: 10.5px;
-            line-height: 1.35;
+            line-height: 1.3;
           }
           table { width: 100%; border-collapse: collapse; }
           th, td { padding: 2px 0; font-size: 11px; }
@@ -373,7 +403,7 @@ export function generateBillHtml(data: BillPrintData): string {
       </head>
       <body>
         <!-- Header -->
-        <div class="center" style="font-size: 16px; font-weight: 900; letter-spacing: 1px;">
+        <div class="center" style="font-size: 15px; font-weight: 900; letter-spacing: 0.5px; line-height: 1.1; margin: 0; padding: 0;">
           ${STORE_INFO.name}
         </div>
 

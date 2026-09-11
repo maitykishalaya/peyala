@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { useAuth } from '@/lib/auth';
@@ -99,6 +99,88 @@ export default function TablesPage() {
       setPrintModeState('test');
     }
   };
+
+  // ── Print Station (Remote KOT Auto-Print Hub for Windows Counter Laptop) ──
+  const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
+  const [lastPrintedKOT, setLastPrintedKOT] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const inFlightKotsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('printStation') === 'true' || urlParams.get('kiosk') === 'true') {
+        localStorage.setItem('peyala_is_print_station', 'true');
+        setIsPrintStation(true);
+        setPrintMode('production');
+        setPrintModeState('production');
+      } else {
+        const savedStation = localStorage.getItem('peyala_is_print_station');
+        setIsPrintStation(savedStation === 'true');
+      }
+    }
+  }, []);
+
+  const togglePrintStation = () => {
+    const nextVal = !isPrintStation;
+    setIsPrintStation(nextVal);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('peyala_is_print_station', nextVal ? 'true' : 'false');
+    }
+  };
+
+  // Background KOT Print Station Listener
+  // When active (on the Windows laptop with printer attached), polls unprinted KOTs and prints silently
+  useEffect(() => {
+    if (!isPrintStation) return;
+
+    let isPolling = false;
+
+    const checkPendingKots = async () => {
+      if (isPolling) return;
+      isPolling = true;
+
+      try {
+        const res = await ordersApi.getPendingKots();
+        const pendingJobs = res.data || [];
+
+        for (const job of pendingJobs) {
+          const jobKey = `${job.orderId}-${job.roundId}`;
+          if (inFlightKotsRef.current.has(jobKey)) continue;
+
+          inFlightKotsRef.current.add(jobKey);
+
+          // Trigger silent auto-print on this print station device
+          printKOT({
+            tableNumber: job.tableNumber,
+            kotNumber: job.kotNumber,
+            orderNumber: job.orderNumber,
+            roundTag: job.roundTag,
+            billerName: job.billerName,
+            createdAt: job.createdAt,
+            items: job.items,
+          }, 'production');
+
+          // Mark round as printed in DB so it is never printed twice
+          await ordersApi.markKotPrinted(job.orderId, job.roundId);
+          setLastPrintedKOT(`Table ${job.tableNumber} (${job.roundTag})`);
+
+          // Brief stagger between tickets if multiple are queued
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      } catch (err) {
+        console.error('Error polling pending KOTs for Print Station:', err);
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    // Check immediately and then poll every 2.5s
+    checkPendingKots();
+    const interval = setInterval(checkPendingKots, 2500);
+
+    return () => clearInterval(interval);
+  }, [isPrintStation]);
 
   // Filtered tables
   const filteredTables = useMemo(() => {
@@ -232,16 +314,24 @@ export default function TablesPage() {
       });
 
       const orderNum = res.data.orderNumber || res.data._id;
-      printKOT({
-        tableNumber: selectedTable.tableNumber,
-        kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-1`,
-        orderNumber: orderNum,
-        tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
-        billerName: res.data.createdBy?.name || 'Staff',
-        roundTag: '[INITIAL ORDER]',
-        createdAt: res.data.createdAt,
-        items: round1Items,
-      });
+      if (isPrintStation) {
+        printKOT({
+          tableNumber: selectedTable.tableNumber,
+          kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-1`,
+          orderNumber: orderNum,
+          tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
+          billerName: res.data.createdBy?.name || 'Staff',
+          roundTag: '[INITIAL ORDER]',
+          createdAt: res.data.createdAt,
+          items: round1Items,
+        });
+        if (res.data.kotRounds?.[0]?._id) {
+          await ordersApi.markKotPrinted(res.data._id, res.data.kotRounds[0]._id);
+        }
+      } else {
+        setNoticeMessage(`Table ${selectedTable.tableNumber} order opened! KOT sent to Counter Printer 🖨️`);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      }
 
       await loadData();
     } catch (err: any) {
@@ -307,16 +397,25 @@ export default function TablesPage() {
 
       const orderNum = res.data.orderNumber || res.data._id;
       const roundNum = res.data.kotCount || 2;
-      printKOT({
-        tableNumber: selectedTable?.tableNumber || 'Table',
-        kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-${roundNum}`,
-        orderNumber: orderNum,
-        tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
-        billerName: res.data.createdBy?.name || 'Staff',
-        roundTag: `[ROUND ${roundNum} - ADD-ON]`,
-        createdAt: new Date(),
-        items: roundItems,
-      });
+      if (isPrintStation) {
+        printKOT({
+          tableNumber: selectedTable?.tableNumber || 'Table',
+          kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-${roundNum}`,
+          orderNumber: orderNum,
+          tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
+          billerName: res.data.createdBy?.name || 'Staff',
+          roundTag: `[ROUND ${roundNum} - ADD-ON]`,
+          createdAt: new Date(),
+          items: roundItems,
+        });
+        const latestRound = res.data.kotRounds?.[res.data.kotRounds.length - 1];
+        if (latestRound?._id) {
+          await ordersApi.markKotPrinted(res.data._id, latestRound._id);
+        }
+      } else {
+        setNoticeMessage(`Added Round ${roundNum} for Table ${selectedTable?.tableNumber || ''}! KOT sent to Counter Printer 🖨️`);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      }
 
       await loadData();
     } catch (err: any) {
@@ -546,7 +645,7 @@ export default function TablesPage() {
                   ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100'
                   : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100'
               )}
-              title="Click to toggle between Test Mode (Visual Preview & PDF) and Production Mode (Silent Print)"
+              title="Click to toggle between Test Mode (Visual Preview & PDF) and Auto-Print Production Mode"
             >
               {printMode === 'test' ? (
                 <>
@@ -556,9 +655,28 @@ export default function TablesPage() {
               ) : (
                 <>
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>🚀 Production Mode (Silent Print)</span>
+                  <span>🚀 Auto-Print (Production)</span>
                 </>
               )}
+            </button>
+            {/* Print Station Toggle */}
+            <button
+              onClick={togglePrintStation}
+              type="button"
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shadow-xs',
+                isPrintStation
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-md ring-2 ring-emerald-500/30'
+                  : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-gray-400'
+              )}
+              title={
+                isPrintStation
+                  ? 'Print Station ACTIVE: This device catches and auto-prints KOTs placed from mobile devices.'
+                  : 'Enable on the Windows counter laptop to auto-print orders placed from mobile devices.'
+              }
+            >
+              <Printer className={cn('w-4 h-4', isPrintStation && 'animate-pulse text-white')} />
+              <span>{isPrintStation ? 'Print Station: ON' : 'Print Station: OFF'}</span>
             </button>
             <button onClick={loadData} className="btn-secondary flex items-center gap-1.5" title="Refresh">
               <RefreshCw className="w-4 h-4" />
@@ -571,6 +689,38 @@ export default function TablesPage() {
             )}
           </div>
         </div>
+
+        {/* Toast / Notification Banner for Mobile Orders */}
+        {noticeMessage && (
+          <div className="flex items-center justify-between p-3 bg-emerald-100 dark:bg-emerald-950/60 border-2 border-emerald-400 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-900 dark:text-emerald-200 shadow-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>{noticeMessage}</span>
+            </div>
+            <button onClick={() => setNoticeMessage(null)} className="text-emerald-700 hover:text-emerald-900">
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Print Station Live Hub Banner */}
+        {isPrintStation && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 shadow-xs">
+            <div className="flex items-center gap-2 font-medium">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+              </span>
+              <span className="font-black text-emerald-900 dark:text-emerald-300">Print Station Active:</span>
+              <span>Reconciling mobile orders and auto-printing KOTs directly to connected printer.</span>
+            </div>
+            {lastPrintedKOT && (
+              <span className="text-[11px] font-bold bg-emerald-200/90 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 shrink-0">
+                Last printed: {lastPrintedKOT}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Non-Admin Notice Banner */}
         {!isAdmin && (
@@ -1067,7 +1217,7 @@ export default function TablesPage() {
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const activeItems = activeOrder.items
                           ?.filter((i: any) => i.status !== 'cancelled')
                           .map((i: any) => ({
@@ -1077,22 +1227,43 @@ export default function TablesPage() {
                           })) || [];
                         const orderNum = activeOrder.orderNumber || activeOrder._id;
                         const tokenNo = activeOrder.orderNumber ? String(activeOrder.orderNumber).slice(-2) : activeOrder._id.slice(-2);
-                        printKOT({
-                          tableNumber: selectedTable.tableNumber,
-                          kotNumber: `KOT-${activeOrder.orderNumber ? activeOrder.orderNumber : activeOrder._id.slice(-4)}-ALL`,
-                          orderNumber: orderNum,
-                          tokenNo: tokenNo,
-                          billerName: activeOrder.createdBy?.name || 'Staff',
-                          roundTag: '[FULL KOT REPRINT]',
-                          createdAt: activeOrder.createdAt,
-                          items: activeItems,
-                        });
+
+                        if (isPrintStation || printMode === 'test') {
+                          printKOT({
+                            tableNumber: selectedTable.tableNumber,
+                            kotNumber: `KOT-${activeOrder.orderNumber ? activeOrder.orderNumber : activeOrder._id.slice(-4)}-ALL`,
+                            orderNumber: orderNum,
+                            tokenNo: tokenNo,
+                            billerName: activeOrder.createdBy?.name || 'Staff',
+                            roundTag: '[FULL KOT REPRINT]',
+                            createdAt: activeOrder.createdAt,
+                            items: activeItems,
+                          });
+                        } else {
+                          try {
+                            await ordersApi.reprintOrderKot(activeOrder._id);
+                            setNoticeMessage(`KOT reprint for Table ${selectedTable.tableNumber} sent to Counter Printer 🖨️`);
+                            setTimeout(() => setNoticeMessage(null), 4000);
+                          } catch (err) {
+                            // Fallback to local print
+                            printKOT({
+                              tableNumber: selectedTable.tableNumber,
+                              kotNumber: `KOT-${activeOrder.orderNumber ? activeOrder.orderNumber : activeOrder._id.slice(-4)}-ALL`,
+                              orderNumber: orderNum,
+                              tokenNo: tokenNo,
+                              billerName: activeOrder.createdBy?.name || 'Staff',
+                              roundTag: '[FULL KOT REPRINT]',
+                              createdAt: activeOrder.createdAt,
+                              items: activeItems,
+                            });
+                          }
+                        }
                       }}
                       className="btn-secondary text-xs py-1.5 flex items-center gap-1 text-gray-700 dark:text-gray-300"
-                      title="Print or reprint 80mm KOT ticket"
+                      title={isPrintStation ? 'Print 80mm KOT ticket on local printer' : 'Dispatch KOT reprint to Counter Printer'}
                     >
                       <Printer className="w-3.5 h-3.5" />
-                      Print KOT
+                      {isPrintStation ? 'Print KOT' : 'Send KOT to Printer'}
                     </button>
                     {isAdmin && activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && (
                       <button

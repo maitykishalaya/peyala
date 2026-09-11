@@ -34,6 +34,20 @@ export interface OrderItem {
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
 }
 
+export interface KotRound {
+  _id: string;
+  roundNumber: number;
+  roundTag?: string;
+  items: Array<{
+    name: string;
+    quantity: number;
+    notes?: string;
+  }>;
+  printed: boolean;
+  printedAt?: string | null;
+  createdAt?: string;
+}
+
 export interface Order {
   _id: string;
   table: {
@@ -46,6 +60,7 @@ export interface Order {
   status: 'open' | 'preparing' | 'served' | 'billed' | 'paid' | 'cancelled';
   orderNumber?: number;
   kotCount?: number;
+  kotRounds?: KotRound[];
   subtotal: number;
   taxAmount: number;
   discountType?: 'flat' | 'percentage';
@@ -116,6 +131,23 @@ export const tablesApi = {
     api.delete<{ message: string }>(`/tables/${id}`),
 };
 
+export interface PendingKotJob {
+  orderId: string;
+  roundId: string;
+  tableNumber: string;
+  orderNumber?: number;
+  kotNumber: string;
+  roundNumber: number;
+  roundTag: string;
+  billerName?: string;
+  createdAt: string;
+  items: Array<{
+    name: string;
+    quantity: number;
+    notes?: string;
+  }>;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Orders API
 // ─────────────────────────────────────────────────────────────────
@@ -142,4 +174,12 @@ export const ordersApi = {
     api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount }),
   cancel: (id: string) =>
     api.post<Order>(`/orders/${id}/cancel`),
+  getPendingKots: () =>
+    api.get<PendingKotJob[]>('/orders/pending-kots'),
+  markKotPrinted: (orderId: string, roundId: string) =>
+    api.post<{ success: boolean; message: string; roundId: string }>(`/orders/${orderId}/rounds/${roundId}/mark-printed`),
+  reprintKot: (orderId: string, roundId: string) =>
+    api.post<{ success: boolean; message: string; roundId: string }>(`/orders/${orderId}/rounds/${roundId}/reprint`),
+  reprintOrderKot: (orderId: string) =>
+    api.post<{ success: boolean; message: string }>(`/orders/${orderId}/reprint`),
 };

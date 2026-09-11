@@ -36,6 +36,9 @@ echo -e "  🔗 API:  ${YELLOW}http://localhost:4000/api/health${NC}"
 echo ""
 echo -e "  Login:  ${YELLOW}admin@peyala.com${NC} / ${YELLOW}peyala123${NC}"
 echo ""
+echo -e "  🖨️  ${GREEN}Silent Auto-Print POS (Bypass Chrome Dialog):${NC}"
+echo -e "      Run: ${CYAN}./start-kiosk.sh${NC} (or double-click ${CYAN}start-kiosk.command${NC})"
+echo ""
 echo -e "Press ${YELLOW}Ctrl+C${NC} to stop"
 
 trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; echo ''; echo 'Servers stopped.'; exit 0" SIGINT SIGTERM

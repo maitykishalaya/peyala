@@ -63,7 +63,7 @@ export default function ThermalPreviewModal() {
   };
 
   const handleSwitchToProduction = () => {
-    if (confirm('Switch to Production Mode? Future KOTs and Bills will print silently without showing this preview modal.')) {
+    if (confirm('Switch to Auto-Print Production Mode? Future KOTs and Bills will auto-print directly without this preview modal.\n\nTip: To bypass the Chrome print dialog completely, launch Chrome via ./start-kiosk.sh')) {
       setPrintMode('production');
       setCurrentMode('production');
       setCopiedNotification(true);
