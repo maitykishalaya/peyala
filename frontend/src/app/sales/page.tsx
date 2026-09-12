@@ -24,6 +24,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info, RefreshCw } from 'lucide-react';
 
 const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
@@ -85,6 +86,7 @@ export default function SalesPage() {
   // ── Modal state ─────────────────────────────────────────────────
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
   const [selected, setSelected] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
 
   // ── Section expand/collapse state (Zomato + Fatafat collapsed by default) ──
   const [zomatoOpen, setZomatoOpen] = useState(false);
@@ -225,24 +227,42 @@ export default function SalesPage() {
 
   // ── Submit form ─────────────────────────────────────────────────
   const submit = async () => {
-    const payload = normalizeSaleFormPayload(form);
-    if (modal === 'edit') {
-      await salesApi.update(selected._id, payload);
-    } else {
-      await salesApi.create(payload);
+    if (!form.date) {
+      toast.error('Date is required');
+      return;
     }
-    setModal(null);
-    setForm(blank());
-    setZomatoOpen(false);
-    setFatafatOpen(false);
-    load();
+    setSaving(true);
+    try {
+      const payload = normalizeSaleFormPayload(form);
+      if (modal === 'edit') {
+        await salesApi.update(selected._id, payload);
+        toast.success(`Sales entry for ${formatDate(form.date)} updated successfully`);
+      } else {
+        await salesApi.create(payload);
+        toast.success(`Sales entry for ${formatDate(form.date)} recorded successfully`);
+      }
+      setModal(null);
+      setForm(blank());
+      setZomatoOpen(false);
+      setFatafatOpen(false);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to save sales entry');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Delete entry ─────────────────────────────────────────────────
   const del = async (id: string) => {
     if (!confirm('Delete this sales entry? Account credits and GST will be reversed.')) return;
-    await salesApi.delete(id);
-    load();
+    try {
+      await salesApi.delete(id);
+      toast.success('Sales entry deleted successfully');
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to delete sales entry');
+    }
   };
 
   const pages = Math.ceil(total / 30);
@@ -653,10 +673,17 @@ export default function SalesPage() {
 
           {/* Submit */}
           <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={submit} className="btn-primary flex-1 py-2.5">
-              Save Sales Entry
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="btn-primary flex-1 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'edit' ? 'Updating Sales Entry...' : 'Saving Sales Entry...')
+                : (modal === 'edit' ? 'Update Sales Entry' : 'Save Sales Entry')}
             </button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

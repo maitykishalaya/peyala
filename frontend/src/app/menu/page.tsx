@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { menuApi, addonsApi, MenuCategory, MenuItem, Addon, MenuItemVariant } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, Search, FolderPlus,
   UtensilsCrossed, Check, X, AlertCircle, Sparkles, Layers
@@ -17,6 +18,11 @@ export default function MenuPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [vegFilter, setVegFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
+
+  // Loading states for buttons
+  const [itemSaving, setItemSaving] = useState(false);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [addonSaving, setAddonSaving] = useState(false);
 
   // Item Modal state
   const [itemModal, setItemModal] = useState<'create' | 'edit' | null>(null);
@@ -180,20 +186,37 @@ export default function MenuPage() {
 
   // Save item
   const saveItem = async () => {
-    if (!itemForm.name.trim()) return alert('Item name is required');
-    if (!itemForm.category) return alert('Category is required');
-    if (!itemForm.hasVariants && itemForm.price < 0) return alert('Price cannot be negative');
+    if (!itemForm.name.trim()) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!itemForm.category) {
+      toast.error('Please select a menu category');
+      return;
+    }
+    if (!itemForm.hasVariants && itemForm.price < 0) {
+      toast.error('Price cannot be negative');
+      return;
+    }
 
     if (itemForm.hasVariants) {
       if (itemForm.variants.length === 0) {
-        return alert('Please add at least one portion variant or disable variants');
+        toast.error('Please add at least one portion variant or disable variants');
+        return;
       }
       for (const v of itemForm.variants) {
-        if (!v.name.trim()) return alert('All variants must have a name (e.g. Half Plate)');
-        if (v.price < 0) return alert('Variant price cannot be negative');
+        if (!v.name.trim()) {
+          toast.error('All portion variants must have a name (e.g. Half Plate)');
+          return;
+        }
+        if (v.price < 0) {
+          toast.error('Variant price cannot be negative');
+          return;
+        }
       }
     }
 
+    setItemSaving(true);
     try {
       const payload = {
         ...itemForm,
@@ -203,13 +226,17 @@ export default function MenuPage() {
 
       if (itemModal === 'edit' && editingItem) {
         await menuApi.updateItem(editingItem._id, payload);
+        toast.success(`Item "${itemForm.name}" updated successfully!`);
       } else {
         await menuApi.createItem(payload);
+        toast.success(`Item "${itemForm.name}" created successfully!`);
       }
       setItemModal(null);
       await loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to save menu item');
+      toast.error(err.response?.data?.message || err.message || 'Failed to save menu item');
+    } finally {
+      setItemSaving(false);
     }
   };
 
@@ -217,11 +244,17 @@ export default function MenuPage() {
   const toggleAvailability = async (item: MenuItem) => {
     try {
       await menuApi.toggleAvailability(item._id);
+      const nextState = !item.isAvailable;
       setItems((prev) =>
-        prev.map((i) => (i._id === item._id ? { ...i, isAvailable: !i.isAvailable } : i))
+        prev.map((i) => (i._id === item._id ? { ...i, isAvailable: nextState } : i))
       );
+      if (nextState) {
+        toast.success(`"${item.name}" is now Available for ordering`);
+      } else {
+        toast.warning(`"${item.name}" marked Out of Stock (86'd)`);
+      }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to toggle availability');
+      toast.error(err.response?.data?.message || err.message || 'Failed to toggle availability');
     }
   };
 
@@ -230,9 +263,10 @@ export default function MenuPage() {
     if (!confirm(`Delete "${item.name}" from menu?`)) return;
     try {
       await menuApi.deleteItem(item._id);
+      toast.success(`"${item.name}" deleted from menu`);
       await loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to delete item');
+      toast.error(err.response?.data?.message || err.message || 'Failed to delete item');
     }
   };
 
@@ -240,21 +274,29 @@ export default function MenuPage() {
   const saveCategory = async () => {
     if (!categoryForm.name.trim()) {
       setCategoryError('Category name is required');
+      toast.error('Category name is required');
       return;
     }
     setCategoryError('');
+    setCategorySaving(true);
 
     try {
       if (editingCategory) {
         await menuApi.updateCategory(editingCategory._id, categoryForm);
+        toast.success(`Category "${categoryForm.name}" updated successfully!`);
       } else {
         await menuApi.createCategory(categoryForm);
+        toast.success(`Category "${categoryForm.name}" created successfully!`);
       }
       setCategoryForm({ name: '', description: '', sortOrder: 0, isActive: true, defaultAddons: [] });
       setEditingCategory(null);
       await loadData();
     } catch (err: any) {
-      setCategoryError(err.response?.data?.message || 'Failed to save category');
+      const msg = err.response?.data?.message || err.message || 'Failed to save category';
+      setCategoryError(msg);
+      toast.error(msg);
+    } finally {
+      setCategorySaving(false);
     }
   };
 
@@ -264,10 +306,13 @@ export default function MenuPage() {
     setCategoryError('');
     try {
       await menuApi.deleteCategory(cat._id);
+      toast.success(`Category "${cat.name}" deleted`);
       if (selectedCategory === cat._id) setSelectedCategory('all');
       await loadData();
     } catch (err: any) {
-      setCategoryError(err.response?.data?.message || 'Failed to delete category');
+      const msg = err.response?.data?.message || err.message || 'Failed to delete category';
+      setCategoryError(msg);
+      toast.error(msg);
     }
   };
 
@@ -275,25 +320,34 @@ export default function MenuPage() {
   const saveAddon = async () => {
     if (!addonForm.name.trim()) {
       setAddonError('Add-on name is required');
+      toast.error('Add-on name is required');
       return;
     }
     if (addonForm.price < 0) {
       setAddonError('Price cannot be negative');
+      toast.error('Price cannot be negative');
       return;
     }
     setAddonError('');
+    setAddonSaving(true);
 
     try {
       if (editingAddon) {
         await addonsApi.update(editingAddon._id, addonForm);
+        toast.success(`Add-on "${addonForm.name}" updated successfully!`);
       } else {
         await addonsApi.create(addonForm);
+        toast.success(`Add-on "${addonForm.name}" created successfully!`);
       }
       setAddonForm({ name: '', price: 0, isVeg: true, isActive: true, sortOrder: 0 });
       setEditingAddon(null);
       await loadData();
     } catch (err: any) {
-      setAddonError(err.response?.data?.message || 'Failed to save add-on');
+      const msg = err.response?.data?.message || err.message || 'Failed to save add-on';
+      setAddonError(msg);
+      toast.error(msg);
+    } finally {
+      setAddonSaving(false);
     }
   };
 
@@ -303,9 +357,12 @@ export default function MenuPage() {
     setAddonError('');
     try {
       await addonsApi.delete(addon._id);
+      toast.success(`Add-on "${addon.name}" deleted`);
       await loadData();
     } catch (err: any) {
-      setAddonError(err.response?.data?.message || 'Failed to delete add-on');
+      const msg = err.response?.data?.message || err.message || 'Failed to delete add-on';
+      setAddonError(msg);
+      toast.error(msg);
     }
   };
 
@@ -961,10 +1018,15 @@ export default function MenuPage() {
           </div>
 
           <div className="flex gap-3 pt-3">
-            <button onClick={saveItem} className="btn-primary flex-1">
-              {itemModal === 'create' ? 'Save Item' : 'Update Item'}
+            <button
+              onClick={saveItem}
+              disabled={itemSaving}
+              className="btn-primary flex-1 py-2.5 disabled:opacity-60 flex items-center justify-center gap-1.5"
+            >
+              {itemSaving && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {itemSaving ? 'Saving Item...' : itemModal === 'create' ? 'Save Item' : 'Update Item'}
             </button>
-            <button onClick={() => setItemModal(null)} className="btn-secondary">
+            <button onClick={() => setItemModal(null)} disabled={itemSaving} className="btn-secondary">
               Cancel
             </button>
           </div>
@@ -1095,9 +1157,17 @@ export default function MenuPage() {
                     Cancel
                   </button>
                 )}
-                <button onClick={saveCategory} className="btn-primary text-xs py-1.5 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" />
-                  {editingCategory ? 'Update' : 'Add Category'}
+                <button
+                  onClick={saveCategory}
+                  disabled={categorySaving}
+                  className="btn-primary text-xs py-1.5 flex items-center gap-1 disabled:opacity-60"
+                >
+                  {categorySaving ? (
+                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  {categorySaving ? 'Saving...' : editingCategory ? 'Update' : 'Add Category'}
                 </button>
               </div>
             </div>
@@ -1278,9 +1348,17 @@ export default function MenuPage() {
                       Cancel
                     </button>
                   )}
-                  <button onClick={saveAddon} className="btn-primary text-xs py-1.5 flex items-center gap-1">
-                    <Check className="w-3.5 h-3.5" />
-                    {editingAddon ? 'Update Add-on' : 'Add Add-on'}
+                  <button
+                    onClick={saveAddon}
+                    disabled={addonSaving}
+                    className="btn-primary text-xs py-1.5 flex items-center gap-1 disabled:opacity-60"
+                  >
+                    {addonSaving ? (
+                      <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    {addonSaving ? 'Saving...' : editingAddon ? 'Update Add-on' : 'Add Add-on'}
                   </button>
                 </div>
               </div>

@@ -26,6 +26,7 @@ import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, UNITS, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle, RefreshCw } from 'lucide-react';
 
 const REFDATA_CACHE_KEY = 'peyala_purchases_refdata_cache_v1';
@@ -172,11 +173,13 @@ export default function PurchasesPage() {
   // ── Payment mode state ──────────────────────────────────────────
   const [allowedModes, setAllowedModes] = useState<{ value: string; label: string }[]>([]);
 
-  // ── Clear due form ──────────────────────────────────────────────
+  // ── Clear due form ──────────────────────────────────────
   const [clearDueForm, setClearDueForm] = useState({ paidFrom: '', paymentMode: 'cash', date: today() });
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [clearDueSaving, setClearDueSaving] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<any>(null);
 
   const blankPurchaseForm = () => ({
@@ -309,6 +312,16 @@ export default function PurchasesPage() {
 
   // ── Save quick-added item and populate the line ─────────────────
   const saveQuickAdd = async () => {
+    if (!quickAddForm.name?.trim()) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!quickAddForm.category) {
+      toast.error('Please select an inventory category');
+      return;
+    }
+
+    setQuickAddSaving(true);
     try {
       const res = await purchasesApi.quickAddItem(quickAddForm);
       const newItem = res.data.item;
@@ -321,9 +334,12 @@ export default function PurchasesPage() {
       if (quickAddTargetLine >= 0) {
         handleItemSelect(quickAddTargetLine, newItem._id, newItem.unit);
       }
+      toast.success(`"${newItem.name}" added to inventory`);
       setQuickAddModal(false);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to add item');
+      toast.error(err.response?.data?.message || 'Failed to add item');
+    } finally {
+      setQuickAddSaving(false);
     }
   };
 
@@ -417,6 +433,7 @@ export default function PurchasesPage() {
     if (errors.length > 0) {
       setFormErrors(errors);
       setErrorModalOpen(true);
+      toast.error(errors[0]);
       return;
     }
 
@@ -439,8 +456,10 @@ export default function PurchasesPage() {
       };
       if (editingPurchase) {
         await purchasesApi.update(editingPurchase._id, payload);
+        toast.success('Purchase updated successfully');
       } else {
         await purchasesApi.create(payload);
+        toast.success('Purchase created successfully');
       }
       setModal(false);
       setEditingPurchase(null);
@@ -451,6 +470,7 @@ export default function PurchasesPage() {
       const message = err.response?.data?.message || 'Purchase could not be saved. Please check the form.';
       setFormErrors([message]);
       setErrorModalOpen(true);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -458,13 +478,31 @@ export default function PurchasesPage() {
 
   const del = async (id: string) => {
     if (!confirm('Delete this purchase and reverse inventory?')) return;
-    await purchasesApi.delete(id); load();
+    try {
+      await purchasesApi.delete(id);
+      toast.success('Purchase deleted and inventory reversed');
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete purchase');
+    }
   };
 
   const clearDue = async () => {
-    await purchasesApi.clearDue(clearDueModal._id, clearDueForm);
-    setClearDueModal(null);
-    load();
+    if (!clearDueForm.paidFrom) {
+      toast.error('Select an account to pay from');
+      return;
+    }
+    setClearDueSaving(true);
+    try {
+      await purchasesApi.clearDue(clearDueModal._id, clearDueForm);
+      toast.success('Due payment cleared successfully');
+      setClearDueModal(null);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to clear due');
+    } finally {
+      setClearDueSaving(false);
+    }
   };
 
   const pages = Math.ceil(total / 20);
@@ -742,11 +780,16 @@ export default function PurchasesPage() {
           <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
 
           <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={submit} disabled={saving} className="btn-primary flex-1 py-2.5 disabled:opacity-60">
-              {saving ? 'Saving...' : editingPurchase ? `Save Changes · ${formatCurrency(grandTotal)}` : `Save Purchase · ${formatCurrency(grandTotal)}`}
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="btn-primary flex-1 py-2.5 disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving ? (editingPurchase ? 'Saving Changes...' : 'Saving Purchase...') : (editingPurchase ? `Save Changes · ${formatCurrency(grandTotal)}` : `Save Purchase · ${formatCurrency(grandTotal)}`)}
               {form.paymentMode === 'due' && !saving && ' (Due)'}
             </button>
-            <button onClick={() => { setModal(false); setEditingPurchase(null); }} className="btn-secondary">Cancel</button>
+            <button onClick={() => { setModal(false); setEditingPurchase(null); }} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -788,8 +831,15 @@ export default function PurchasesPage() {
             </div>
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={saveQuickAdd} className="btn-primary flex-1">Add to Inventory & Use</button>
-            <button onClick={() => setQuickAddModal(false)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={saveQuickAdd}
+              disabled={quickAddSaving}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {quickAddSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {quickAddSaving ? 'Adding Item...' : 'Add to Inventory & Use'}
+            </button>
+            <button onClick={() => setQuickAddModal(false)} disabled={quickAddSaving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -816,8 +866,15 @@ export default function PurchasesPage() {
             </div>
             <div><label className="label">Date</label><input type="date" className="input" value={clearDueForm.date} onChange={e => setClearDueForm({...clearDueForm, date: e.target.value})} /></div>
             <div className="flex gap-3 pt-2">
-              <button onClick={clearDue} className="btn-primary flex-1">Clear Due · {formatCurrency(clearDueModal.totalAmount)}</button>
-              <button onClick={() => setClearDueModal(null)} className="btn-secondary">Cancel</button>
+              <button
+                onClick={clearDue}
+                disabled={clearDueSaving}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {clearDueSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {clearDueSaving ? 'Clearing Due...' : `Clear Due · ${formatCurrency(clearDueModal.totalAmount)}`}
+              </button>
+              <button onClick={() => setClearDueModal(null)} disabled={clearDueSaving} className="btn-secondary">Cancel</button>
             </div>
           </div>
         )}

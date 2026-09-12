@@ -73,8 +73,12 @@ const orderSchema = new mongoose.Schema({
     other: { type: Number, default: 0 },
   },
   paidAt: { type: Date, default: null },
+  billPrinted: { type: Boolean, default: false },
+  billPrintedAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
+
+orderSchema.index({ status: 1, billPrinted: 1 });
 
 // Static helper to calculate order financial totals excluding cancelled items
 orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discountType = 'flat') {

@@ -5,7 +5,8 @@ import Modal from '@/components/ui/Modal';
 import { authApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate, getInitials } from '@/lib/utils';
-import { Plus, Pencil, UserX, Shield, User, Eye, EyeOff } from 'lucide-react';
+import { toast } from '@/lib/toast';
+import { Plus, Pencil, UserX, Shield, User, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 const ROLES = [
@@ -22,6 +23,7 @@ export default function UserManagementPage() {
   const [selected, setSelected] = useState<any>(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const blank = () => ({ name: '', email: '', password: '', role: 'staff', isActive: true });
   const [form, setForm] = useState<any>(blank());
@@ -46,22 +48,53 @@ export default function UserManagementPage() {
 
   const save = async () => {
     setError('');
+    if (!form.name?.trim()) {
+      toast.error('Full name is required');
+      return;
+    }
+    if (!form.email?.trim()) {
+      toast.error('Email address is required');
+      return;
+    }
+    if (modal === 'create' && !form.password) {
+      toast.error('Password is required');
+      return;
+    }
+    if (form.password && form.password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    setSaving(true);
     try {
       if (modal === 'create') {
-        if (!form.password) return setError('Password is required');
         await authApi.createUser(form);
+        toast.success('Staff account created successfully');
       } else {
         await authApi.updateUser(selected._id, form);
+        toast.success('User updated successfully');
       }
-      setModal(null); setForm(blank()); load();
+      setModal(null);
+      setForm(blank());
+      load();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Error saving user');
+      const msg = err.response?.data?.message || 'Error saving user';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
   const deactivate = async (u: any) => {
     if (!confirm(`Deactivate ${u.name}? They won't be able to log in.`)) return;
-    await authApi.deleteUser(u._id); load();
+    try {
+      await authApi.deleteUser(u._id);
+      toast.success(`${u.name} deactivated`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to deactivate user');
+    }
   };
 
   const roleColor = (role: string) => ({ admin: 'badge-red', manager: 'badge-blue', staff: 'badge-green' }[role] || 'badge-blue');
@@ -176,8 +209,17 @@ export default function UserManagementPage() {
             </label>
           )}
           <div className="flex gap-3 pt-2">
-            <button onClick={save} className="btn-primary flex-1">{modal === 'create' ? 'Create Account' : 'Save Changes'}</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'create' ? 'Creating Account...' : 'Saving Changes...')
+                : (modal === 'create' ? 'Create Account' : 'Save Changes')}
+            </button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

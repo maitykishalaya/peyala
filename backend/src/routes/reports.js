@@ -7,6 +7,7 @@ const InventoryItem = require('../models/InventoryItem');
 const Order = require('../models/Order');
 const Table = require('../models/Table');
 const { auth } = require('../middleware/auth');
+const { getIstDayRange } = require('../utils/date');
 
 router.use(auth);
 
@@ -69,13 +70,12 @@ router.get('/pnl', async (req, res) => {
 router.get('/daily', async (req, res) => {
   try {
     const { date } = req.query;
-    const day = new Date(date); day.setHours(0, 0, 0, 0);
-    const next = new Date(day); next.setDate(next.getDate() + 1);
+    const { start, end } = getIstDayRange(date || new Date());
 
     const [sales, purchases, payments] = await Promise.all([
-      SalesEntry.findOne({ date: { $gte: day, $lt: next } }),
-      PurchaseEntry.find({ date: { $gte: day, $lt: next } }).populate('supplier', 'name').populate('items.item', 'name'),
-      Payment.find({ date: { $gte: day, $lt: next } }).populate('paidFrom', 'name'),
+      SalesEntry.findOne({ date: { $gte: start, $lte: end } }),
+      PurchaseEntry.find({ date: { $gte: start, $lte: end } }).populate('supplier', 'name').populate('items.item', 'name'),
+      Payment.find({ date: { $gte: start, $lte: end } }).populate('paidFrom', 'name'),
     ]);
 
     const totalExpenses = payments.reduce((s, p) => s + p.amount, 0) + purchases.reduce((s, p) => s + p.totalAmount, 0);

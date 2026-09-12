@@ -5,6 +5,7 @@ import { reportsApi } from '@/lib/api';
 import { ordersApi, menuApi, MenuItem } from '@/lib/pos-api';
 import { useAuth } from '@/lib/auth';
 import { formatCurrency, monthStart, today, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import {
   BarChart3, TrendingUp, TrendingDown, FileText, Calendar,
   Download, Search, Filter, ChevronDown, ChevronUp, Clock,
@@ -258,11 +259,11 @@ export default function ReportsPage() {
   const handleSaveEditSettled = async () => {
     if (!editOrder) return;
     if (activeEditItems.length === 0) {
-      alert('The bill must contain at least one active item.');
+      toast.error('The bill must contain at least one active item.');
       return;
     }
     if (editPaymentMethod === 'part' && totalEditPartAllocated <= 0) {
-      alert('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
+      toast.error('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
       return;
     }
 
@@ -293,11 +294,12 @@ export default function ReportsPage() {
       });
 
       invalidateFinancialCaches();
+      toast.success('Settled bill updated and reconciled successfully');
       setEditOrder(null);
       await loadSales(true);
     } catch (err: any) {
       console.error('Failed to update settled order:', err);
-      alert(err?.response?.data?.message || err.message || 'Failed to update settled order');
+      toast.error(err?.response?.data?.message || err.message || 'Failed to update settled order');
     } finally {
       setActionLoading(false);
     }
@@ -309,6 +311,7 @@ export default function ReportsPage() {
     try {
       await ordersApi.deleteSettled(deleteOrder._id);
       invalidateFinancialCaches();
+      toast.success('Settled bill deleted and financial records updated');
       setDeleteOrder(null);
       if (expandedOrderId === deleteOrder._id) {
         setExpandedOrderId(null);
@@ -316,7 +319,7 @@ export default function ReportsPage() {
       await loadSales(true);
     } catch (err: any) {
       console.error('Failed to delete settled order:', err);
-      alert(err?.response?.data?.message || err.message || 'Failed to delete settled order');
+      toast.error(err?.response?.data?.message || err.message || 'Failed to delete settled order');
     } finally {
       setActionLoading(false);
     }
@@ -431,7 +434,7 @@ export default function ReportsPage() {
 
   const exportSalesCsv = () => {
     if (!salesData || !salesData.orders || salesData.orders.length === 0) {
-      alert('No sales data available to export');
+      toast.warning('No sales data available to export');
       return;
     }
 

@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
 import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_inventory_cache_v1';
@@ -40,6 +41,7 @@ export default function InventoryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [catSaving, setCatSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
@@ -95,15 +97,35 @@ export default function InventoryPage() {
   };
 
   const saveItem = async () => {
+    if (!itemForm.name.trim()) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!itemForm.category) {
+      toast.error('Category is required');
+      return;
+    }
+    if (!itemForm.unit) {
+      toast.error('Unit is required');
+      return;
+    }
+
     setSaving(true);
     setSaveError('');
     try {
-      if (modal === 'edit') await inventoryApi.updateItem(selected._id, itemForm);
-      else await inventoryApi.createItem(itemForm);
+      if (modal === 'edit') {
+        await inventoryApi.updateItem(selected._id, itemForm);
+        toast.success(`Item "${itemForm.name}" updated successfully`);
+      } else {
+        await inventoryApi.createItem(itemForm);
+        toast.success(`Item "${itemForm.name}" added successfully`);
+      }
       setModal(null);
       await load();
     } catch (err: any) {
-      setSaveError(err?.response?.data?.message || 'Could not save the item. Please try again.');
+      const errMsg = err?.response?.data?.message || 'Could not save the item. Please try again.';
+      setSaveError(errMsg);
+      toast.error(errMsg);
     } finally {
       setSaving(false);
     }
@@ -132,27 +154,52 @@ export default function InventoryPage() {
 
   const deleteCat = async (cat: any, itemCount: number) => {
     if (itemCount > 0) {
-      alert(`Can't delete "${cat.name}" — it still has ${itemCount} item(s) in it. Move or remove those items first.`);
+      toast.warning(`Can't delete "${cat.name}" — it still has ${itemCount} item(s) in it. Move or remove those items first.`);
       return;
     }
     if (!confirm(`Delete the empty category "${cat.name}"?`)) return;
     try {
       await inventoryApi.deleteCategory(cat._id);
+      toast.success(`Category "${cat.name}" deleted`);
       load();
     } catch (err: any) {
-      alert(err?.response?.data?.message || 'Could not delete category');
+      toast.error(err?.response?.data?.message || 'Could not delete category');
     }
   };
 
   const saveCat = async () => {
-    if (modal === 'editCat') await inventoryApi.updateCategory(editingCategory._id, catForm);
-    else await inventoryApi.createCategory(catForm);
-    setModal(null); setEditingCategory(null); load();
+    if (!catForm.name.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+    setCatSaving(true);
+    try {
+      if (modal === 'editCat') {
+        await inventoryApi.updateCategory(editingCategory._id, catForm);
+        toast.success(`Category "${catForm.name}" updated successfully`);
+      } else {
+        await inventoryApi.createCategory(catForm);
+        toast.success(`Category "${catForm.name}" created successfully`);
+      }
+      setModal(null);
+      setEditingCategory(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not save category');
+    } finally {
+      setCatSaving(false);
+    }
   };
 
   const del = async (id: string) => {
     if (!confirm('Remove item?')) return;
-    await inventoryApi.deleteItem(id); load();
+    try {
+      await inventoryApi.deleteItem(id);
+      toast.success('Item removed successfully');
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not remove item');
+    }
   };
 
   const totalValue = items.reduce((s, i) => s + (i.currentStock * i.averageCost), 0);
@@ -329,8 +376,15 @@ export default function InventoryPage() {
             <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{saveError}</div>
           )}
           <div className="flex gap-3 pt-2">
-            <button onClick={saveItem} disabled={saving} className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed">
-              {saving ? 'Saving...' : 'Save Item'}
+            <button
+              onClick={saveItem}
+              disabled={saving}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'edit' ? 'Saving Changes...' : 'Saving Item...')
+                : (modal === 'edit' ? 'Save Changes' : 'Save Item')}
             </button>
             <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
@@ -344,8 +398,17 @@ export default function InventoryPage() {
           <div><label className="label">Icon (emoji)</label><input className="input" value={catForm.icon} onChange={e => setCatForm({...catForm, icon: e.target.value})} /></div>
           <div><label className="label">Color</label><input type="color" className="input h-10" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} /></div>
           <div className="flex gap-3 pt-2">
-            <button onClick={saveCat} className="btn-primary flex-1">{modal === 'editCat' ? 'Save Changes' : 'Add Category'}</button>
-            <button onClick={() => { setModal(null); setEditingCategory(null); }} className="btn-secondary">Cancel</button>
+            <button
+              onClick={saveCat}
+              disabled={catSaving}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {catSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {catSaving
+                ? (modal === 'editCat' ? 'Saving Changes...' : 'Adding Category...')
+                : (modal === 'editCat' ? 'Save Changes' : 'Add Category')}
+            </button>
+            <button onClick={() => { setModal(null); setEditingCategory(null); }} disabled={catSaving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

@@ -18,6 +18,7 @@ import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { paymentsApi, accountsApi, suppliersApi, categoriesApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
 
 const PAYMENTS_CACHE_KEY = 'peyala_payments_cache_v1';
@@ -58,6 +59,7 @@ export default function PaymentsPage() {
   // ── Modal state ─────────────────────────────────────────────────
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
   const [selected, setSelected] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
   const [detail, setDetail] = useState<any>(null); // payment being viewed (shows entered by)
 
   // ── Payment mode (smart filtering per account) ──────────────────
@@ -173,17 +175,55 @@ export default function PaymentsPage() {
 
   // ── Submit ──────────────────────────────────────────────────────
   const submit = async () => {
-    const payload = { ...form, amount: +form.amount };
-    if (modal === 'edit') await paymentsApi.update(selected._id, payload);
-    else await paymentsApi.create(payload);
-    setModal(null); setForm(blank()); setAllowedModes([]); setSubcategories([]);
-    load();
+    if (!form.payee.trim()) {
+      toast.error('Payee name is required');
+      return;
+    }
+    if (!form.amount || +form.amount <= 0) {
+      toast.error('Payment amount must be greater than 0');
+      return;
+    }
+    if (!form.paidFrom) {
+      toast.error('Please select an account to pay from');
+      return;
+    }
+    if (!form.category) {
+      toast.error('Please select a payment category');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = { ...form, amount: +form.amount };
+      if (modal === 'edit') {
+        await paymentsApi.update(selected._id, payload);
+        toast.success(`Payment to "${form.payee}" updated successfully`);
+      } else {
+        await paymentsApi.create(payload);
+        toast.success(`Payment to "${form.payee}" recorded successfully`);
+      }
+      setModal(null);
+      setForm(blank());
+      setAllowedModes([]);
+      setSubcategories([]);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to record payment');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Delete ──────────────────────────────────────────────────────
   const del = async (id: string) => {
     if (!confirm('Delete this payment? Account balance will be restored.')) return;
-    await paymentsApi.delete(id); load();
+    try {
+      await paymentsApi.delete(id);
+      toast.success('Payment deleted and account balance restored');
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to delete payment');
+    }
   };
 
   const pages = Math.ceil(total / 20);
@@ -384,8 +424,17 @@ export default function PaymentsPage() {
           </div>
 
           <div className="flex gap-3 pt-2">
-            <button onClick={submit} className="btn-primary flex-1">Save Payment</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={submit}
+              disabled={saving}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'edit' ? 'Updating Payment...' : 'Recording Payment...')
+                : (modal === 'edit' ? 'Update Payment' : 'Save Payment')}
+            </button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

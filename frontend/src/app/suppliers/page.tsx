@@ -4,7 +4,8 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { suppliersApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { Plus, Pencil, Trash2, Phone, MapPin, RefreshCw } from 'lucide-react';
+import { toast } from '@/lib/toast';
+import { Plus, Phone, MapPin, Pencil, Trash2, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_suppliers_cache_v1';
 
@@ -18,11 +19,11 @@ function readCache() {
   }
 }
 
-function writeCache(data: any[]) {
+function writeCache(suppliers: any[]) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ suppliers: data, savedAt: Date.now() }));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ suppliers, savedAt: Date.now() }));
   } catch {
-    // ignore
+    // Storage full or unavailable — ignore
   }
 }
 
@@ -31,20 +32,23 @@ export default function SuppliersPage() {
   const [selected, setSelected] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null);
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
-  const [form, setForm] = useState({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 });
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 });
 
   const load = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
       const r = await suppliersApi.list();
       setSuppliers(r.data);
-      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       writeCache(r.data);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
       console.error('Failed to load suppliers:', err);
     } finally {
+      setLoading(false);
       setRefreshing(false);
     }
   };
@@ -56,6 +60,7 @@ export default function SuppliersPage() {
       if (cached.savedAt) {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
+      setLoading(false);
       return;
     }
     load();
@@ -66,15 +71,37 @@ export default function SuppliersPage() {
 
   const remove = async (s: any) => {
     if (!confirm(`Deactivate supplier ${s.name}? Existing history will remain.`)) return;
-    await suppliersApi.delete(s._id);
-    if (detail?.supplier?._id === s._id) setDetail(null);
-    load();
+    try {
+      await suppliersApi.delete(s._id);
+      toast.success(`Supplier "${s.name}" deactivated`);
+      if (detail?.supplier?._id === s._id) setDetail(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not deactivate supplier');
+    }
   };
 
   const save = async () => {
-    if (modal === 'edit') await suppliersApi.update(selected._id, form);
-    else await suppliersApi.create(form);
-    setModal(null); load();
+    if (!form.name.trim()) {
+      toast.error('Supplier name is required');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (modal === 'edit') {
+        await suppliersApi.update(selected._id, form);
+        toast.success(`Supplier "${form.name}" updated successfully`);
+      } else {
+        await suppliersApi.create(form);
+        toast.success(`Supplier "${form.name}" added successfully`);
+      }
+      setModal(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Could not save supplier');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const totalDues = suppliers.reduce((s, sup) => s + (sup.outstanding || 0), 0);
@@ -150,8 +177,17 @@ export default function SuppliersPage() {
           <div><label className="label">Opening Balance Due (₹)</label><input type="number" className="input" value={form.openingBalance} onChange={e => setForm({...form, openingBalance: +e.target.value})} /></div>
           <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
           <div className="flex gap-3 pt-2">
-            <button onClick={save} className="btn-primary flex-1">Save Supplier</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'edit' ? 'Saving Changes...' : 'Saving Supplier...')
+                : (modal === 'edit' ? 'Save Changes' : 'Save Supplier')}
+            </button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

@@ -142,6 +142,8 @@ export const attendanceApi = {
   mark: (data: any) => api.post('/attendance', data),
   update: (id: string, data: any) => api.put(`/attendance/${id}`, data),
   getSummary: (staffId: string, month?: number, year?: number) => api.get(`/attendance/summary/${staffId}`, { params: month ? { month, year } : {} }),
+  logTime: (data: any) => api.post('/attendance/time-log', data),
+  getDayTimeLogs: (date?: string) => api.get('/attendance/time-logs', { params: date ? { date } : {} }),
 };
 
 // Transfers

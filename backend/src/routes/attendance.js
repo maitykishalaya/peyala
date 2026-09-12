@@ -239,4 +239,145 @@ router.get('/summary/:staffId', async (req, res) => {
   }
 });
 
+// ── Time duration helpers ─────────────────────────────────────────
+const timeToMinutes = (timeStr) => {
+  if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
+  const [h, m] = timeStr.trim().split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+};
+
+const calculateShiftMinutes = (entry, exit) => {
+  const entryMin = timeToMinutes(entry);
+  const exitMin = timeToMinutes(exit);
+  if (entryMin === null || exitMin === null) return 0;
+  if (exitMin >= entryMin) {
+    return exitMin - entryMin;
+  } else {
+    // Cross-midnight / overnight shift
+    return (1440 - entryMin) + exitMin;
+  }
+};
+
+// GET /api/attendance/time-logs?date=YYYY-MM-DD
+router.get('/time-logs', async (req, res) => {
+  try {
+    const targetDate = req.query.date ? normalizeDate(req.query.date) : normalizeDate(new Date());
+    const staffList = await Staff.find({ status: 'active' }).sort('name');
+    const attendanceRecords = await Attendance.find({ date: targetDate });
+
+    const attMap = {};
+    attendanceRecords.forEach((r) => {
+      attMap[r.staff.toString()] = r;
+    });
+
+    const logs = staffList.map((s) => ({
+      staff: s,
+      record: attMap[s._id.toString()] || null,
+    }));
+
+    res.json({ date: formatDateKey(targetDate), logs });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/attendance/time-log
+// Manager or Admin only
+router.post('/time-log', adminOrManager, async (req, res) => {
+  try {
+    const { staffId, date, dutyHours, dailySalary, shift1, shift2, note } = req.body;
+
+    if (!staffId || !date) {
+      return res.status(400).json({ message: 'Staff member and date are required' });
+    }
+
+    const numDutyHours = parseFloat(dutyHours);
+    if (isNaN(numDutyHours) || numDutyHours <= 0) {
+      return res.status(400).json({ message: 'Target duty hours is mandatory and must be greater than 0' });
+    }
+
+    const numDailySalary = parseFloat(dailySalary);
+    if (isNaN(numDailySalary) || numDailySalary <= 0) {
+      return res.status(400).json({ message: 'Gross daily salary is mandatory and must be greater than 0' });
+    }
+
+    const attendanceDate = normalizeDate(date);
+    const today = normalizeDate(new Date());
+    if (attendanceDate > today) {
+      return res.status(400).json({ message: 'Cannot mark future dates' });
+    }
+
+    // Calculate shift minutes
+    const shift1Min = calculateShiftMinutes(shift1?.entry, shift1?.exit);
+    const shift2Min = calculateShiftMinutes(shift2?.entry, shift2?.exit);
+    const totalMinutes = shift1Min + shift2Min;
+    const totalPresentHours = +(totalMinutes / 60).toFixed(2);
+    const absentHours = Math.max(0, +(numDutyHours - totalPresentHours).toFixed(2));
+    const hourlyRate = +(numDailySalary / numDutyHours).toFixed(2);
+    const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
+    const payableAmount = Math.max(0, +(numDailySalary - deductionAmount).toFixed(2));
+
+    // Auto-mark attendance: if entry time is logged -> present, otherwise -> absent
+    const hasEntry = Boolean(
+      (shift1?.entry && String(shift1.entry).trim() !== '') ||
+      (shift2?.entry && String(shift2.entry).trim() !== '')
+    );
+    const autoStatus = hasEntry ? 'present' : 'absent';
+
+    const record = await Attendance.findOneAndUpdate(
+      { staff: staffId, date: attendanceDate },
+      {
+        staff: staffId,
+        date: attendanceDate,
+        status: autoStatus,
+        note: note ? String(note).trim() : undefined,
+        markedBy: req.user._id,
+        dutyHours: numDutyHours,
+        shift1: {
+          entry: shift1?.entry ? String(shift1.entry).trim() : '',
+          exit: shift1?.exit ? String(shift1.exit).trim() : '',
+        },
+        shift2: {
+          entry: shift2?.entry ? String(shift2.entry).trim() : '',
+          exit: shift2?.exit ? String(shift2.exit).trim() : '',
+        },
+        totalPresentHours,
+        absentHours,
+        dailySalary: numDailySalary,
+        hourlyRate,
+        deductionAmount,
+        payableAmount,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).populate('staff', 'name position monthlySalary dailySalary defaultDutyHours');
+
+    // Update staff's saved dailySalary & defaultDutyHours for seamless auto-fill next time
+    await Staff.findByIdAndUpdate(staffId, {
+      dailySalary: numDailySalary,
+      defaultDutyHours: numDutyHours,
+    });
+
+    await log({
+      user: req.user,
+      action: 'UPDATE',
+      module: 'Attendance',
+      description: `${req.user.name} logged duty time for ${record.staff?.name || staffId} on ${formatDateKey(attendanceDate)}: ${totalPresentHours}h present (${absentHours}h shortage, -₹${deductionAmount})`,
+      metadata: {
+        dutyHours: numDutyHours,
+        totalPresentHours,
+        absentHours,
+        dailySalary: numDailySalary,
+        deductionAmount,
+        payableAmount,
+        autoStatus,
+      },
+    });
+
+    res.status(201).json(record);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
 module.exports = router;

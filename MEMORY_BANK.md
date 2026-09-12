@@ -39,22 +39,46 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 
 ## 3) Core Business Rules & Implemented Workflows
 
-### 3.1 Dine-In POS & Table Lifecycle
-1. **Table States**:
-   - `available`: Table is clean and ready. Tap opens menu picker to seat guests and launch the initial order.
-   - `occupied`: Active order in progress. Tap opens live order management modal.
-   - `reserved`: Reserved for upcoming guests.
+### 3.1 Petpooja POS Flow & Table Lifecycle (`/tables`)
+1. **Two-View POS Architecture**:
+   - **View A: Table View (Floor Plan)**:
+     - Section groupings: **Indoor**, **Outdoor**, and **Pick Up**.
+     - **5 Differentiated Status Colors**:
+       - `Blank Table`: Grey dashed border (`border-dashed border-gray-400`). Tapping opens POS Order Screen for Round 1.
+       - `Running Table`: Soft blue (`border-blue-400 bg-blue-50/90 text-blue-950`).
+       - `Running KOT Table`: Soft yellow (`border-amber-400 bg-amber-100/90 text-amber-950`).
+       - `Printed Table` (Billed): Soft green (`border-emerald-400 bg-emerald-50 text-emerald-950`).
+       - `Paid Table`: Soft orange (`border-orange-400 bg-orange-50 text-orange-950`).
+     - **Dual-Action Table Card Interaction**:
+       - `Quick Print Bill Icon (<Printer />)`: Directly prints customer bill / KOT without opening order taker.
+       - `View Items (<Eye />)`: Opens full order details modal (status tracking, item cancellation, discount engine, bill finalization, and payment settlement).
+       - `Card Body Click`: Clicking the body of an occupied table immediately switches to the POS Order Taking Screen in **Round 2 / Add Items mode**, ready to select more items for the table!
+     - **Live KOT Elapsed Minutes Indicator**: Live badge displaying minutes passed since latest KOT creation (`<Clock /> {kotMins} Min`), auto-updating every 30 seconds.
+   - **View B: Live POS Order Taking Screen (3-Column Layout)**:
+     - **Column 1 (Category Rail)**: Fixed vertical list of categories with active crimson red highlight (`border-l-4 border-l-red-600 bg-red-50 text-red-600 font-bold`).
+     - **Column 2 (Item Catalog & Search)**: Real-time search bar + item cards grid with **Veg / Non-Veg Left Edge Stripes** (emerald green for veg, red for non-veg), price tags, and blue active ring when present in cart.
+     - **Column 3 (Live Order / Cart Panel)**:
+       - Service type switcher: `Dine In` (active red), `Delivery`, `Pick Up`.
+       - Table indicator badge + guest count stepper + notes.
+       - Items table with delete `(X)`, indented variant/addon sub-lines, check item indicators, quantity steppers `[-] 1 [+]`, and prices.
+       - Subtotal, Tax/GST, Discount, and Grand Total.
+       - Payment mode chips: `[ Cash ✓ ]`, `[ Card ✓ ]`, `[ Due / UPI ✓ ]`, `[ Part Payment ]` with `It's Paid` checkbox.
+       - Petpooja Action buttons: `[ Save ]` (Red), `[ Save & Print ]` (Red), `[ KOT ]` (Charcoal dark gray), `[ KOT & Print ]` (Charcoal dark gray).
+       - **Auto-Return Workflow**: As soon as a KOT is dispatched (`[ KOT ]` or `[ KOT & Print ]`), the system sends the ticket to the kitchen, notifies the print station, and **automatically returns to Table View**!
+   - **View C: Add-on & Variant Customization Modal**:
+     - Modal title with item name and unit price + close `(X)`.
+     - Real-time `Search addon item` input.
+     - Portions/Variants selection (Required).
+     - Grouped Add-ons grid with limit badges (`[ Min: 0, Max: 5 ]`) and veg/non-veg indicator stripes.
+     - Kitchen instruction / special request input.
+     - Quantity stepper and `[ Cancel ]` / `[ Save ]` (Red) buttons.
 2. **Order Lifecycle**:
    - `open`: Initial order placed, Round 1 KOT dispatched.
-   - Additional rounds can be added at any time via `+ Add KOT Round`. Each add-on dispatches an incremental KOT ticket (`[ROUND X - ADD-ON]`) without re-printing earlier rounds.
+   - Additional rounds can be added at any time via card body click or `+ Add KOT Round`. Each add-on dispatches an incremental KOT ticket (`[ROUND X - ADD-ON]`) without re-printing earlier rounds.
    - Item statuses transition: `pending` → `preparing` → `served` (or `cancelled` with reason note).
-   - `billed`: Finalized bill printed for guest. Table remains occupied until payment is recorded.
-   - `paid`: Payment collected, settlement recorded, table automatically freed back to `available`.
+   - `billed`: Finalized bill printed for guest. Table card becomes green (Printed Table).
+   - `paid`: Payment collected (Cash, UPI, Card, Other, or Part Payment), table automatically freed back to `available` (Blank Table).
    - `cancelled`: Order aborted, table freed.
-3. **High-Density Half-Size Table Grid & Live KOT Wait Minutes**:
-   - Table cards are half their previous size (2-3 cols on mobile, 4-6 on laptop, up to 8 on wide desktop, ~105px min height), displaying 24+ tables in a single viewport without scrolling.
-   - Seating capacity clutter removed from table cards, modal titles, and creation forms.
-   - Occupied tables display a live badge showing elapsed minutes since KOT creation (`<Clock /> {kotMins}m`), color-coded by service urgency (blue for < 15m, amber for 15–30m, red for ≥ 30m), auto-updating every 30 seconds via a live timer.
 
 ### 3.2 Dual Discount Engine
 - Operators can toggle between **Flat Discount (₹)** and **Percentage Discount (%)**.
@@ -80,7 +104,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - To strictly prevent exhausting free-tier hosting quotas (Vercel serverless execution seconds, Render free tier spins, and Mongo Atlas operations):
   1. Aggressive tab-focus polling (`window.addEventListener('focus')`) has been completely stripped across all management modules.
   2. Data across the following 11 operational modules is stored in and served directly from browser `localStorage`:
-     - **Dashboard**: `peyala_dashboard_cache_v1`
+     - **Dashboard**: `peyala_dashboard_cache_v2` (caches today/yesterday IST metrics, graphs, accounts, and Owner Notice)
      - **Sales**: `peyala_sales_list_cache_v1`
      - **Accounts**: `peyala_accounts_cache_v1`
      - **Inventory**: `peyala_inventory_cache_v1`
@@ -96,7 +120,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
      - The operator explicitly clicks the "Refresh" button.
      - The page is loaded for the first time and no local cache exists.
      - The user creates/edits/deletes an entity on that page.
-  5. **Daily Sales Consolidation**: All order settlements on a calendar day locate today's single `SalesEntry` in IST (`Asia/Kolkata`) and atomically increment totals. Collecting payment on `/tables` purges `peyala_sales_list_cache_v1` so the next visit to `/sales` pulls fresh numbers once.
+  5. **Daily Sales Consolidation & IST Alignment**: All order settlements on a calendar day locate today's single `SalesEntry` in IST (`Asia/Kolkata`) via `getIstDayRange` and atomically increment totals. Dashboard today and yesterday stats query exact IST calendar windows with fallback aggregation to settled orders, eliminating UTC timezone discrepancies on cloud server environments. Saving Owner Notice in Settings automatically invalidates the dashboard cache.
   6. **Live POS (`/tables`) Independent Lifecycle**: The `/tables` POS does NOT store orders in `localStorage` — it re-queries table occupancy and live orders after every user mutation (create order, add round, cancel item, update status, discount, finalize bill, payment collection) to guarantee 100% real-time POS accuracy across devices. The counter Print Station background polling runs at 4000ms and pauses automatically when hidden.
 
 ### 3.5 Detailed Sales Report (`/reports` Tab 3)
@@ -109,11 +133,15 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 
 ### 3.6 Multi-Device Distributed Thermal Printing Engine & Chrome Silent Auto-Print
 - **Multi-Device Distributed Architecture**:
-  - **Mobile Waiter Devices (Ordering Clients)**: Waiters create orders and add KOT rounds from smartphones/tablets. On mobile devices (`isPrintStation = false`), the POS suppresses local print dialogs, stores the order in MongoDB with `kotRounds` (`printed: false`), and alerts the waiter: *"KOT sent to Counter Printer 🖨️"*.
-  - **Counter Print Station (Windows Laptop with Thermal Printer)**: A designated laptop connected via USB to the 80mm thermal receipt printer runs Chrome in kiosk mode (`start-kiosk.bat`) with the POS `/tables` page open and **"Print Station"** mode toggled **ON** in the header.
-  - **Automated Database Reconciliation**: The Print Station polls `GET /api/orders/pending-kots` every 2.5 seconds. When new unprinted KOT rounds arrive from any device, it automatically formats and sends them silently to the thermal printer via `printKOT(job, 'production')`, then acknowledges each job with `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
-  - **Concurrency & Deduplication**: To avoid double printing during network latency, an in-memory lock (`inFlightKotsRef`) tracks round IDs currently printing.
-  - **Remote KOT Reprint**: Waiters can tap "Send KOT to Printer" on any active order to queue an immediate reprint on the counter printer (`POST /api/orders/:orderId/reprint`).
+  - **Mobile Waiter Devices (Ordering Clients)**: Waiters create orders, add KOT rounds, and finalize bills from smartphones/tablets.
+    - **Remote KOT Generation**: On mobile devices (`isPrintStation = false`), the POS suppresses local print dialogs, stores the order in MongoDB with `kotRounds` (`printed: false`), and alerts the waiter: *"KOT sent to Counter Printer 🖨️"*.
+    - **Remote Customer Bill Printing**: When staff taps the **Printer icon** on any table card, taps **"Save & Print"** on the live POS order taker, taps **"Print Bill"** in the order details modal, or collects payment via **"Collect Payment"**, the customer bill is queued in MongoDB (`billPrinted = false`) via `POST /api/orders/:orderId/queue-bill-print` and alerts the waiter: *"Customer bill for Table X sent to Counter Printer 🖨️"*. No browser print dialog appears on the phone!
+  - **Counter Print Station (Windows Laptop with Thermal Printer)**: A designated laptop connected via USB to the 80mm thermal receipt printer runs Chrome in kiosk mode (`start-kiosk.bat`) with the POS `/tables` page open and **"Print Station"** mode toggled **ON** in the header (`?printStation=true` / `localStorage.getItem('peyala_is_print_station')`).
+  - **Automated Database Reconciliation**: The Print Station polls both `GET /api/orders/pending-kots` and `GET /api/orders/pending-bills` every 4 seconds (auto-pausing on tab hide/screen lock).
+    - **Auto-Printing KOTs**: New unprinted KOT rounds are formatted as 80mm kitchen tickets, sent silently to the printer via `printKOT(job, 'production')`, and marked `printed: true` via `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
+    - **Auto-Printing Bills**: New finalized or settled customer bills are formatted as 80mm receipts (itemized variants, add-ons, discounts, GST/tax, settlement breakdown), sent silently to the printer via `printCustomerBill(job, 'production')`, and marked `billPrinted: true` via `POST /api/orders/:orderId/mark-bill-printed`.
+  - **Concurrency & Deduplication**: To avoid double printing during network latency, in-memory locks (`inFlightKotsRef` and `inFlightBillsRef`) track job keys currently printing.
+  - **Remote KOT Reprint & Bill Queuing**: Waiters can tap "Send KOT to Printer" or tap the printer icon on any occupied table card to queue an immediate print on the counter printer (`POST /api/orders/:orderId/reprint` or `POST /api/orders/:orderId/queue-bill-print`).
 - **Auto-Print Default (`'production'`)**: In Production Mode, KOTs and Bills bypass preview modals and immediately invoke `printThermalSlip(html)` via a hidden iframe.
 - **Bypassing Chrome Print Dialog (Zero-Click Kiosk Printing)**:
   - Chrome requires `--kiosk-printing` to bypass its native print preview dialog.
@@ -223,6 +251,91 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Admin Edit Modal allows switching to/from part payment with live accounting preview (`Cash Counter: ±₹...`, `Bank / Digital: ±₹...`).
   - Admin Delete Modal details exact split deductions before permanent record deletion.
 
+### 3.12 POS Order-Taking Typography & Top-Alignment + Full-Screen Balance Sheet Layout
+- **Cart Top-Alignment (`frontend/src/app/tables/page.tsx` Column 3)**:
+  - Previously, `justify-between` and `max-h-56` caused flexbox to distribute vertical space between the table header and bottom totals, making 1 or 2 items appear to hang in the vertical center.
+  - Updated cart panel outer container and items table container to `flex flex-col justify-start gap-3` with `min-h-[220px]`.
+  - Items list container updated to `divide-y overflow-y-auto max-h-[360px] flex-1 flex flex-col justify-start items-stretch` so items rigidly stack top-down immediately beneath the column header.
+- **POS Font Sizing & Readability**:
+  - Table headers: `text-xs font-extrabold text-gray-700 uppercase tracking-wider py-2`.
+  - Item names: `text-sm sm:text-base font-bold text-gray-900 dark:text-white`.
+  - Addon / variant modifiers: `text-xs font-semibold text-gray-500`.
+  - Stepper controls: `text-sm sm:text-base font-bold min-w-[1.25rem] text-center` with larger `w-4 h-4` icons.
+  - Line item prices: `text-sm sm:text-base font-extrabold text-gray-900 dark:text-white`.
+  - Grand total: `text-lg sm:text-xl font-black text-red-600`.
+  - Payment chips: `px-2.5 py-1.5 text-xs font-bold`.
+  - Action buttons (`Save`, `Save & Print`, `KOT`, `KOT & Print`): `text-sm font-bold py-2.5`.
+  - Item catalog cards (Column 2): `text-sm font-bold` item names, `text-sm font-black` prices, `h-10 text-sm` search input.
+- **Full-Screen Balance Sheet Layout (`frontend/src/app/balancesheet/page.tsx`)**:
+  - Replaced restrictive `max-w-6xl` container (1152px) with `w-full`.
+  - Page header enlarged to `text-2xl sm:text-3xl font-extrabold` with `w-6 h-6` icon.
+  - KPI summary cards enlarged to `p-6 sm:p-7` with metrics styled at `text-3xl sm:text-4xl lg:text-5xl font-black`.
+  - 3-column breakdown (Assets, Liabilities, Equity) updated to `p-6 space-y-5`, headers to `text-lg sm:text-xl`, account rows to `p-3.5 sm:p-4 text-base`, GST and Dues amounts to `text-2xl sm:text-3xl font-black`, and equity metrics to `text-2xl font-black`.
+
+### 3.13 Move KOT / Table Transfer & Merge Architecture (Petpooja POS Alignment)
+- **Problem & Operational Need**: Customers regularly switch tables midway through a meal or combine with friends at another table. Waiters must be able to move the entire active order, specific KOT rounds, or individual items to another table with automatic status reconciliation.
+- **Backend Endpoint (`POST /api/orders/:id/transfer` with `managerOrAdmin`)**:
+  - Accepts `targetTableId`, `transferType` (`'table' | 'kot' | 'item'`), `kotRoundNumbers`, and `itemTransfers`.
+  - **Move to Empty/Available Table**:
+    - Updates `order.table = targetTable._id`.
+    - Updates `targetTable.activeOrder = order._id; targetTable.status = 'occupied'`.
+    - Frees source table: `sourceTable.activeOrder = null; sourceTable.status = 'available'`.
+    - Preserves all KOT rounds, timestamps, elapsed timer, and billing metadata.
+  - **Move to Occupied Table (Order Merge)**:
+    - Merges active items from source order into destination order.
+    - Appends KOT rounds into target order with re-indexed round numbers and tag prefix `[FROM {sourceTable.tableNumber} - ROUND {n}]`.
+    - Recalculates destination order subtotal, taxes, discounts, and total via `Order.calcTotals`.
+    - Flags `billPrinted: false` so updated combined bill can be reprinted.
+    - Cancels source order with reason: `Merged into Table {targetTable.tableNumber} (Order #{targetOrder.orderNumber})`.
+    - Frees source table (`available`).
+  - **KOT-Wise & Item-Wise Transfers**:
+    - Splices selected KOT rounds or item quantities from source order and transfers to destination table (creating new order if target was empty, or merging into target's active order).
+    - If source order has 0 active items left, automatically cancels source order and frees source table.
+  - **Audit Logging**: All transfers recorded in `AuditLog` for management review.
+- **Frontend Petpooja Modal (`Move KOT/Items - {tableNumber}`)**:
+  - Accessible via the `<ArrowRightLeft />` icon on occupied table cards in the floor plan and via the "Move Table" button in the Order Details modal.
+  - **3 Tabs**: `Table Wise` (Default), `KOT Wise`, `Item Wise`.
+  - **Sectioned Floor Layout**: Displays destination tables categorized into `Indoor`, `Outdoor`, `Pick Up`, and `Other` with dashed outline badges (`border border-dashed border-gray-400`).
+  - **Active Selection**: Clicking any destination table highlights it with a red dashed border (`border-2 border-dashed border-red-600 text-red-600 font-bold bg-red-50/60`) and synchronizes with the `Table No.` input at the bottom.
+  - Fast execution: `Cancel` and solid red `Move` button (`#d32f2f`).
+
+### 3.15 Universal Interactive Button Feedback & Toast Notification System
+- **Global Reactive Toast Engine**:
+  - `frontend/src/lib/toast.ts`: Zero-dependency custom-event notification dispatcher exposing `toast.success(message, duration?)`, `toast.error(...)`, `toast.warning(...)`, and `toast.info(...)`.
+  - `frontend/src/components/ui/Toast.tsx`: Client-rendered animated floating notification container mounted at root level in `frontend/src/app/layout.tsx`. Features category-specific icons (`CheckCircle2`, `AlertCircle`, `AlertTriangle`, `Info`), smooth slide-in/fade animations, manual dismiss buttons (`X`), and auto-dismissal after 4000ms.
+  - **Zero Native `alert(...)` Calls**: Replaced all intrusive native browser modal alerts across every single module (`tables`, `reports`, `inventory`, `purchases`, `settings/backup`, etc.) with non-blocking toast notifications.
+- **Interactive Button Loading States & Double-Click Guarding**:
+  - Every mutating action across all 13 core modules (`/menu`, `/tables`, `/inventory`, `/suppliers`, `/sales`, `/payments`, `/accounts`, `/staff`, `/attendance`, `/reports`, `/settings`, `/settings/users`, `/settings/categories`, `/settings/backup`, `/purchases`, `/balancesheet`) implements an explicit loading state (`saving`, `tableSaving`, `submittingAction`, `transferring`, `paying`, `catSaving`, `subSaving`, `noticeSaving`, `testingApi`, etc.).
+  - While an operation is pending:
+    1. Buttons are immediately disabled (`disabled={saving || loading}`) to physically guard against duplicate submissions and race conditions.
+    2. Button labels dynamically reflect the active operation (e.g., `Saving Item...`, `Saving Supplier...`, `Recording Payment...`, `Sending KOT...`, `Clearing Due...`, `Testing Connection...`).
+    3. An inline spinning icon (`<RefreshCw className="w-4 h-4 animate-spin" />`) is rendered alongside the label.
+- **Immediate Input Validation & Actionable API Error Feedback**:
+  - Client-side validation runs prior to API requests; if any required field is missing or invalid (e.g. empty item name, account mismatch, non-positive amount), a descriptive `toast.error(...)` is immediately shown and execution halts.
+  - Backend errors are caught in standard try/catch blocks and surfaced with the exact reason via `toast.error(err.response?.data?.message || 'Failure reason')`.
+  - Successful operations produce positive green toasts (e.g. `toast.success('Order settled successfully')`).
+
+### 3.16 Staff Duty & Shift Time Tracking (Entry / Exit / 2 Shifts) & Auto-Deductions
+- **Manager & Admin Only Operational Control**:
+  - Located at the bottom of the Attendance page (`/attendance`), providing detailed daily shift monitoring, duty hours tracking, and pro-rata salary deduction calculation.
+- **Customizable 2-Shift Support (Split Duty)**:
+  - Supports staff working single shifts or split duty (Shift 1 Entry/Exit + Shift 2 Entry/Exit).
+  - Handles regular shifts and overnight/cross-midnight shifts (calculating total minutes wrapped around 24 hours).
+- **Mandatory Duty Hours & Gross Daily Salary Inputs**:
+  - Target duty hours (e.g. 10 hrs) and Gross daily salary (e.g. ₹300) are strictly mandatory fields (`> 0`).
+  - Auto-prefilled from staff profile defaults (`staff.dailySalary || Math.round(monthlySalary / 30)` and `staff.defaultDutyHours`) and customizable on the fly.
+- **Pro-Rata Shortage & Salary Deduction Engine**:
+  - `totalPresentHours = (shift1Minutes + shift2Minutes) / 60`
+  - `absentHours = Math.max(0, dutyHours - totalPresentHours)`
+  - `hourlyRate = dailySalary / dutyHours`
+  - `deductionAmount = absentHours * hourlyRate`
+  - `payableAmount = Math.max(0, dailySalary - deductionAmount)`
+  - Displays instant live visual calculation as shift times are typed: Total Present, Duty Shortage, Suggested Deduction (-₹...), and Net Day Payable.
+- **Automatic Main Attendance Status Synchronization**:
+  - If any entry time is logged (`shift1.entry` or `shift2.entry`), the staff's attendance status is automatically set to **`present`** (`P`).
+  - If neither entry time is logged, the attendance status is automatically set to **`absent`** (`A`).
+  - Persisted in the `Attendance` collection for `{ staff, date }`, synchronizing both the bottom shift table and the top monthly attendance calendar grid.
+
 ---
 
 ## 4) Database Models & Schemas
@@ -238,8 +351,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | **`PurchaseEntry`** | `backend/src/models/PurchaseEntry.js` | `date`, `supplier` (ref: Supplier), `items` (`item`, `quantity`, `unit`, `pricePerUnit`, `gstPercent`, `totalPrice`), `totalAmount`, `paidFrom` (ref: Account), `paymentMode`, `isPaid`. |
 | **`Account`** | `backend/src/models/Account.js` | `name`, `type` (`cash`, `bank`, `digital`), `currentBalance`, `color`, `isActive`. |
 | **`Supplier`** | `backend/src/models/Supplier.js` | `name`, `phone`, `address`, `category`, `totalPurchased`, `totalPaid`, `outstanding`. |
-| **`Staff`** | `backend/src/models/Staff.js` | `name`, `phone`, `position`, `monthlySalary`, `totalSalaryPaid`, `totalAdvancePaid`, `status`. |
-| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `note`, `markedBy`. |
+| **`Staff`** | `backend/src/models/Staff.js` | `name`, `phone`, `position`, `monthlySalary`, `dailySalary`, `defaultDutyHours`, `totalSalaryPaid`, `totalAdvancePaid`, `status`. |
+| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `payableAmount`, `note`, `markedBy`. |
 | **`Payment`** | `backend/src/models/Payment.js` | `date`, `amount`, `payee`, `category`, `subcategory`, `paidFrom`, `paymentMode`. |
 
 ---

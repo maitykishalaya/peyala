@@ -17,6 +17,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { backupApi } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import {
   Download, Upload, Database, FileJson, FileSpreadsheet,
   AlertTriangle, CheckCircle2, Loader2
@@ -86,10 +87,12 @@ export default function BackupPage() {
       const res = await backupApi.exportJson();
       const filename = `peyala-backup-${new Date().toISOString().split('T')[0]}.json`;
       downloadBlob(res.data, filename);
+      toast.success('Backup downloaded successfully');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Export failed');
+      toast.error(err.response?.data?.message || 'Export failed');
+    } finally {
+      setExportingJson(false);
     }
-    setExportingJson(false);
   };
 
   // ── Export single collection as CSV ───────────────────────────────
@@ -99,10 +102,12 @@ export default function BackupPage() {
       const res = await backupApi.exportCsv(collection);
       const filename = `peyala-${collection}-${new Date().toISOString().split('T')[0]}.csv`;
       downloadBlob(res.data, filename);
+      toast.success(`${COLLECTION_LABELS[collection] || collection} CSV exported`);
     } catch (err: any) {
-      alert(err.response?.data?.message || `No data to export for ${COLLECTION_LABELS[collection]}`);
+      toast.error(err.response?.data?.message || `No data to export for ${COLLECTION_LABELS[collection]}`);
+    } finally {
+      setExportingCsv(null);
     }
-    setExportingCsv(null);
   };
 
   // ── Handle file selection for restore ─────────────────────────────
@@ -121,7 +126,7 @@ export default function BackupPage() {
         setRestoreData(parsed);
         setRestoreModal(true);
       } catch (err) {
-        alert('Invalid JSON file. Please select a valid Peyala backup file.');
+        toast.error('Invalid JSON file. Please select a valid Peyala backup file.');
         setRestoreFile(null);
       }
     };
@@ -130,16 +135,21 @@ export default function BackupPage() {
 
   // ── Submit the restore ────────────────────────────────────────────
   const submitRestore = async () => {
-    if (confirmText !== 'RESTORE') return;
+    if (confirmText !== 'RESTORE') {
+      toast.error('Please type RESTORE to confirm');
+      return;
+    }
     setRestoring(true);
     try {
       const res = await backupApi.import(restoreData.data, restoreMode, confirmText);
       setRestoreResult(res.data.results);
+      toast.success('Data restored successfully');
       load(); // refresh counts
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Restore failed');
+      toast.error(err.response?.data?.message || 'Restore failed');
+    } finally {
+      setRestoring(false);
     }
-    setRestoring(false);
   };
 
   const closeRestoreModal = () => {

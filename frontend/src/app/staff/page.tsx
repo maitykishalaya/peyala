@@ -17,6 +17,7 @@ import Modal from '@/components/ui/Modal';
 import { staffApi, accountsApi } from '@/lib/api';
 import { formatCurrency, formatDate, today, getInitials, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
+import { toast } from '@/lib/toast';
 import { Plus, Pencil, Phone, IndianRupee, ChevronDown, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_staff_cache_v1';
@@ -53,6 +54,8 @@ export default function StaffPage() {
   const [selected, setSelected] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null); // { member, payments }
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [paying, setPaying] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   // Form for create/edit
@@ -146,15 +149,60 @@ export default function StaffPage() {
   };
 
   const save = async () => {
-    if (modal === 'edit') await staffApi.update(selected._id, form);
-    else await staffApi.create(form);
-    setModal(null); setForm(blank()); load();
+    if (!form.name.trim()) {
+      toast.error('Staff name is required');
+      return;
+    }
+    if (!form.position.trim()) {
+      toast.error('Position / role is required');
+      return;
+    }
+    if (form.monthlySalary === undefined || +form.monthlySalary < 0) {
+      toast.error('Please enter a valid monthly salary');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (modal === 'edit') {
+        await staffApi.update(selected._id, form);
+        toast.success(`Staff member "${form.name}" updated successfully`);
+      } else {
+        await staffApi.create(form);
+        toast.success(`Staff member "${form.name}" added successfully`);
+      }
+      setModal(null);
+      setForm(blank());
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to save staff member');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Pay salary/advance/bonus using new unified endpoint
   const pay = async () => {
-    await staffApi.pay(selected._id, payForm);
-    setModal(null); load();
+    if (!payForm.amount || +payForm.amount <= 0) {
+      toast.error('Payment amount must be greater than 0');
+      return;
+    }
+    if (!payForm.paidFrom) {
+      toast.error('Please select an account to pay from');
+      return;
+    }
+
+    setPaying(true);
+    try {
+      await staffApi.pay(selected._id, payForm);
+      toast.success(`${payForm.paymentType.toUpperCase()} of ${formatCurrency(payForm.amount)} recorded for ${selected?.name}`);
+      setModal(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to record payment');
+    } finally {
+      setPaying(false);
+    }
   };
 
   const totalSalaryBill = staff.filter(s => s.status === 'active')
@@ -321,8 +369,17 @@ export default function StaffPage() {
           </div>
           <div><label className="label">Address</label><textarea className="input" rows={2} value={form.address} onChange={e => setForm({...form, address: e.target.value})} /></div>
           <div className="flex gap-3 pt-2">
-            <button onClick={save} className="btn-primary flex-1">Save</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {saving
+                ? (modal === 'edit' ? 'Saving Changes...' : 'Adding Staff...')
+                : (modal === 'edit' ? 'Save Changes' : 'Add Staff')}
+            </button>
+            <button onClick={() => setModal(null)} disabled={saving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -424,11 +481,15 @@ export default function StaffPage() {
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={pay} className="btn-primary flex-1 py-2.5">
-              Pay {formatCurrency(payForm.amount)}
-              {payForm.paymentType !== 'salary' && ` (${payForm.paymentType})`}
+            <button
+              onClick={pay}
+              disabled={paying}
+              className="btn-primary flex-1 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {paying && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {paying ? 'Processing Payment...' : `Pay ${formatCurrency(payForm.amount)}${payForm.paymentType !== 'salary' ? ` (${payForm.paymentType})` : ''}`}
             </button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button onClick={() => setModal(null)} disabled={paying} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

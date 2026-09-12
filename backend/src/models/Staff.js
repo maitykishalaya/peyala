@@ -18,6 +18,8 @@ const staffSchema = new mongoose.Schema({
 
   // Monthly salary agreed amount
   monthlySalary: { type: Number, default: 0 },
+  dailySalary: { type: Number, default: 0 },
+  defaultDutyHours: { type: Number, default: 10 },
 
   // Running totals updated on every salary/advance payment
   totalSalaryPaid: { type: Number, default: 0 },   // full salary payments only

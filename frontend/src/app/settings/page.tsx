@@ -4,7 +4,8 @@ import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/lib/auth';
 import { authApi, ownerNoteApi } from '@/lib/api';
-import { Settings, User, Shield, Database, Users, Activity, Tag } from 'lucide-react';
+import { toast } from '@/lib/toast';
+import { Settings, User, Shield, Database, Users, Activity, Tag, RefreshCw } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -12,8 +13,10 @@ export default function SettingsPage() {
   const [profileForm, setProfileForm] = useState({ name: user?.name || '' });
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [ownerNote, setOwnerNote] = useState('');
-  const [ownerNoteMsg, setOwnerNoteMsg] = useState('');
-  const [msg, setMsg] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [pwUpdating, setPwUpdating] = useState(false);
+  const [noticeSaving, setNoticeSaving] = useState(false);
+  const [testingApi, setTestingApi] = useState(false);
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
@@ -22,20 +25,84 @@ export default function SettingsPage() {
   ] as const;
 
   const saveProfile = async () => {
+    if (!profileForm.name.trim()) {
+      toast.error('Display name cannot be empty');
+      return;
+    }
+    setProfileSaving(true);
     try {
-      setMsg('Profile updated ✓');
-      setTimeout(() => setMsg(''), 2000);
-    } catch { setMsg('Error saving'); }
+      if (user?.id) {
+        await authApi.updateUser(user.id, { name: profileForm.name });
+      }
+      toast.success('Profile updated successfully');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const updatePassword = async () => {
+    if (!pwForm.currentPassword) {
+      toast.error('Current password is required');
+      return;
+    }
+    if (!pwForm.newPassword) {
+      toast.error('New password is required');
+      return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      toast.error('New password and confirm password do not match');
+      return;
+    }
+    if (pwForm.newPassword.length < 6) {
+      toast.error('New password must be at least 6 characters');
+      return;
+    }
+    setPwUpdating(true);
+    try {
+      if (user?.id) {
+        await authApi.updateUser(user.id, { password: pwForm.newPassword });
+      }
+      toast.success('Password updated successfully');
+      setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update password');
+    } finally {
+      setPwUpdating(false);
+    }
   };
 
   const saveOwnerNote = async () => {
+    setNoticeSaving(true);
     try {
       await ownerNoteApi.update({ note: ownerNote });
-      setOwnerNoteMsg('Owner notice saved ✓');
-      setTimeout(() => setOwnerNoteMsg(''), 2000);
+      try {
+        localStorage.removeItem('peyala_dashboard_cache_v1');
+        localStorage.removeItem('peyala_dashboard_cache_v2');
+      } catch {}
+      toast.success('Owner notice saved successfully');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save owner notice');
+    } finally {
+      setNoticeSaving(false);
+    }
+  };
+
+  const testApiConnection = async () => {
+    setTestingApi(true);
+    try {
+      const res = await fetch('http://localhost:4000/api/health');
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`API Status: ${data.status || 'healthy'}`);
+      } else {
+        toast.error(`API returned status ${res.status}`);
+      }
     } catch {
-      setOwnerNoteMsg('Failed to save owner notice');
-      setTimeout(() => setOwnerNoteMsg(''), 2000);
+      toast.error('API unreachable — is backend running?');
+    } finally {
+      setTestingApi(false);
     }
   };
 
@@ -101,8 +168,6 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {msg && <div className="px-4 py-2 bg-green-50 dark:bg-green-900/20 text-green-600 text-sm rounded-lg">{msg}</div>}
-
         {tab === 'profile' && (
           <div className="card p-6 space-y-5">
             <div className="flex items-center gap-4">
@@ -121,7 +186,14 @@ export default function SettingsPage() {
             <div><label className="label">Email</label>
               <input className="input opacity-50 cursor-not-allowed" value={user?.email || ''} disabled />
             </div>
-            <button onClick={saveProfile} className="btn-primary">Save Profile</button>
+            <button
+              onClick={saveProfile}
+              disabled={profileSaving}
+              className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {profileSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {profileSaving ? 'Saving Profile...' : 'Save Profile'}
+            </button>
           </div>
         )}
 
@@ -131,7 +203,14 @@ export default function SettingsPage() {
             <div><label className="label">Current Password</label><input type="password" className="input" value={pwForm.currentPassword} onChange={e => setPwForm({...pwForm, currentPassword: e.target.value})} /></div>
             <div><label className="label">New Password</label><input type="password" className="input" value={pwForm.newPassword} onChange={e => setPwForm({...pwForm, newPassword: e.target.value})} /></div>
             <div><label className="label">Confirm New Password</label><input type="password" className="input" value={pwForm.confirmPassword} onChange={e => setPwForm({...pwForm, confirmPassword: e.target.value})} /></div>
-            <button className="btn-primary">Update Password</button>
+            <button
+              onClick={updatePassword}
+              disabled={pwUpdating}
+              className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {pwUpdating && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {pwUpdating ? 'Updating Password...' : 'Update Password'}
+            </button>
           </div>
         )}
 
@@ -186,8 +265,14 @@ export default function SettingsPage() {
                   placeholder="Enter owner notice for managers and staff..."
                 />
                 <div className="mt-3 flex items-center justify-between gap-4">
-                  <button onClick={saveOwnerNote} className="btn-primary">Save Notice</button>
-                  {ownerNoteMsg && <p className="text-sm text-green-600 dark:text-green-300">{ownerNoteMsg}</p>}
+                  <button
+                    onClick={saveOwnerNote}
+                    disabled={noticeSaving}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    {noticeSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                    {noticeSaving ? 'Saving Notice...' : 'Save Notice'}
+                  </button>
                 </div>
               </div>
             )}
@@ -195,8 +280,14 @@ export default function SettingsPage() {
             <div className="card p-6">
               <h3 className="font-medium text-gray-900 dark:text-white mb-2">API Health</h3>
               <p className="text-sm text-gray-400 mb-3">Backend: <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-xs">http://localhost:4000/api</code></p>
-              <button onClick={() => fetch('http://localhost:4000/api/health').then(r => r.json()).then(d => alert('API Status: ' + d.status)).catch(() => alert('API unreachable — is backend running?'))}
-                className="btn-secondary text-xs">Test API Connection</button>
+              <button
+                onClick={testApiConnection}
+                disabled={testingApi}
+                className="btn-secondary text-xs flex items-center gap-1.5"
+              >
+                {testingApi && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                {testingApi ? 'Testing Connection...' : 'Test API Connection'}
+              </button>
             </div>
           </div>
         )}

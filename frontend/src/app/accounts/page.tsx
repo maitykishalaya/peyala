@@ -15,6 +15,7 @@ import AccountLedger from '@/components/ui/AccountLedger';
 import { accountsApi, transfersApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
+import { toast } from '@/lib/toast';
 import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2, RefreshCw } from 'lucide-react';
 
 const ACCOUNTS_CACHE_KEY = 'peyala_accounts_cache_v1';
@@ -66,6 +67,8 @@ export default function AccountsPage() {
   const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   // ── Modal state ─────────────────────────────────────────────────
@@ -205,27 +208,70 @@ export default function AccountsPage() {
 
   // ── Save account (create or update) ────────────────────────────
   const save = async () => {
-    if (modal === 'create') {
-      await accountsApi.create(form);
-    } else {
-      await accountsApi.update(selected._id, form);
+    if (!form.name.trim()) {
+      toast.error('Account name is required');
+      return;
     }
-    setModal(null);
-    load(); // refresh list
+    setSaving(true);
+    try {
+      if (modal === 'create') {
+        await accountsApi.create(form);
+        toast.success(`Account "${form.name}" created successfully`);
+      } else {
+        await accountsApi.update(selected._id, form);
+        toast.success(`Account "${form.name}" updated successfully`);
+      }
+      setModal(null);
+      load(); // refresh list
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to save account');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Deactivate account ──────────────────────────────────────────
   const del = async (id: string) => {
     if (!confirm('Deactivate this account? All transaction history is preserved.')) return;
-    await accountsApi.delete(id);
-    load();
+    try {
+      await accountsApi.delete(id);
+      toast.success('Account deactivated');
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to deactivate account');
+    }
   };
 
   // ── Create a transfer between two accounts ──────────────────────
   const doTransfer = async () => {
-    await transfersApi.create(transferForm);
-    setModal(null);
-    load();
+    if (!transferForm.fromAccount) {
+      toast.error('Please select an origin account');
+      return;
+    }
+    if (!transferForm.toAccount) {
+      toast.error('Please select a destination account');
+      return;
+    }
+    if (transferForm.fromAccount === transferForm.toAccount) {
+      toast.error('Source and destination accounts must be different');
+      return;
+    }
+    if (!transferForm.amount || +transferForm.amount <= 0) {
+      toast.error('Transfer amount must be greater than 0');
+      return;
+    }
+
+    setTransferring(true);
+    try {
+      await transfersApi.create(transferForm);
+      toast.success(`Transfer of ${formatCurrency(transferForm.amount)} completed successfully`);
+      setModal(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to complete transfer');
+    } finally {
+      setTransferring(false);
+    }
   };
 
   // ── Total balance across all accounts ──────────────────────────
@@ -454,10 +500,19 @@ export default function AccountsPage() {
             </div>
 
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setModalTab('payment')} className="btn-secondary flex items-center gap-2">
+              <button onClick={() => setModalTab('payment')} disabled={saving} className="btn-secondary flex items-center gap-2">
                 <Settings2 className="w-4 h-4" /> Configure Payment Modes →
               </button>
-              <button onClick={save} className="btn-primary flex-1">Save Account</button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {saving
+                  ? (modal === 'create' ? 'Creating Account...' : 'Saving Account...')
+                  : 'Save Account'}
+              </button>
             </div>
           </div>
         )}
@@ -543,8 +598,17 @@ export default function AccountsPage() {
             </div>
 
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setModalTab('basic')} className="btn-secondary">← Back</button>
-              <button onClick={save} className="btn-primary flex-1">Save Account</button>
+              <button onClick={() => setModalTab('basic')} disabled={saving} className="btn-secondary">← Back</button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {saving
+                  ? (modal === 'create' ? 'Creating Account...' : 'Saving Account...')
+                  : 'Save Account'}
+              </button>
             </div>
           </div>
         )}
@@ -580,8 +644,15 @@ export default function AccountsPage() {
             <input className="input" value={transferForm.description} onChange={e => setTransferForm({...transferForm, description: e.target.value})} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={doTransfer} className="btn-primary flex-1">Transfer</button>
-            <button onClick={() => setModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={doTransfer}
+              disabled={transferring}
+              className="btn-primary flex-1 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            >
+              {transferring && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {transferring ? 'Transferring...' : 'Transfer'}
+            </button>
+            <button onClick={() => setModal(null)} disabled={transferring} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

@@ -107,6 +107,61 @@ router.get('/pending-kots', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// GET /api/orders/pending-bills — List unprinted customer bills across billed/paid orders
+// Polled by the Print Station laptop to auto-print finalized bills placed from mobile devices
+// ─────────────────────────────────────────────────────────────────
+router.get('/pending-bills', async (req, res) => {
+  try {
+    const pendingOrders = await Order.find({
+      status: { $in: ['billed', 'paid'] },
+      billPrinted: false,
+    })
+      .populate('table', 'tableNumber')
+      .populate('createdBy', 'name')
+      .sort({ updatedAt: 1 });
+
+    const pending = pendingOrders.map((order) => {
+      const activeItems = (order.items || [])
+        .filter((i) => i.status !== 'cancelled')
+        .map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+          taxPercent: i.taxPercent || 0,
+          notes: i.notes || '',
+          variantName: i.variant?.name || '',
+          addons: (i.selectedAddons || []).map((a) => ({ name: a.name, price: a.price || 0 })),
+        }));
+
+      return {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        tokenNo: order.orderNumber ? String(order.orderNumber).slice(-2) : String(order._id).slice(-2),
+        tableNumber: order.table ? order.table.tableNumber : 'Takeaway',
+        billerName: order.createdBy ? order.createdBy.name : 'Staff',
+        createdAt: order.createdAt,
+        items: activeItems,
+        subtotal: order.subtotal,
+        taxAmount: order.taxAmount,
+        discount: order.discount || 0,
+        discountType: order.discountType || 'flat',
+        discountValue: order.discountValue || 0,
+        total: order.total,
+        settledAmount: order.settledAmount,
+        waivedAmount: order.waivedAmount || 0,
+        paymentMethod: order.paymentMethod || 'cash',
+        paymentBreakdown: order.paymentBreakdown || {},
+        isPaid: order.status === 'paid',
+      };
+    });
+
+    res.json(pending);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /api/orders/:id — get order by id
 // ─────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -513,6 +568,7 @@ router.post('/:id/bill', managerOrAdmin, async (req, res) => {
     }
 
     order.status = 'billed';
+    order.billPrinted = false;
     await order.save();
 
     await log({
@@ -676,6 +732,7 @@ router.post('/:id/pay', managerOrAdmin, async (req, res) => {
     order.paymentBreakdown = orderPaymentBreakdown;
     order.settledAmount = finalSettled;
     order.waivedAmount = waivedAmount;
+    order.billPrinted = false;
     await order.save();
 
     if (tableDoc) {
@@ -735,6 +792,439 @@ router.post('/:id/cancel', managerOrAdmin, async (req, res) => {
 
     const populated = await populateOrder(Order.findById(order._id));
     res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/transfer — Move table / KOT / items
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/transfer', managerOrAdmin, async (req, res) => {
+  try {
+    const { targetTableId, transferType = 'table', kotRoundNumbers = [], itemTransfers = [] } = req.body;
+
+    if (!targetTableId) {
+      return res.status(400).json({ message: 'Target table is required' });
+    }
+
+    const sourceOrder = await Order.findById(req.params.id);
+    if (!sourceOrder) {
+      return res.status(404).json({ message: 'Source order not found' });
+    }
+    if (sourceOrder.status === 'paid' || sourceOrder.status === 'cancelled') {
+      return res.status(400).json({ message: `Cannot transfer an order with status: ${sourceOrder.status}` });
+    }
+
+    const sourceTable = await Table.findById(sourceOrder.table);
+    if (!sourceTable) {
+      return res.status(404).json({ message: 'Source table not found' });
+    }
+
+    const targetTable = await Table.findById(targetTableId);
+    if (!targetTable) {
+      return res.status(404).json({ message: 'Target table not found' });
+    }
+
+    if (String(sourceTable._id) === String(targetTable._id)) {
+      return res.status(400).json({ message: 'Source table and target table cannot be the same' });
+    }
+
+    // ───────────────────────────────────────────────
+    // Scenario 1: Table-wise transfer (Whole Order / All KOTs)
+    // ───────────────────────────────────────────────
+    if (transferType === 'table') {
+      // If target table is available/empty:
+      if (!targetTable.activeOrder) {
+        sourceOrder.table = targetTable._id;
+        await sourceOrder.save();
+
+        targetTable.activeOrder = sourceOrder._id;
+        targetTable.status = 'occupied';
+        await targetTable.save();
+
+        sourceTable.activeOrder = null;
+        sourceTable.status = 'available';
+        await sourceTable.save();
+
+        await log({
+          user: req.user,
+          action: 'UPDATE',
+          module: 'Orders',
+          description: `${req.user.name} moved Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber} (Order #${sourceOrder.orderNumber})`,
+        });
+
+        return res.json({
+          success: true,
+          message: `Successfully moved order from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+          type: 'table_move',
+        });
+      } else {
+        // Target table is already occupied -> MERGE orders
+        const targetOrder = await Order.findById(targetTable.activeOrder);
+        if (!targetOrder) {
+          // Orphan reference fallback
+          sourceOrder.table = targetTable._id;
+          await sourceOrder.save();
+          targetTable.activeOrder = sourceOrder._id;
+          targetTable.status = 'occupied';
+          await targetTable.save();
+          sourceTable.activeOrder = null;
+          sourceTable.status = 'available';
+          await sourceTable.save();
+
+          return res.json({
+            success: true,
+            message: `Successfully moved order from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+            type: 'table_move',
+          });
+        }
+
+        // Merge items from source into target
+        for (const it of sourceOrder.items) {
+          if (it.status !== 'cancelled') {
+            targetOrder.items.push({
+              menuItem: it.menuItem,
+              name: it.name,
+              price: it.price,
+              taxPercent: it.taxPercent,
+              quantity: it.quantity,
+              notes: it.notes ? `${it.notes} (from ${sourceTable.tableNumber})` : `(from ${sourceTable.tableNumber})`,
+              variant: it.variant,
+              selectedAddons: it.selectedAddons,
+              status: it.status || 'pending',
+            });
+          }
+        }
+
+        // Merge KOT rounds
+        let currentKotCount = targetOrder.kotCount || targetOrder.kotRounds?.length || 1;
+        for (const round of (sourceOrder.kotRounds || [])) {
+          currentKotCount += 1;
+          targetOrder.kotRounds.push({
+            roundNumber: currentKotCount,
+            roundTag: `[FROM ${sourceTable.tableNumber} - ROUND ${round.roundNumber}]`,
+            items: round.items,
+            printed: round.printed,
+            printedAt: round.printedAt,
+            createdAt: round.createdAt || new Date(),
+          });
+        }
+        targetOrder.kotCount = currentKotCount;
+
+        // Recalculate target totals
+        const newTotals = Order.calcTotals(targetOrder.items, targetOrder.discountValue, targetOrder.discountType);
+        targetOrder.subtotal = newTotals.subtotal;
+        targetOrder.taxAmount = newTotals.taxAmount;
+        targetOrder.total = newTotals.total;
+        targetOrder.billPrinted = false;
+        await targetOrder.save();
+
+        // Cancel and mark source order as merged
+        sourceOrder.status = 'cancelled';
+        sourceOrder.cancelReason = `Merged into Table ${targetTable.tableNumber} (Order #${targetOrder.orderNumber})`;
+        await sourceOrder.save();
+
+        // Free source table
+        sourceTable.activeOrder = null;
+        sourceTable.status = 'available';
+        await sourceTable.save();
+
+        await log({
+          user: req.user,
+          action: 'UPDATE',
+          module: 'Orders',
+          description: `${req.user.name} merged Table ${sourceTable.tableNumber} into Table ${targetTable.tableNumber} (Order #${targetOrder.orderNumber})`,
+        });
+
+        return res.json({
+          success: true,
+          message: `Successfully merged Table ${sourceTable.tableNumber} into Table ${targetTable.tableNumber}`,
+          type: 'table_merge',
+        });
+      }
+    }
+
+    // ───────────────────────────────────────────────
+    // Scenario 2: KOT-wise transfer (Specific KOT Rounds)
+    // ───────────────────────────────────────────────
+    if (transferType === 'kot') {
+      const roundNums = Array.isArray(kotRoundNumbers) ? kotRoundNumbers.map(Number) : [];
+      if (roundNums.length === 0) {
+        return res.status(400).json({ message: 'No KOT rounds selected for transfer' });
+      }
+
+      const allRounds = (sourceOrder.kotRounds || []).map((r) => r.roundNumber);
+      if (roundNums.length >= allRounds.length && allRounds.every((r) => roundNums.includes(r))) {
+        // Equivalent to table transfer
+        req.body.transferType = 'table';
+        // Recursively handle as table transfer
+        if (!targetTable.activeOrder) {
+          sourceOrder.table = targetTable._id;
+          await sourceOrder.save();
+          targetTable.activeOrder = sourceOrder._id;
+          targetTable.status = 'occupied';
+          await targetTable.save();
+          sourceTable.activeOrder = null;
+          sourceTable.status = 'available';
+          await sourceTable.save();
+          return res.json({
+            success: true,
+            message: `Successfully moved all KOTs from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+            type: 'table_move',
+          });
+        }
+      }
+
+      const roundsToMove = (sourceOrder.kotRounds || []).filter((r) => roundNums.includes(r.roundNumber));
+      const remainingRounds = (sourceOrder.kotRounds || []).filter((r) => !roundNums.includes(r.roundNumber));
+
+      if (roundsToMove.length === 0) {
+        return res.status(400).json({ message: 'Selected KOT rounds not found' });
+      }
+
+      const itemsToMoveNames = new Map();
+      for (const r of roundsToMove) {
+        for (const it of r.items) {
+          const count = itemsToMoveNames.get(it.name) || 0;
+          itemsToMoveNames.set(it.name, count + (it.quantity || 1));
+        }
+      }
+
+      const movedItems = [];
+      const remainingItems = [];
+      for (const it of sourceOrder.items) {
+        const needed = itemsToMoveNames.get(it.name) || 0;
+        if (needed > 0 && it.status !== 'cancelled') {
+          if (it.quantity <= needed) {
+            movedItems.push(it);
+            itemsToMoveNames.set(it.name, needed - it.quantity);
+          } else {
+            const splitQty = needed;
+            const keptQty = it.quantity - splitQty;
+            it.quantity = keptQty;
+            remainingItems.push(it);
+
+            const clone = it.toObject ? it.toObject() : { ...it };
+            delete clone._id;
+            clone.quantity = splitQty;
+            movedItems.push(clone);
+            itemsToMoveNames.set(it.name, 0);
+          }
+        } else {
+          remainingItems.push(it);
+        }
+      }
+
+      sourceOrder.items = remainingItems;
+      sourceOrder.kotRounds = remainingRounds;
+      const srcTotals = Order.calcTotals(sourceOrder.items, sourceOrder.discountValue, sourceOrder.discountType);
+      sourceOrder.subtotal = srcTotals.subtotal;
+      sourceOrder.taxAmount = srcTotals.taxAmount;
+      sourceOrder.total = srcTotals.total;
+
+      const activeRemaining = sourceOrder.items.filter((i) => i.status !== 'cancelled');
+      if (activeRemaining.length === 0) {
+        sourceOrder.status = 'cancelled';
+        sourceOrder.cancelReason = `All KOTs moved to Table ${targetTable.tableNumber}`;
+        sourceTable.activeOrder = null;
+        sourceTable.status = 'available';
+        await sourceTable.save();
+      }
+      await sourceOrder.save();
+
+      if (!targetTable.activeOrder) {
+        const orderCount = await Order.countDocuments();
+        const orderNumber = 4500 + orderCount + 1;
+        const tgtTotals = Order.calcTotals(movedItems, 0, 'flat');
+
+        const newTargetOrder = await Order.create({
+          table: targetTable._id,
+          orderNumber,
+          items: movedItems,
+          kotRounds: roundsToMove.map((r, idx) => ({
+            roundNumber: idx + 1,
+            roundTag: `[FROM ${sourceTable.tableNumber} - ${r.roundTag || 'KOT'}]`,
+            items: r.items,
+            printed: r.printed,
+            printedAt: r.printedAt,
+          })),
+          kotCount: roundsToMove.length,
+          subtotal: tgtTotals.subtotal,
+          taxAmount: tgtTotals.taxAmount,
+          total: tgtTotals.total,
+          createdBy: req.user._id,
+        });
+
+        targetTable.activeOrder = newTargetOrder._id;
+        targetTable.status = 'occupied';
+        await targetTable.save();
+      } else {
+        const targetOrder = await Order.findById(targetTable.activeOrder);
+        if (targetOrder) {
+          for (const mi of movedItems) {
+            targetOrder.items.push(mi);
+          }
+          let cnt = targetOrder.kotCount || targetOrder.kotRounds?.length || 1;
+          for (const r of roundsToMove) {
+            cnt += 1;
+            targetOrder.kotRounds.push({
+              roundNumber: cnt,
+              roundTag: `[FROM ${sourceTable.tableNumber} - ${r.roundTag || 'KOT'}]`,
+              items: r.items,
+              printed: r.printed,
+              printedAt: r.printedAt,
+            });
+          }
+          targetOrder.kotCount = cnt;
+          const tgtTotals = Order.calcTotals(targetOrder.items, targetOrder.discountValue, targetOrder.discountType);
+          targetOrder.subtotal = tgtTotals.subtotal;
+          targetOrder.taxAmount = tgtTotals.taxAmount;
+          targetOrder.total = tgtTotals.total;
+          targetOrder.billPrinted = false;
+          await targetOrder.save();
+        }
+      }
+
+      await log({
+        user: req.user,
+        action: 'UPDATE',
+        module: 'Orders',
+        description: `${req.user.name} moved KOT rounds [${roundNums.join(', ')}] from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+      });
+
+      return res.json({
+        success: true,
+        message: `Successfully moved selected KOT rounds from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+      });
+    }
+
+    // ───────────────────────────────────────────────
+    // Scenario 3: Item-wise transfer (Specific Items)
+    // ───────────────────────────────────────────────
+    if (transferType === 'item') {
+      if (!Array.isArray(itemTransfers) || itemTransfers.length === 0) {
+        return res.status(400).json({ message: 'No items selected for transfer' });
+      }
+
+      const movedItems = [];
+      const remainingItems = [];
+      const transferMap = new Map(itemTransfers.map((t) => [String(t.itemId), Number(t.quantity) || 1]));
+
+      for (const it of sourceOrder.items) {
+        const transferQty = transferMap.get(String(it._id));
+        if (transferQty && transferQty > 0 && it.status !== 'cancelled') {
+          if (transferQty >= it.quantity) {
+            movedItems.push(it);
+          } else {
+            const keptQty = it.quantity - transferQty;
+            it.quantity = keptQty;
+            remainingItems.push(it);
+
+            const clone = it.toObject ? it.toObject() : { ...it };
+            delete clone._id;
+            clone.quantity = transferQty;
+            movedItems.push(clone);
+          }
+        } else {
+          remainingItems.push(it);
+        }
+      }
+
+      if (movedItems.length === 0) {
+        return res.status(400).json({ message: 'No valid items found to move' });
+      }
+
+      sourceOrder.items = remainingItems;
+      const srcTotals = Order.calcTotals(sourceOrder.items, sourceOrder.discountValue, sourceOrder.discountType);
+      sourceOrder.subtotal = srcTotals.subtotal;
+      sourceOrder.taxAmount = srcTotals.taxAmount;
+      sourceOrder.total = srcTotals.total;
+
+      const activeRemaining = sourceOrder.items.filter((i) => i.status !== 'cancelled');
+      if (activeRemaining.length === 0) {
+        sourceOrder.status = 'cancelled';
+        sourceOrder.cancelReason = `All items moved to Table ${targetTable.tableNumber}`;
+        sourceTable.activeOrder = null;
+        sourceTable.status = 'available';
+        await sourceTable.save();
+      }
+      await sourceOrder.save();
+
+      if (!targetTable.activeOrder) {
+        const orderCount = await Order.countDocuments();
+        const orderNumber = 4500 + orderCount + 1;
+        const tgtTotals = Order.calcTotals(movedItems, 0, 'flat');
+
+        const newTargetOrder = await Order.create({
+          table: targetTable._id,
+          orderNumber,
+          items: movedItems,
+          kotRounds: [{
+            roundNumber: 1,
+            roundTag: `[TRANSFER FROM ${sourceTable.tableNumber}]`,
+            items: movedItems.map((i) => ({
+              name: i.name,
+              quantity: i.quantity,
+              notes: i.notes || '',
+              variantName: i.variant?.name || '',
+              addons: i.selectedAddons?.map((a) => a.name) || [],
+            })),
+            printed: false,
+          }],
+          kotCount: 1,
+          subtotal: tgtTotals.subtotal,
+          taxAmount: tgtTotals.taxAmount,
+          total: tgtTotals.total,
+          createdBy: req.user._id,
+        });
+
+        targetTable.activeOrder = newTargetOrder._id;
+        targetTable.status = 'occupied';
+        await targetTable.save();
+      } else {
+        const targetOrder = await Order.findById(targetTable.activeOrder);
+        if (targetOrder) {
+          for (const mi of movedItems) {
+            targetOrder.items.push(mi);
+          }
+          const cnt = (targetOrder.kotCount || targetOrder.kotRounds?.length || 1) + 1;
+          targetOrder.kotCount = cnt;
+          targetOrder.kotRounds.push({
+            roundNumber: cnt,
+            roundTag: `[TRANSFER FROM ${sourceTable.tableNumber}]`,
+            items: movedItems.map((i) => ({
+              name: i.name,
+              quantity: i.quantity,
+              notes: i.notes || '',
+              variantName: i.variant?.name || '',
+              addons: i.selectedAddons?.map((a) => a.name) || [],
+            })),
+            printed: false,
+          });
+          const tgtTotals = Order.calcTotals(targetOrder.items, targetOrder.discountValue, targetOrder.discountType);
+          targetOrder.subtotal = tgtTotals.subtotal;
+          targetOrder.taxAmount = tgtTotals.taxAmount;
+          targetOrder.total = tgtTotals.total;
+          targetOrder.billPrinted = false;
+          await targetOrder.save();
+        }
+      }
+
+      await log({
+        user: req.user,
+        action: 'UPDATE',
+        module: 'Orders',
+        description: `${req.user.name} moved ${movedItems.length} items from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+      });
+
+      return res.json({
+        success: true,
+        message: `Successfully moved selected items from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
+      });
+    }
+
+    return res.status(400).json({ message: 'Invalid transferType' });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -833,6 +1323,45 @@ router.post('/:orderId/rounds/:roundId/reprint', async (req, res) => {
     await order.save();
 
     res.json({ success: true, message: 'KOT re-queued for print station', roundId: round._id });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:orderId/mark-bill-printed — Acknowledge Customer Bill printed
+// ─────────────────────────────────────────────────────────────────
+router.post('/:orderId/mark-bill-printed', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    order.billPrinted = true;
+    order.billPrintedAt = new Date();
+    await order.save();
+
+    res.json({ success: true, message: 'Customer bill marked as printed', orderId: order._id });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:orderId/queue-bill-print — Queue customer bill print for Print Station laptop
+// ─────────────────────────────────────────────────────────────────
+router.post('/:orderId/queue-bill-print', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    order.billPrinted = false;
+    await order.save();
+
+    res.json({ success: true, message: 'Customer bill queued for printer', orderId: order._id });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }

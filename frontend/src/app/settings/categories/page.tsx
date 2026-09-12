@@ -16,7 +16,8 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { categoriesApi, paymentsApi } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { Plus, Trash2, ChevronRight, Tag, X, IndianRupee, Pencil } from 'lucide-react';
+import { toast } from '@/lib/toast';
+import { Plus, Trash2, ChevronRight, Tag, X, IndianRupee, Pencil, RefreshCw } from 'lucide-react';
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -25,6 +26,7 @@ export default function CategoriesPage() {
   // ── New category form ───────────────────────────────────────────
   const [newCatModal, setNewCatModal] = useState(false);
   const [catForm, setCatForm] = useState({ name: '', icon: '💰', color: '#6366f1' });
+  const [catSaving, setCatSaving] = useState(false);
 
   // ── Subcategory drill-down state ────────────────────────────────
   const [ledgerModal, setLedgerModal] = useState(false);
@@ -36,10 +38,12 @@ export default function CategoriesPage() {
   // ── Add subcategory state ───────────────────────────────────────
   const [addSubModal, setAddSubModal] = useState<any>(null);       // which category
   const [newSubName, setNewSubName] = useState('');
+  const [subSaving, setSubSaving] = useState(false);
 
   // ── Edit category state ─────────────────────────────────────────
   const [editModal, setEditModal] = useState<any>(null);
   const [editForm, setEditForm] = useState({ name: '', icon: '', color: '' });
+  const [editSaving, setEditSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -69,40 +73,85 @@ export default function CategoriesPage() {
 
   // ── Save new category ───────────────────────────────────────────
   const saveCategory = async () => {
-    await categoriesApi.create({ ...catForm, subcategories: [] });
-    setNewCatModal(false);
-    setCatForm({ name: '', icon: '💰', color: '#6366f1' });
-    load();
+    if (!catForm.name?.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+    setCatSaving(true);
+    try {
+      await categoriesApi.create({ ...catForm, name: catForm.name.trim(), subcategories: [] });
+      toast.success('Category created successfully');
+      setNewCatModal(false);
+      setCatForm({ name: '', icon: '💰', color: '#6366f1' });
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to create category');
+    } finally {
+      setCatSaving(false);
+    }
   };
 
   // ── Save edited category ────────────────────────────────────────
   const saveEdit = async () => {
-    await categoriesApi.update(editModal._id, editForm);
-    setEditModal(null);
-    load();
+    if (!editForm.name?.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await categoriesApi.update(editModal._id, { ...editForm, name: editForm.name.trim() });
+      toast.success('Category updated successfully');
+      setEditModal(null);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update category');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   // ── Delete a category ───────────────────────────────────────────
   const deleteCategory = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"? Existing payments will keep this category label.`)) return;
-    await categoriesApi.delete(id);
-    load();
+    try {
+      await categoriesApi.delete(id);
+      toast.success(`Category "${name}" deleted`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete category');
+    }
   };
 
   // ── Add a subcategory ───────────────────────────────────────────
   const addSubcategory = async () => {
-    if (!newSubName.trim()) return;
-    await categoriesApi.addSubcategory(addSubModal._id, newSubName.trim());
-    setAddSubModal(null);
-    setNewSubName('');
-    load();
+    if (!newSubName.trim()) {
+      toast.error('Subcategory name cannot be empty');
+      return;
+    }
+    setSubSaving(true);
+    try {
+      await categoriesApi.addSubcategory(addSubModal._id, newSubName.trim());
+      toast.success('Subcategory added successfully');
+      setAddSubModal(null);
+      setNewSubName('');
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to add subcategory');
+    } finally {
+      setSubSaving(false);
+    }
   };
 
   // ── Remove a subcategory ────────────────────────────────────────
   const removeSubcategory = async (catId: string, name: string) => {
     if (!confirm(`Remove subcategory "${name}"?`)) return;
-    await categoriesApi.deleteSubcategory(catId, name);
-    load();
+    try {
+      await categoriesApi.deleteSubcategory(catId, name);
+      toast.success(`Subcategory "${name}" removed`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to remove subcategory');
+    }
   };
 
   return (
@@ -213,8 +262,15 @@ export default function CategoriesPage() {
             </div>
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={saveCategory} className="btn-primary flex-1">Add Category</button>
-            <button onClick={() => setNewCatModal(false)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={saveCategory}
+              disabled={catSaving}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {catSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {catSaving ? 'Adding Category...' : 'Add Category'}
+            </button>
+            <button onClick={() => setNewCatModal(false)} disabled={catSaving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -234,8 +290,15 @@ export default function CategoriesPage() {
             </div>
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={saveEdit} className="btn-primary flex-1">Save Changes</button>
-            <button onClick={() => setEditModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={saveEdit}
+              disabled={editSaving}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {editSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {editSaving ? 'Saving Changes...' : 'Save Changes'}
+            </button>
+            <button onClick={() => setEditModal(null)} disabled={editSaving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -257,8 +320,15 @@ export default function CategoriesPage() {
             />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={addSubcategory} className="btn-primary flex-1">Add Subcategory</button>
-            <button onClick={() => setAddSubModal(null)} className="btn-secondary">Cancel</button>
+            <button
+              onClick={addSubcategory}
+              disabled={subSaving}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {subSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {subSaving ? 'Adding Subcategory...' : 'Add Subcategory'}
+            </button>
+            <button onClick={() => setAddSubModal(null)} disabled={subSaving} className="btn-secondary">Cancel</button>
           </div>
         </div>
       </Modal>

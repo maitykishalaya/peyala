@@ -6,38 +6,176 @@ const PurchaseEntry = require('../models/PurchaseEntry');
 const Account = require('../models/Account');
 const InventoryItem = require('../models/InventoryItem');
 const Supplier = require('../models/Supplier');
+const Order = require('../models/Order');
+const OwnerNote = require('../models/OwnerNote');
 const { auth } = require('../middleware/auth');
+const { getIstDayRange } = require('../utils/date');
 
 router.use(auth);
 
 router.get('/summary', async (req, res) => {
   try {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    // 1. Precise Indian Standard Time (IST / Asia:Kolkata) Date Ranges
+    const todayRange = getIstDayRange(new Date());
+    const yesterdayDate = new Date(todayRange.start.getTime() - 1000);
+    const yesterdayRange = getIstDayRange(yesterdayDate);
 
-    // Yesterday's date range (for the dashboard summary banner)
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    // tomorrow is reused as today's exclusive end, so yesterday's range is [yesterday, today)
+    const [currentYear, currentMonth] = todayRange.istDateStr.split('-').map(Number);
+    const monthStartRange = getIstDayRange(`${currentYear}-${String(currentMonth).padStart(2, '0')}-01`);
+    const monthStart = monthStartRange.start;
 
-    // Yesterday's sales entry
-    const yesterdaySales = await SalesEntry.findOne({ date: { $gte: yesterday, $lt: today } });
+    const thirtyDaysAgoMs = todayRange.start.getTime() - (29 * 24 * 3600 * 1000);
+    const thirtyDaysAgoRange = getIstDayRange(new Date(thirtyDaysAgoMs));
+    const thirtyDaysAgo = thirtyDaysAgoRange.start;
+
+    // 2. Yesterday's sales & purchases in IST
+    const yesterdaySales = await SalesEntry.findOne({
+      date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end }
+    });
+
+    const yesterdayOrdersAgg = await Order.aggregate([
+      {
+        $match: {
+          status: 'paid',
+          $or: [
+            { paidAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+            { updatedAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$settledAmount' },
+          count: { $sum: 1 },
+          cash: { $sum: '$paymentBreakdown.cash' },
+          upi: { $sum: '$paymentBreakdown.upi' },
+          card: { $sum: '$paymentBreakdown.card' },
+          other: { $sum: '$paymentBreakdown.other' },
+        },
+      },
+    ]);
+
+    let yesterdaySalesData = null;
+    if (yesterdaySales) {
+      const ordTotal = yesterdayOrdersAgg[0]?.total || 0;
+      const outletAmount = (yesterdaySales.outletSales || 0) > 0 ? yesterdaySales.outletSales : ordTotal;
+      const totalRev = (yesterdaySales.totalRevenue || 0) > 0
+        ? yesterdaySales.totalRevenue
+        : outletAmount + (yesterdaySales.zomato?.netSettlement || 0) + (yesterdaySales.fatafat?.netSettlement || 0) + (yesterdaySales.otherSales || 0);
+
+      yesterdaySalesData = {
+        outlet: outletAmount,
+        zomato: yesterdaySales.zomato?.netSettlement || 0,
+        fatafat: yesterdaySales.fatafat?.netSettlement || 0,
+        other: yesterdaySales.otherSales || 0,
+        total: totalRev,
+        paymentBreakdown: yesterdaySales.paymentBreakdown || (yesterdayOrdersAgg[0] ? {
+          cash: yesterdayOrdersAgg[0].cash || 0,
+          upi: yesterdayOrdersAgg[0].upi || 0,
+          card: yesterdayOrdersAgg[0].card || 0,
+          bankTransfer: yesterdayOrdersAgg[0].other || 0,
+        } : {}),
+      };
+    } else if (yesterdayOrdersAgg[0] && yesterdayOrdersAgg[0].total > 0) {
+      yesterdaySalesData = {
+        outlet: yesterdayOrdersAgg[0].total,
+        zomato: 0,
+        fatafat: 0,
+        other: 0,
+        total: yesterdayOrdersAgg[0].total,
+        paymentBreakdown: {
+          cash: yesterdayOrdersAgg[0].cash || 0,
+          upi: yesterdayOrdersAgg[0].upi || 0,
+          card: yesterdayOrdersAgg[0].card || 0,
+          bankTransfer: yesterdayOrdersAgg[0].other || 0,
+        },
+      };
+    }
 
     // Yesterday's purchases (all entries, summed)
     const yesterdayPurchasesAgg = await PurchaseEntry.aggregate([
-      { $match: { date: { $gte: yesterday, $lt: today } } },
+      { $match: { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } } },
       { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
     ]);
-    const yesterdayPurchases = await PurchaseEntry.find({ date: { $gte: yesterday, $lt: today } })
+    const yesterdayPurchases = await PurchaseEntry.find({ date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } })
       .populate('supplier', 'name')
       .select('supplier totalAmount isPaid');
 
-    // Today's sales entry
-    const todaySales = await SalesEntry.findOne({ date: { $gte: today, $lt: tomorrow } });
+    // 3. Today's sales & expenses in IST
+    const todaySales = await SalesEntry.findOne({
+      date: { $gte: todayRange.start, $lte: todayRange.end }
+    });
 
-    // This month's sales totals
+    const todayOrdersAgg = await Order.aggregate([
+      {
+        $match: {
+          status: 'paid',
+          $or: [
+            { paidAt: { $gte: todayRange.start, $lte: todayRange.end } },
+            { updatedAt: { $gte: todayRange.start, $lte: todayRange.end } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$settledAmount' },
+          count: { $sum: 1 },
+          cash: { $sum: '$paymentBreakdown.cash' },
+          upi: { $sum: '$paymentBreakdown.upi' },
+          card: { $sum: '$paymentBreakdown.card' },
+          other: { $sum: '$paymentBreakdown.other' },
+        },
+      },
+    ]);
+
+    let todaySalesData = null;
+    if (todaySales) {
+      const ordTotal = todayOrdersAgg[0]?.total || 0;
+      const outletAmount = (todaySales.outletSales || 0) > 0 ? todaySales.outletSales : ordTotal;
+      const totalRev = (todaySales.totalRevenue || 0) > 0
+        ? todaySales.totalRevenue
+        : outletAmount + (todaySales.zomato?.netSettlement || 0) + (todaySales.fatafat?.netSettlement || 0) + (todaySales.otherSales || 0);
+
+      todaySalesData = {
+        outlet: outletAmount,
+        zomato: todaySales.zomato?.netSettlement || 0,
+        fatafat: todaySales.fatafat?.netSettlement || 0,
+        other: todaySales.otherSales || 0,
+        total: totalRev,
+        paymentBreakdown: todaySales.paymentBreakdown || (todayOrdersAgg[0] ? {
+          cash: todayOrdersAgg[0].cash || 0,
+          upi: todayOrdersAgg[0].upi || 0,
+          card: todayOrdersAgg[0].card || 0,
+          bankTransfer: todayOrdersAgg[0].other || 0,
+        } : {}),
+      };
+    } else if (todayOrdersAgg[0] && todayOrdersAgg[0].total > 0) {
+      todaySalesData = {
+        outlet: todayOrdersAgg[0].total,
+        zomato: 0,
+        fatafat: 0,
+        other: 0,
+        total: todayOrdersAgg[0].total,
+        paymentBreakdown: {
+          cash: todayOrdersAgg[0].cash || 0,
+          upi: todayOrdersAgg[0].upi || 0,
+          card: todayOrdersAgg[0].card || 0,
+          bankTransfer: todayOrdersAgg[0].other || 0,
+        },
+      };
+    }
+
+    // Today's expenses by category
+    const todayExpenses = await Payment.aggregate([
+      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
+      { $group: { _id: '$category', total: { $sum: '$amount' } } }
+    ]);
+
+    // 4. This month's sales totals in IST
     const monthSalesAgg = await SalesEntry.aggregate([
-      { $match: { date: { $gte: monthStart, $lt: tomorrow } } },
+      { $match: { date: { $gte: monthStart, $lte: todayRange.end } } },
       { $group: {
         _id: null,
         total: { $sum: '$totalRevenue' },
@@ -48,22 +186,11 @@ router.get('/summary', async (req, res) => {
       }}
     ]);
 
-    // Today's expenses by category
-    const todayExpenses = await Payment.aggregate([
-      { $match: { date: { $gte: today, $lt: tomorrow } } },
-      { $group: { _id: '$category', total: { $sum: '$amount' } } }
-    ]);
-
-    // Month total expenses
+    // Month total expenses in IST
     const monthExpenses = await Payment.aggregate([
-      { $match: { date: { $gte: monthStart, $lt: tomorrow } } },
+      { $match: { date: { $gte: monthStart, $lte: todayRange.end } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
-
-    // Note: month total expenses now comes purely from Payments (below) —
-    // every purchase already creates a matching Payment record under
-    // 'Raw Materials', so summing PurchaseEntry separately here would
-    // double-count the same money.
 
     // All active accounts
     const accounts = await Account.find({ isActive: true });
@@ -78,12 +205,11 @@ router.get('/summary', async (req, res) => {
       { $group: { _id: null, total: { $sum: { $add: ['$openingBalance', { $subtract: ['$totalPurchased', '$totalPaid'] }] } } } }
     ]);
 
-    // 30-day sales trend
-    const thirtyDaysAgo = new Date(today); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+    // 30-day sales trend in IST
     const salesTrend = await SalesEntry.aggregate([
-      { $match: { date: { $gte: thirtyDaysAgo, $lt: tomorrow } } },
+      { $match: { date: { $gte: thirtyDaysAgo, $lte: todayRange.end } } },
       { $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: '+05:30' } },
         revenue: { $sum: '$totalRevenue' },
         outlet: { $sum: '$outletSales' },
         zomato: { $sum: '$zomato.netSettlement' },
@@ -92,16 +218,16 @@ router.get('/summary', async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    // 30-day expense trend
+    // 30-day expense trend in IST
     const expenseTrend = await Payment.aggregate([
-      { $match: { date: { $gte: thirtyDaysAgo, $lt: tomorrow } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } }, amount: { $sum: '$amount' } } },
+      { $match: { date: { $gte: thirtyDaysAgo, $lte: todayRange.end } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: '+05:30' } }, amount: { $sum: '$amount' } } },
       { $sort: { _id: 1 } }
     ]);
 
     // Expense by category this month
     const expenseByCategory = await Payment.aggregate([
-      { $match: { date: { $gte: monthStart, $lt: tomorrow } } },
+      { $match: { date: { $gte: monthStart, $lte: todayRange.end } } },
       { $group: { _id: '$category', total: { $sum: '$amount' } } },
       { $sort: { total: -1 } }
     ]);
@@ -110,28 +236,19 @@ router.get('/summary', async (req, res) => {
     const totalMonthExpenses = monthExpenses[0]?.total || 0;
     const rawMaterialsThisMonth = expenseByCategory.find(e => e._id === 'Raw Materials')?.total || 0;
 
+    // 5. Owner Note singleton
+    const ownerNoteDoc = await OwnerNote.getSingleton();
+    const ownerNoteText = ownerNoteDoc?.text || '';
+
     res.json({
       today: {
-        sales: todaySales ? {
-          outlet: todaySales.outletSales,
-          zomato: todaySales.zomato?.netSettlement || 0,
-          fatafat: todaySales.fatafat?.netSettlement || 0,
-          other: todaySales.otherSales,
-          total: todaySales.totalRevenue,
-          paymentBreakdown: todaySales.paymentBreakdown,
-        } : null,
+        sales: todaySalesData,
         expenses: todayExpenses,
       },
       // ── Yesterday summary for the dashboard banner ─────────────
       yesterday: {
-        date: yesterday,
-        sales: yesterdaySales ? {
-          outlet: yesterdaySales.outletSales,
-          zomato: yesterdaySales.zomato?.netSettlement || 0,
-          fatafat: yesterdaySales.fatafat?.netSettlement || 0,
-          other: yesterdaySales.otherSales,
-          total: yesterdaySales.totalRevenue,
-        } : null,
+        date: yesterdayRange.canonicalDate,
+        sales: yesterdaySalesData,
         purchases: {
           total: yesterdayPurchasesAgg[0]?.total || 0,
           count: yesterdayPurchasesAgg[0]?.count || 0,
@@ -156,7 +273,8 @@ router.get('/summary', async (req, res) => {
       inventoryValue,
       lowStockCount,
       supplierDues: supplierDues[0]?.total || 0,
-      charts: { salesTrend, expenseTrend, expenseByCategory }
+      charts: { salesTrend, expenseTrend, expenseByCategory },
+      ownerNote: ownerNoteText,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -4,8 +4,12 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { attendanceApi, staffApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { cn, formatDate, getInitials } from '@/lib/utils';
-import { CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info, RefreshCw } from 'lucide-react';
+import { cn, formatDate, getInitials, formatCurrency } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import {
+  CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info, RefreshCw,
+  Clock, Plus, Pencil, CheckCircle2, AlertTriangle, ArrowRight, UserCheck, ShieldAlert, Check
+} from 'lucide-react';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -74,6 +78,35 @@ function normalizeStatusValue(status?: string): StatusKey {
   return 'present';
 }
 
+function formatHoursMinutes(hoursNum: number) {
+  const totalMin = Math.round((hoursNum || 0) * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0 && m === 0) return '0 hrs';
+  if (m === 0) return `${h} hrs`;
+  if (h === 0) return `${m} mins`;
+  return `${h}h ${m}m`;
+}
+
+function timeToMinutes(timeStr?: string) {
+  if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) return null;
+  const [h, m] = timeStr.trim().split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function calculateShiftMinutes(entry?: string, exit?: string) {
+  const entryMin = timeToMinutes(entry || '');
+  const exitMin = timeToMinutes(exit || '');
+  if (entryMin === null || exitMin === null) return 0;
+  if (exitMin >= entryMin) {
+    return exitMin - entryMin;
+  } else {
+    // Cross-midnight / overnight
+    return (1440 - entryMin) + exitMin;
+  }
+}
+
 const STAFF_CACHE_KEY = 'peyala_attendance_staff_cache_v1';
 const getAttendanceCacheKey = (y: number, m: number) => `peyala_attendance_${y}_${m}_v1`;
 
@@ -110,6 +143,7 @@ export default function AttendancePage() {
   const [form, setForm] = useState({ status: 'present' as StatusKey, note: '' });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -139,6 +173,236 @@ export default function AttendancePage() {
 
   const activeStaff = useMemo(() => staff.filter((member) => member.status === 'active'), [staff]);
   const canEdit = useMemo(() => ['admin', 'manager'].includes(user?.role || ''), [user]);
+
+  // ── Duty & Shift Time Tracking State ─────────────────────────────
+  const [selectedLogDate, setSelectedLogDate] = useState(formatDateOnly(today));
+  const [timeLogs, setTimeLogs] = useState<any[]>([]);
+  const [timeLogsLoading, setTimeLogsLoading] = useState(false);
+  const [timeModalOpen, setTimeModalOpen] = useState(false);
+  const [timeModalStaff, setTimeModalStaff] = useState<any>(null);
+  const [timeSaving, setTimeSaving] = useState(false);
+  const [timeForm, setTimeForm] = useState({
+    staffId: '',
+    date: formatDateOnly(today),
+    dutyHours: '10',
+    dailySalary: '',
+    shift1: { entry: '', exit: '' },
+    shift2: { entry: '', exit: '' },
+    hasSecondShift: false,
+    note: '',
+  });
+
+  const loadDayTimeLogs = async (dateStr = selectedLogDate) => {
+    setTimeLogsLoading(true);
+    try {
+      const res = await attendanceApi.getDayTimeLogs(dateStr);
+      setTimeLogs(res.data?.logs || []);
+    } catch (err) {
+      console.error('Failed to load day time logs:', err);
+    } finally {
+      setTimeLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDayTimeLogs(selectedLogDate);
+  }, [selectedLogDate]);
+
+  const openTimeModal = (member?: any, existingRecord?: any) => {
+    const targetMember = member || activeStaff[0];
+    if (!targetMember) {
+      toast.error('No active staff found');
+      return;
+    }
+    setTimeModalStaff(targetMember);
+
+    const defaultSalary = existingRecord?.dailySalary
+      ? String(existingRecord.dailySalary)
+      : targetMember.dailySalary
+      ? String(targetMember.dailySalary)
+      : targetMember.monthlySalary
+      ? String(Math.round(targetMember.monthlySalary / 30))
+      : '';
+
+    const defaultDuty = existingRecord?.dutyHours
+      ? String(existingRecord.dutyHours)
+      : targetMember.defaultDutyHours
+      ? String(targetMember.defaultDutyHours)
+      : '10';
+
+    const hasShift2 = Boolean(
+      (existingRecord?.shift2?.entry && existingRecord?.shift2?.entry.trim() !== '') ||
+      (existingRecord?.shift2?.exit && existingRecord?.shift2?.exit.trim() !== '')
+    );
+
+    setTimeForm({
+      staffId: targetMember._id,
+      date: selectedLogDate,
+      dutyHours: defaultDuty,
+      dailySalary: defaultSalary,
+      shift1: {
+        entry: existingRecord?.shift1?.entry || '',
+        exit: existingRecord?.shift1?.exit || '',
+      },
+      shift2: {
+        entry: existingRecord?.shift2?.entry || '',
+        exit: existingRecord?.shift2?.exit || '',
+      },
+      hasSecondShift: hasShift2,
+      note: existingRecord?.note || '',
+    });
+    setTimeModalOpen(true);
+  };
+
+  const handleStaffChangeInModal = (staffId: string) => {
+    const foundStaff = activeStaff.find((s) => s._id === staffId);
+    if (!foundStaff) return;
+    setTimeModalStaff(foundStaff);
+
+    // Look for existing record in timeLogs
+    const logItem = timeLogs.find((l) => (l.staff?._id || l.staff) === staffId);
+    const existingRecord = logItem?.record;
+
+    const defaultSalary = existingRecord?.dailySalary
+      ? String(existingRecord.dailySalary)
+      : foundStaff.dailySalary
+      ? String(foundStaff.dailySalary)
+      : foundStaff.monthlySalary
+      ? String(Math.round(foundStaff.monthlySalary / 30))
+      : '';
+
+    const defaultDuty = existingRecord?.dutyHours
+      ? String(existingRecord.dutyHours)
+      : foundStaff.defaultDutyHours
+      ? String(foundStaff.defaultDutyHours)
+      : '10';
+
+    const hasShift2 = Boolean(
+      (existingRecord?.shift2?.entry && existingRecord?.shift2?.entry.trim() !== '') ||
+      (existingRecord?.shift2?.exit && existingRecord?.shift2?.exit.trim() !== '')
+    );
+
+    setTimeForm((prev) => ({
+      ...prev,
+      staffId,
+      dutyHours: defaultDuty,
+      dailySalary: defaultSalary,
+      shift1: {
+        entry: existingRecord?.shift1?.entry || '',
+        exit: existingRecord?.shift1?.exit || '',
+      },
+      shift2: {
+        entry: existingRecord?.shift2?.entry || '',
+        exit: existingRecord?.shift2?.exit || '',
+      },
+      hasSecondShift: hasShift2,
+      note: existingRecord?.note || '',
+    }));
+  };
+
+  // Live real-time calculations inside modal
+  const timeCalc = useMemo(() => {
+    const shift1Min = calculateShiftMinutes(timeForm.shift1.entry, timeForm.shift1.exit);
+    const shift2Min = timeForm.hasSecondShift
+      ? calculateShiftMinutes(timeForm.shift2.entry, timeForm.shift2.exit)
+      : 0;
+    const totalMinutes = shift1Min + shift2Min;
+    const totalPresentHours = +(totalMinutes / 60).toFixed(2);
+    const dutyHours = parseFloat(timeForm.dutyHours) || 0;
+    const absentHours = Math.max(0, +(dutyHours - totalPresentHours).toFixed(2));
+    const dailySalary = parseFloat(timeForm.dailySalary) || 0;
+    const hourlyRate = dutyHours > 0 ? +(dailySalary / dutyHours).toFixed(2) : 0;
+    const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
+    const payableAmount = Math.max(0, +(dailySalary - deductionAmount).toFixed(2));
+    const hasEntry = Boolean(
+      (timeForm.shift1.entry && timeForm.shift1.entry.trim() !== '') ||
+      (timeForm.hasSecondShift && timeForm.shift2.entry && timeForm.shift2.entry.trim() !== '')
+    );
+    const autoStatus = hasEntry ? 'present' : 'absent';
+
+    return {
+      shift1Min,
+      shift2Min,
+      totalMinutes,
+      totalPresentHours,
+      dutyHours,
+      absentHours,
+      dailySalary,
+      hourlyRate,
+      deductionAmount,
+      payableAmount,
+      hasEntry,
+      autoStatus,
+    };
+  }, [timeForm]);
+
+  const saveTimeLog = async () => {
+    if (!timeForm.staffId) {
+      toast.error('Please select a staff member');
+      return;
+    }
+    if (!timeForm.date) {
+      toast.error('Please select a date');
+      return;
+    }
+    const numDuty = parseFloat(timeForm.dutyHours);
+    if (isNaN(numDuty) || numDuty <= 0) {
+      toast.error('Target duty hours is mandatory and must be greater than 0');
+      return;
+    }
+    const numDailySalary = parseFloat(timeForm.dailySalary);
+    if (isNaN(numDailySalary) || numDailySalary <= 0) {
+      toast.error('Gross daily salary is mandatory and must be greater than 0');
+      return;
+    }
+
+    setTimeSaving(true);
+    try {
+      await attendanceApi.logTime({
+        staffId: timeForm.staffId,
+        date: timeForm.date,
+        dutyHours: numDuty,
+        dailySalary: numDailySalary,
+        shift1: timeForm.shift1,
+        shift2: timeForm.hasSecondShift ? timeForm.shift2 : { entry: '', exit: '' },
+        note: timeForm.note,
+      });
+
+      const memberName = activeStaff.find((s) => s._id === timeForm.staffId)?.name || 'staff';
+      toast.success(`Duty time & attendance updated for ${memberName}`);
+      setTimeModalOpen(false);
+
+      // Refresh both day logs and monthly calendar
+      await Promise.all([
+        loadDayTimeLogs(selectedLogDate),
+        loadData(true),
+      ]);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to save duty time log');
+    } finally {
+      setTimeSaving(false);
+    }
+  };
+
+  const handlePrevLogDate = () => {
+    const cur = new Date(selectedLogDate);
+    cur.setDate(cur.getDate() - 1);
+    setSelectedLogDate(formatDateOnly(cur));
+  };
+
+  const handleNextLogDate = () => {
+    const cur = new Date(selectedLogDate);
+    cur.setDate(cur.getDate() + 1);
+    if (cur > today) {
+      toast.warning('Cannot view future dates');
+      return;
+    }
+    setSelectedLogDate(formatDateOnly(cur));
+  };
+
+  const handleTodayLogDate = () => {
+    setSelectedLogDate(formatDateOnly(today));
+  };
 
   const daysInMonth = getDaysInMonth(year, month);
   const days = Array.from({ length: daysInMonth }, (_, index) => index + 1);
@@ -261,23 +525,30 @@ export default function AttendancePage() {
     if (!selected) return;
 
     const statusValue = normalizeStatusValue(form.status);
+    setSaving(true);
+    try {
+      if (selected.record?._id) {
+        await attendanceApi.update(selected.record._id, {
+          status: statusValue,
+          note: form.note,
+        });
+      } else {
+        await attendanceApi.mark({
+          date: selected.date,
+          status: statusValue,
+          note: form.note,
+          staffId: selected.member._id,
+        });
+      }
 
-    if (selected.record?._id) {
-      await attendanceApi.update(selected.record._id, {
-        status: statusValue,
-        note: form.note,
-      });
-    } else {
-      await attendanceApi.mark({
-        date: selected.date,
-        status: statusValue,
-        note: form.note,
-        staffId: selected.member._id,
-      });
+      toast.success(`Marked ${STATUS_CONFIG[statusValue].text} for ${selected.member?.name || 'staff'}`);
+      setModalOpen(false);
+      await loadData(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to update attendance');
+    } finally {
+      setSaving(false);
     }
-
-    setModalOpen(false);
-    await loadData(true);
   };
 
   const bulkMarkPresentForDay = async (day: number) => {
@@ -288,13 +559,18 @@ export default function AttendancePage() {
 
     if (!window.confirm(`Mark all active staff present for ${formatDate(dateValue)}?`)) return;
 
-    await attendanceApi.mark({
-      date: formatDateOnly(dateValue),
-      status: 'present',
-      staffIds: activeStaff.map((member) => member._id),
-    });
+    try {
+      await attendanceApi.mark({
+        date: formatDateOnly(dateValue),
+        status: 'present',
+        staffIds: activeStaff.map((member) => member._id),
+      });
 
-    await loadData(true);
+      toast.success(`Marked all active staff present for ${formatDate(dateValue)}`);
+      await loadData(true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to mark attendance');
+    }
   };
 
   return (
@@ -669,6 +945,309 @@ export default function AttendancePage() {
             )}
           </div>
         </div>
+
+        {/* ── Section: Staff Duty & Shift Time Tracking (Entry / Exit / 2 Shifts) ── */}
+        <div className="card p-4 sm:p-6 border-2 border-indigo-100 dark:border-indigo-950/60 bg-gradient-to-b from-white to-indigo-50/20 dark:from-gray-900 dark:to-gray-900/60 space-y-5">
+          {/* Header & Date Controls */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                <Clock className="w-4 h-4" />
+                <span>Duty & Shift Time Tracking</span>
+                <span className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300 text-[10px] px-2 py-0.5 rounded-full font-bold">Manager & Admin Only</span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-gray-900 dark:text-white">
+                Daily Shift Timings & Pro-Rata Salary Deduction
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl leading-relaxed">
+                Log 1 or 2 shift entry and exit times. Target duty hours is mandatory. The system calculates duty shortage and suggests daily salary deductions based on hours worked.
+              </p>
+            </div>
+
+            {/* Date Selector & Action */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 border border-gray-300 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={handlePrevLogDate}
+                  className="p-1.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded"
+                  title="Previous Day"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <input
+                  type="date"
+                  max={formatDateOnly(today)}
+                  value={selectedLogDate}
+                  onChange={(e) => setSelectedLogDate(e.target.value)}
+                  className="bg-transparent text-xs font-black px-2 py-1 text-gray-900 dark:text-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleNextLogDate}
+                  disabled={selectedLogDate >= formatDateOnly(today)}
+                  className="p-1.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Next Day"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTodayLogDate}
+                className="btn-secondary text-xs font-bold py-2 px-3"
+              >
+                Today
+              </button>
+
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => openTimeModal()}
+                  className="btn-primary text-xs font-bold py-2 px-3.5 flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Log Staff Duty</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!canEdit && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>Read-only mode. Managers and Administrators can add or edit entry/exit timings, duty hours, and deductions.</span>
+            </div>
+          )}
+
+          {/* Daily Table of Staff Shift Times */}
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-gray-50/80 dark:bg-gray-800/80 text-[11px] font-black uppercase tracking-wider text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <tr>
+                  <th className="py-3 px-3.5">Staff Member</th>
+                  <th className="py-3 px-3 text-center">Shift 1 (Entry - Exit)</th>
+                  <th className="py-3 px-3 text-center">Shift 2 (Entry - Exit)</th>
+                  <th className="py-3 px-3 text-center">Duty Target</th>
+                  <th className="py-3 px-3 text-center">Present Duty</th>
+                  <th className="py-3 px-3 text-center">Shortage / Absent</th>
+                  <th className="py-3 px-3 text-right">Daily Salary</th>
+                  <th className="py-3 px-3 text-right">Deduction</th>
+                  <th className="py-3 px-3 text-right">Day Net Pay</th>
+                  <th className="py-3 px-3 text-center">Attendance</th>
+                  {canEdit && <th className="py-3 px-3 text-center">Action</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 text-xs">
+                {timeLogsLoading ? (
+                  <tr>
+                    <td colSpan={canEdit ? 11 : 10} className="py-8 text-center text-gray-400 font-bold">
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
+                      Loading shift time records for {selectedLogDate}...
+                    </td>
+                  </tr>
+                ) : timeLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={canEdit ? 11 : 10} className="py-8 text-center text-gray-400 font-medium">
+                      No active staff found.
+                    </td>
+                  </tr>
+                ) : (
+                  timeLogs.map(({ staff: member, record }: any) => {
+                    const hasRecord = Boolean(record && (record.dutyHours || record.shift1?.entry));
+                    const isPresent = record?.status === 'present';
+                    const hasShortage = record?.absentHours > 0;
+
+                    return (
+                      <tr
+                        key={member._id}
+                        className="hover:bg-indigo-50/30 dark:hover:bg-gray-800/40 transition-colors"
+                      >
+                        {/* Staff */}
+                        <td className="py-3 px-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300 flex items-center justify-center font-bold text-xs shrink-0">
+                              {getInitials(member.name)}
+                            </div>
+                            <div>
+                              <p className="font-bold text-gray-900 dark:text-white leading-tight">{member.name}</p>
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400">{member.position}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Shift 1 */}
+                        <td className="py-3 px-3 text-center">
+                          {record?.shift1?.entry ? (
+                            <span className="font-semibold text-gray-800 dark:text-gray-200">
+                              {record.shift1.entry} <span className="text-gray-400">→</span> {record.shift1.exit || 'Active'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+
+                        {/* Shift 2 */}
+                        <td className="py-3 px-3 text-center">
+                          {record?.shift2?.entry ? (
+                            <span className="font-semibold text-gray-800 dark:text-gray-200">
+                              {record.shift2.entry} <span className="text-gray-400">→</span> {record.shift2.exit || 'Active'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+
+                        {/* Target Duty */}
+                        <td className="py-3 px-3 text-center font-bold text-gray-700 dark:text-gray-300">
+                          {record?.dutyHours ? `${record.dutyHours}h` : member.defaultDutyHours ? `${member.defaultDutyHours}h` : '—'}
+                        </td>
+
+                        {/* Present Duty */}
+                        <td className="py-3 px-3 text-center">
+                          {hasRecord ? (
+                            <span className="font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded">
+                              {formatHoursMinutes(record.totalPresentHours)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">0h</span>
+                          )}
+                        </td>
+
+                        {/* Shortage / Absent */}
+                        <td className="py-3 px-3 text-center">
+                          {hasRecord ? (
+                            hasShortage ? (
+                              <span className="font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded text-[11px]">
+                                -{formatHoursMinutes(record.absentHours)}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded text-[11px] inline-flex items-center justify-center gap-1">
+                                <Check className="w-3 h-3" /> Full Duty
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-gray-400 text-[11px]">Not logged</span>
+                          )}
+                        </td>
+
+                        {/* Daily Salary */}
+                        <td className="py-3 px-3 text-right font-medium text-gray-700 dark:text-gray-300">
+                          {record?.dailySalary
+                            ? formatCurrency(record.dailySalary)
+                            : member.dailySalary
+                            ? formatCurrency(member.dailySalary)
+                            : member.monthlySalary
+                            ? `~${formatCurrency(Math.round(member.monthlySalary / 30))}`
+                            : '—'}
+                        </td>
+
+                        {/* Deduction */}
+                        <td className="py-3 px-3 text-right">
+                          {hasRecord && record?.deductionAmount > 0 ? (
+                            <span className="font-black text-rose-600 dark:text-rose-400">
+                              -{formatCurrency(record.deductionAmount)}
+                            </span>
+                          ) : hasRecord ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">₹0</span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+
+                        {/* Day Net Pay */}
+                        <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
+                          {hasRecord && record?.payableAmount !== undefined ? (
+                            formatCurrency(record.payableAmount)
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+
+                        {/* Attendance Status */}
+                        <td className="py-3 px-3 text-center">
+                          {record?.status ? (
+                            <span
+                              className={cn(
+                                'inline-flex items-center justify-center px-2 py-0.5 rounded text-[11px] font-black uppercase shadow-2xs',
+                                STATUS_CONFIG[record.status as StatusKey]?.pill || 'bg-gray-100 text-gray-700'
+                              )}
+                            >
+                              {STATUS_CONFIG[record.status as StatusKey]?.text || record.status}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-[11px] italic">Unmarked</span>
+                          )}
+                        </td>
+
+                        {/* Action */}
+                        {canEdit && (
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => openTimeModal(member, record)}
+                              className="btn-secondary py-1 px-2.5 text-xs font-bold inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                              title="Log / Edit Duty Times"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>{hasRecord ? 'Edit' : 'Log'}</span>
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Daily Aggregate KPI Bar */}
+          {!timeLogsLoading && timeLogs.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2">
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
+                <span className="text-[10px] font-black uppercase text-gray-400">Staff Active</span>
+                <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">{timeLogs.length}</p>
+              </div>
+
+              <div className="p-3 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-xl border border-indigo-200 dark:border-indigo-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400">Total Present</span>
+                <p className="text-base font-black text-indigo-700 dark:text-indigo-300 mt-0.5">
+                  {formatHoursMinutes(timeLogs.reduce((sum, l) => sum + (l.record?.totalPresentHours || 0), 0))}
+                </p>
+              </div>
+
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Shortage</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {formatHoursMinutes(timeLogs.reduce((sum, l) => sum + (l.record?.absentHours || 0), 0))}
+                </p>
+              </div>
+
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
+                <span className="text-[10px] font-black uppercase text-gray-400">Total Daily Gross</span>
+                <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">
+                  {formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.dailySalary || 0), 0))}
+                </p>
+              </div>
+
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Deductions</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  -{formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.deductionAmount || 0), 0))}
+                </p>
+              </div>
+
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Net Day Payable</span>
+                <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  {formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.payableAmount || 0), 0))}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Attendance Edit Modal */}
@@ -733,13 +1312,16 @@ export default function AttendancePage() {
               <button
                 type="button"
                 onClick={saveAttendance}
-                className="btn-primary flex-1 font-bold shadow-xs"
+                disabled={saving}
+                className="btn-primary flex-1 font-bold shadow-xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                Save Attendance
+                {saving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {saving ? 'Saving Attendance...' : 'Save Attendance'}
               </button>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
+                disabled={saving}
                 className="btn-secondary font-bold"
               >
                 Cancel
@@ -747,6 +1329,282 @@ export default function AttendancePage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* ── Modal: Log Staff Duty Time ── */}
+      <Modal
+        open={timeModalOpen}
+        onClose={() => setTimeModalOpen(false)}
+        title="Log Staff Shift Timing & Duty"
+        size="md"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveTimeLog();
+          }}
+          className="space-y-4"
+        >
+          {/* Staff & Date Selection */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label font-bold text-gray-900 dark:text-gray-200">Staff Member *</label>
+              <select
+                value={timeForm.staffId}
+                onChange={(e) => handleStaffChangeInModal(e.target.value)}
+                className="input font-semibold"
+                required
+              >
+                {activeStaff.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name} ({s.position})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label font-bold text-gray-900 dark:text-gray-200">Duty Date *</label>
+              <input
+                type="date"
+                max={formatDateOnly(today)}
+                value={timeForm.date}
+                onChange={(e) => setTimeForm((prev) => ({ ...prev, date: e.target.value }))}
+                className="input font-semibold"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Mandatory Duty Hours & Mandatory Daily Salary */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800">
+            <div>
+              <label className="label font-bold text-indigo-950 dark:text-indigo-200 flex items-center justify-between">
+                <span>Target Duty Hours *</span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black">Mandatory</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="24"
+                  required
+                  value={timeForm.dutyHours}
+                  onChange={(e) => setTimeForm((prev) => ({ ...prev, dutyHours: e.target.value }))}
+                  placeholder="e.g. 10"
+                  className="input font-black text-base pr-10"
+                />
+                <span className="absolute right-3 top-2.5 text-xs text-gray-400 font-bold">hours</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">Mandatory duty duration threshold (e.g. 10)</p>
+            </div>
+
+            <div>
+              <label className="label font-bold text-indigo-950 dark:text-indigo-200 flex items-center justify-between">
+                <span>Gross Daily Salary (₹) *</span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 uppercase font-black">Mandatory</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  required
+                  value={timeForm.dailySalary}
+                  onChange={(e) => setTimeForm((prev) => ({ ...prev, dailySalary: e.target.value }))}
+                  placeholder="e.g. 300"
+                  className="input font-black text-base pl-7"
+                />
+                <span className="absolute left-3 top-2.5 text-xs text-gray-400 font-bold">₹</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">Mandatory daily wage for pro-rata deduction</p>
+            </div>
+          </div>
+
+          {/* Shift 1 Timings */}
+          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                Shift 1 (Primary Duty)
+              </span>
+              <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">
+                {timeCalc.shift1Min > 0 ? formatHoursMinutes(timeCalc.shift1Min / 60) : '0 hrs'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Entry Time</label>
+                <input
+                  type="time"
+                  value={timeForm.shift1.entry}
+                  onChange={(e) =>
+                    setTimeForm((prev) => ({
+                      ...prev,
+                      shift1: { ...prev.shift1, entry: e.target.value },
+                    }))
+                  }
+                  className="input font-bold text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Exit Time</label>
+                <input
+                  type="time"
+                  value={timeForm.shift1.exit}
+                  onChange={(e) =>
+                    setTimeForm((prev) => ({
+                      ...prev,
+                      shift1: { ...prev.shift1, exit: e.target.value },
+                    }))
+                  }
+                  className="input font-bold text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Shift 2 Option (Split Duty) */}
+          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={timeForm.hasSecondShift}
+                  onChange={(e) =>
+                    setTimeForm((prev) => ({
+                      ...prev,
+                      hasSecondShift: e.target.checked,
+                    }))
+                  }
+                  className="w-4 h-4 rounded text-indigo-600"
+                />
+                <span>Enable Shift 2 (for split duty staff)</span>
+              </label>
+              {timeForm.hasSecondShift && (
+                <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">
+                  {timeCalc.shift2Min > 0 ? formatHoursMinutes(timeCalc.shift2Min / 60) : '0 hrs'}
+                </span>
+              )}
+            </div>
+
+            {timeForm.hasSecondShift && (
+              <div className="grid grid-cols-2 gap-3 pt-1 border-t border-gray-100 dark:border-gray-800">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Shift 2 Entry</label>
+                  <input
+                    type="time"
+                    value={timeForm.shift2.entry}
+                    onChange={(e) =>
+                      setTimeForm((prev) => ({
+                        ...prev,
+                        shift2: { ...prev.shift2, entry: e.target.value },
+                      }))
+                    }
+                    className="input font-bold text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Shift 2 Exit</label>
+                  <input
+                    type="time"
+                    value={timeForm.shift2.exit}
+                    onChange={(e) =>
+                      setTimeForm((prev) => ({
+                        ...prev,
+                        shift2: { ...prev.shift2, exit: e.target.value },
+                      }))
+                    }
+                    className="input font-bold text-sm"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Remarks */}
+          <div>
+            <label className="label font-bold text-gray-900 dark:text-gray-200">Duty Remarks / Note</label>
+            <input
+              type="text"
+              value={timeForm.note}
+              onChange={(e) => setTimeForm((prev) => ({ ...prev, note: e.target.value }))}
+              placeholder="e.g. Left early due to emergency, split duty completed"
+              className="input font-medium text-sm"
+            />
+          </div>
+
+          {/* Real-time Calculation Card */}
+          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/80 border-2 border-indigo-200 dark:border-indigo-900/60 space-y-3">
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2">
+              <span className="text-xs font-black uppercase text-gray-500 tracking-wider">Live Calculation Breakdown</span>
+              <span
+                className={cn(
+                  'px-2 py-0.5 rounded text-xs font-black uppercase shadow-2xs',
+                  STATUS_CONFIG[timeCalc.autoStatus as StatusKey]?.pill
+                )}
+              >
+                Auto Status: {STATUS_CONFIG[timeCalc.autoStatus as StatusKey]?.text}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div>
+                <span className="text-gray-500 font-medium">Target Duty:</span>
+                <p className="font-bold text-gray-800 dark:text-gray-200">{timeCalc.dutyHours} hrs</p>
+              </div>
+              <div>
+                <span className="text-gray-500 font-medium">Total Present:</span>
+                <p className="font-bold text-indigo-700 dark:text-indigo-300">{formatHoursMinutes(timeCalc.totalPresentHours)}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 font-medium">Duty Shortage:</span>
+                <p className={cn('font-bold', timeCalc.absentHours > 0 ? 'text-rose-600' : 'text-emerald-600')}>
+                  {timeCalc.absentHours > 0 ? `-${formatHoursMinutes(timeCalc.absentHours)}` : 'None (0h)'}
+                </p>
+              </div>
+              <div>
+                <span className="text-gray-500 font-medium">Hourly Rate:</span>
+                <p className="font-bold text-gray-800 dark:text-gray-200">{formatCurrency(timeCalc.hourlyRate)}/hr</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700 text-sm font-black">
+              <div>
+                <span className="text-gray-500 text-xs font-medium block">Suggested Deduction:</span>
+                <span className={cn('text-base', timeCalc.deductionAmount > 0 ? 'text-rose-600' : 'text-gray-700 dark:text-gray-300')}>
+                  {timeCalc.deductionAmount > 0 ? `-${formatCurrency(timeCalc.deductionAmount)}` : '₹0'}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-gray-500 text-xs font-medium block">Net Day Payable:</span>
+                <span className="text-lg text-emerald-600 dark:text-emerald-400">
+                  {formatCurrency(timeCalc.payableAmount)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="flex gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={timeSaving}
+              className="btn-primary flex-1 font-bold py-2.5 flex items-center justify-center gap-2 shadow-xs disabled:opacity-60"
+            >
+              {timeSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {timeSaving ? 'Saving Duty Time...' : 'Save Duty Timing & Deductions'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimeModalOpen(false)}
+              disabled={timeSaving}
+              className="btn-secondary font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       </Modal>
     </AppLayout>
   );

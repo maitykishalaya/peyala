@@ -6,6 +6,23 @@ const attendanceSchema = new mongoose.Schema({
   status: { type: String, enum: ['present', 'absent', 'leave', 'holiday', 'halfday'], required: true },
   note: { type: String },
   markedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+
+  // Duty and Shift Time Tracking fields
+  dutyHours: { type: Number },
+  shift1: {
+    entry: { type: String, trim: true },
+    exit: { type: String, trim: true },
+  },
+  shift2: {
+    entry: { type: String, trim: true },
+    exit: { type: String, trim: true },
+  },
+  totalPresentHours: { type: Number, default: 0 },
+  absentHours: { type: Number, default: 0 },
+  dailySalary: { type: Number },
+  hourlyRate: { type: Number, default: 0 },
+  deductionAmount: { type: Number, default: 0 },
+  payableAmount: { type: Number, default: 0 },
 }, { timestamps: true });
 
 attendanceSchema.index({ staff: 1, date: 1 }, { unique: true });

@@ -196,6 +196,35 @@ export interface PendingKotJob {
   }>;
 }
 
+export interface PendingBillJob {
+  orderId: string;
+  orderNumber?: number;
+  tokenNo?: string | number;
+  tableNumber: string;
+  billerName?: string;
+  createdAt: string;
+  items: Array<{
+    name: string;
+    quantity: number;
+    price: number;
+    taxPercent: number;
+    notes?: string;
+    variantName?: string;
+    addons?: Array<{ name: string; price: number }>;
+  }>;
+  subtotal: number;
+  taxAmount: number;
+  discount: number;
+  discountType?: 'flat' | 'percentage' | string;
+  discountValue?: number;
+  total: number;
+  settledAmount?: number;
+  waivedAmount?: number;
+  paymentMethod?: string;
+  paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number };
+  isPaid?: boolean;
+}
+
 export interface OrderInputItem {
   menuItemId: string;
   quantity: number;
@@ -262,8 +291,24 @@ export const ordersApi = {
     api.post<{ success: boolean; message: string; roundId: string }>(`/orders/${orderId}/rounds/${roundId}/reprint`),
   reprintOrderKot: (orderId: string) =>
     api.post<{ success: boolean; message: string }>(`/orders/${orderId}/reprint`),
+  getPendingBills: () =>
+    api.get<PendingBillJob[]>('/orders/pending-bills'),
+  markBillPrinted: (orderId: string) =>
+    api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/mark-bill-printed`),
+  queueBillPrint: (orderId: string) =>
+    api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/queue-bill-print`),
   updateSettled: (id: string, data: UpdateSettledOrderPayload) =>
     api.put<Order>(`/orders/${id}/settled`, data),
   deleteSettled: (id: string) =>
     api.delete<{ message: string; deletedOrderNumber?: number }>(`/orders/${id}/settled`),
+  transfer: (
+    id: string,
+    data: {
+      targetTableId: string;
+      transferType?: 'table' | 'kot' | 'item';
+      kotRoundNumbers?: number[];
+      itemTransfers?: Array<{ itemId: string; quantity: number }>;
+    }
+  ) =>
+    api.post<{ success: boolean; message: string; type?: string }>(`/orders/${id}/transfer`, data),
 };

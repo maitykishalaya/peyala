@@ -3,15 +3,68 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { useAuth } from '@/lib/auth';
-import { tablesApi, ordersApi, menuApi, addonsApi, Table, Order, MenuItem, MenuCategory, Addon, MenuItemVariant } from '@/lib/pos-api';
-import { formatCurrency, cn } from '@/lib/utils';
 import {
-  LayoutGrid, Plus, Users, Utensils, Receipt, CheckCircle,
-  XCircle, Clock, Search, Trash2, ChevronRight, AlertCircle,
-  CreditCard, Wallet, Smartphone, Building2, PlusCircle, MinusCircle,
-  ChefHat, RefreshCw, Printer, ShieldAlert, Sparkles, Check, Layers, Pencil
+  tablesApi,
+  ordersApi,
+  menuApi,
+  addonsApi,
+  Table,
+  Order,
+  MenuItem,
+  MenuCategory,
+  Addon,
+  MenuItemVariant,
+} from '@/lib/pos-api';
+import { formatCurrency, cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import {
+  LayoutGrid,
+  Plus,
+  Users,
+  Utensils,
+  Receipt,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Search,
+  Trash2,
+  ChevronRight,
+  AlertCircle,
+  CreditCard,
+  Wallet,
+  Smartphone,
+  Building2,
+  PlusCircle,
+  MinusCircle,
+  ChefHat,
+  RefreshCw,
+  Printer,
+  ShieldAlert,
+  Sparkles,
+  Check,
+  Layers,
+  Pencil,
+  Eye,
+  ArrowRightLeft,
+  ArrowLeft,
+  CheckSquare,
+  Square,
+  FileText,
+  X,
+  ChevronDown,
+  ShoppingBag,
+  Store,
+  Bike,
+  Percent,
 } from 'lucide-react';
-import { printKOT, printCustomerBill, getPrintMode, setPrintMode, PrintMode, BillItem } from '@/lib/thermal-print';
+import {
+  printKOT,
+  printCustomerBill,
+  getPrintMode,
+  setPrintMode,
+  PrintMode,
+  BillItem,
+} from '@/lib/thermal-print';
 
 export interface CartItemConfig {
   menuItemId: string;
@@ -22,47 +75,120 @@ export interface CartItemConfig {
   unitPrice: number;
 }
 
+export type TableSection = 'Indoor' | 'Outdoor' | 'Pick Up' | 'Other';
+
+// Group table into Indoor, Outdoor, Pick Up, Other sections (matching Petpooja layout)
+function getTableSection(tableNumber: string): TableSection {
+  const lower = (tableNumber || '').toLowerCase().trim();
+  if (
+    lower.startsWith('in ') ||
+    lower.startsWith('in-') ||
+    lower.startsWith('in1') ||
+    lower.startsWith('in2') ||
+    lower.startsWith('in3') ||
+    lower.startsWith('in4') ||
+    lower.startsWith('in5') ||
+    lower.startsWith('in6') ||
+    lower.startsWith('in7') ||
+    lower.startsWith('in8') ||
+    lower.startsWith('in9') ||
+    lower.startsWith('in0') ||
+    lower === 'in' ||
+    lower.includes('indoor') ||
+    lower.startsWith('i-') ||
+    lower.startsWith('din')
+  ) {
+    return 'Indoor';
+  }
+  if (
+    lower.startsWith('out') ||
+    lower.includes('outdoor') ||
+    lower.startsWith('o-') ||
+    lower.startsWith('patio') ||
+    lower.startsWith('sudhanil') ||
+    lower.startsWith('ratnadeep') ||
+    lower.startsWith('extra') ||
+    lower.startsWith('dhitun')
+  ) {
+    return 'Outdoor';
+  }
+  if (
+    lower.startsWith('pick') ||
+    lower.startsWith('takeaway') ||
+    lower.startsWith('delivery') ||
+    lower.startsWith('pu')
+  ) {
+    return 'Pick Up';
+  }
+  return 'Other';
+}
+
 export default function TablesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const canManageOrders = user?.role === 'admin' || user?.role === 'manager';
+
+  // ── Primary View Mode: 'table_view' (Floor Plan) or 'pos_order' (3-Column Screen) ──
+  const [activeView, setActiveView] = useState<'table_view' | 'pos_order'>('table_view');
 
   const [tables, setTables] = useState<Table[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'occupied' | 'reserved'>('all');
 
-  // Selected Table & Order Modal state
+  // Table View status filter & section filter
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'occupied' | 'reserved'>('all');
+  const [sectionFilter, setSectionFilter] = useState<'all' | TableSection>('all');
+  const [tableSearch, setTableSearch] = useState('');
+
+  // Selected Table & Active Order
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [isRound2Mode, setIsRound2Mode] = useState<boolean>(false);
   const [orderModalLoading, setOrderModalLoading] = useState(false);
 
-  // Cart state for Opening New Order
+  // Detailed Order & Settlement Modal (opened via Eye icon)
+  const [showOrderDetailsModal, setShowOrderDetailsModal] = useState(false);
+
+  // Move KOT / Items Modal state (Matching Petpooja Screenshots)
+  const [moveModal, setMoveModal] = useState<{
+    open: boolean;
+    sourceTable: Table | null;
+    activeOrder: Order | null;
+  }>({
+    open: false,
+    sourceTable: null,
+    activeOrder: null,
+  });
+  const [moveTab, setMoveTab] = useState<'table' | 'kot' | 'item'>('table');
+  const [selectedTargetTableId, setSelectedTargetTableId] = useState<string>('');
+  const [selectedKotRounds, setSelectedKotRounds] = useState<number[]>([]);
+  const [itemTransferQuantities, setItemTransferQuantities] = useState<Record<string, number>>({});
+  const [moveLoading, setMoveLoading] = useState<boolean>(false);
+
+  // POS Order Screen Cart state (for Round 1 or Round 2+)
   const [cart, setCart] = useState<Record<string, CartItemConfig>>({});
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [menuSearch, setMenuSearch] = useState('');
-  const [menuCatFilter, setMenuCatFilter] = useState('all');
+  const [serviceType, setServiceType] = useState<'dine_in' | 'delivery' | 'pickup'>('dine_in');
+  const [guestCount, setGuestCount] = useState<number>(1);
+  const [orderNotes, setOrderNotes] = useState<string>('');
 
-  // Add Round (KOT) state for Occupied Table
-  const [showAddRound, setShowAddRound] = useState(false);
-  const [roundCart, setRoundCart] = useState<Record<string, CartItemConfig>>({});
-  const [roundSearch, setRoundSearch] = useState('');
-  const [roundCatFilter, setRoundCatFilter] = useState('all');
-
-  // Item Customization Pop-Up Modal state
+  // Item Customization Modal state (Addons & Variants matching Image 4)
   const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
-  const [customizingTarget, setCustomizingTarget] = useState<'cart' | 'roundCart'>('cart');
   const [selectedVariant, setSelectedVariant] = useState<MenuItemVariant | null>(null);
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [customizingNotes, setCustomizingNotes] = useState('');
   const [customizingQty, setCustomizingQty] = useState(1);
+  const [addonSearch, setAddonSearch] = useState('');
 
-  // Billing & Payment state
+  // Billing, Discount & Payment state
   const [discountType, setDiscountType] = useState<'flat' | 'percentage'>('flat');
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [settlementInput, setSettlementInput] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'other' | 'part'>('cash');
+  const [isPaidChecked, setIsPaidChecked] = useState<boolean>(false);
   const [partCash, setPartCash] = useState<string>('');
   const [partUpi, setPartUpi] = useState<string>('');
   const [partCard, setPartCard] = useState<string>('');
@@ -70,15 +196,30 @@ export default function TablesPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [printMode, setPrintModeState] = useState<PrintMode>('test');
 
-  const numPartCash = Math.max(0, parseFloat(partCash) || 0);
-  const numPartUpi = Math.max(0, parseFloat(partUpi) || 0);
-  const numPartCard = Math.max(0, parseFloat(partCard) || 0);
-  const numPartOther = Math.max(0, parseFloat(partOther) || 0);
-  const totalPartAllocated = Math.round((numPartCash + numPartUpi + numPartCard + numPartOther) * 100) / 100;
-  const partDifference = activeOrder ? Math.round((activeOrder.total - totalPartAllocated) * 100) / 100 : 0;
-  const partRemaining = Math.max(0, partDifference);
+  // Print Station state
+  const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
+  const [lastPrintedKOT, setLastPrintedKOT] = useState<string | null>(null);
+  const [lastPrintedBill, setLastPrintedBill] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const inFlightKotsRef = useRef<Set<string>>(new Set());
+  const inFlightBillsRef = useRef<Set<string>>(new Set());
 
-  // Live timer tick to keep KOT elapsed minutes updated in real time
+  // Table Management Modal (create/edit)
+  const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
+  const [editingTable, setEditingTable] = useState<Table | null>(null);
+  const [tableForm, setTableForm] = useState<{
+    tableNumber: string;
+    capacity: number;
+    status: 'available' | 'occupied' | 'reserved';
+  }>({ tableNumber: '', capacity: 4, status: 'available' });
+  const [tableSaving, setTableSaving] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<'save' | 'save_print' | 'kot' | 'kot_print' | null>(null);
+
+  // Bill / KOT Quick Lookup Dialog
+  const [lookupQuery, setLookupQuery] = useState('');
+  const [showLookupModal, setShowLookupModal] = useState<'bill' | 'kot' | null>(null);
+
+  // Live timer tick for KOT elapsed minutes
   const [, setKotTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setKotTick((t) => t + 1), 30000);
@@ -87,21 +228,15 @@ export default function TablesPage() {
 
   const getKotElapsedMinutes = (order: any) => {
     if (!order) return null;
-    const kotTime = order.kotRounds?.[0]?.createdAt || order.createdAt;
+    const latestRound = order.kotRounds && order.kotRounds.length > 0
+      ? order.kotRounds[order.kotRounds.length - 1]
+      : null;
+    const kotTime = latestRound?.createdAt || order.createdAt;
     if (!kotTime) return null;
     const diffMs = Date.now() - new Date(kotTime).getTime();
     if (isNaN(diffMs) || diffMs < 0) return 0;
     return Math.floor(diffMs / (1000 * 60));
   };
-
-  // Table Management Modal
-  const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
-  const [editingTable, setEditingTable] = useState<Table | null>(null);
-  const [tableForm, setTableForm] = useState<{
-    tableNumber: string;
-    capacity: number;
-    status: 'available' | 'occupied' | 'reserved';
-  }>({ tableNumber: '', capacity: 4, status: 'available' });
 
   // Load all tables, menu, and addons
   const loadData = async () => {
@@ -139,7 +274,7 @@ export default function TablesPage() {
 
   const togglePrintMode = () => {
     if (printMode === 'test') {
-      if (confirm('Switch to Production Mode?\n\nKOTs and Bills will be sent directly to your thermal printer silently without showing the test preview modal.')) {
+      if (confirm('Switch to Production Mode?\n\nKOTs and Bills will be sent directly to your thermal printer silently.')) {
         setPrintMode('production');
         setPrintModeState('production');
       }
@@ -148,12 +283,6 @@ export default function TablesPage() {
       setPrintModeState('test');
     }
   };
-
-  // ── Print Station (Remote KOT Auto-Print Hub for Windows Counter Laptop) ──
-  const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
-  const [lastPrintedKOT, setLastPrintedKOT] = useState<string | null>(null);
-  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
-  const inFlightKotsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -178,28 +307,28 @@ export default function TablesPage() {
     }
   };
 
-  // Background KOT Print Station Listener
-  // When active (on the Windows laptop with printer attached), polls unprinted KOTs and prints silently
+  // Background KOT & Customer Bill Print Station Listener
+  // When active (on counter laptop with printer attached), polls unprinted KOTs and Bills placed from mobiles
   useEffect(() => {
     if (!isPrintStation) return;
 
     let isPolling = false;
 
-    const checkPendingKots = async () => {
+    const checkPendingPrintJobs = async () => {
       if (isPolling) return;
       isPolling = true;
 
       try {
-        const res = await ordersApi.getPendingKots();
-        const pendingJobs = res.data || [];
+        // 1. Check and Auto-Print Pending KOTs
+        const kotRes = await ordersApi.getPendingKots();
+        const pendingKots = kotRes.data || [];
 
-        for (const job of pendingJobs) {
+        for (const job of pendingKots) {
           const jobKey = `${job.orderId}-${job.roundId}`;
           if (inFlightKotsRef.current.has(jobKey)) continue;
 
           inFlightKotsRef.current.add(jobKey);
 
-          // Trigger silent auto-print on this print station device
           printKOT({
             tableNumber: job.tableNumber,
             kotNumber: job.kotNumber,
@@ -210,85 +339,97 @@ export default function TablesPage() {
             items: job.items,
           }, 'production');
 
-          // Mark round as printed in DB so it is never printed twice
           await ordersApi.markKotPrinted(job.orderId, job.roundId);
           setLastPrintedKOT(`Table ${job.tableNumber} (${job.roundTag})`);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
 
-          // Brief stagger between tickets if multiple are queued
+        // 2. Check and Auto-Print Pending Finalized / Settled Customer Bills
+        const billRes = await ordersApi.getPendingBills();
+        const pendingBills = billRes.data || [];
+
+        for (const bJob of pendingBills) {
+          const billKey = `${bJob.orderId}-${bJob.isPaid ? 'paid' : 'billed'}`;
+          if (inFlightBillsRef.current.has(billKey)) continue;
+
+          inFlightBillsRef.current.add(billKey);
+
+          printCustomerBill({
+            orderNumber: bJob.orderNumber,
+            tokenNo: bJob.tokenNo,
+            tableNumber: bJob.tableNumber,
+            billerName: bJob.billerName,
+            createdAt: bJob.createdAt,
+            items: bJob.items,
+            subtotal: bJob.subtotal,
+            taxAmount: bJob.taxAmount,
+            discount: bJob.discount,
+            discountType: bJob.discountType,
+            discountValue: bJob.discountValue,
+            total: bJob.total,
+            settledAmount: bJob.settledAmount,
+            waivedAmount: bJob.waivedAmount,
+            paymentMethod: bJob.paymentMethod,
+            paymentBreakdown: bJob.paymentBreakdown,
+            isPaid: bJob.isPaid,
+          }, 'production');
+
+          await ordersApi.markBillPrinted(bJob.orderId);
+          setLastPrintedBill(`Table ${bJob.tableNumber} (${bJob.isPaid ? 'Receipt' : 'Bill'})`);
           await new Promise((resolve) => setTimeout(resolve, 400));
         }
       } catch (err) {
-        console.error('Error polling pending KOTs for Print Station:', err);
+        console.error('Error polling pending print jobs for Print Station:', err);
       } finally {
         isPolling = false;
       }
     };
 
-    // Check immediately and then poll every 4s, only when browser window is visible
-    checkPendingKots();
+    checkPendingPrintJobs();
     const interval = setInterval(() => {
-      // Pause background requests when tab is hidden or laptop screen locked to preserve free hosting limits
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
-      checkPendingKots();
+      checkPendingPrintJobs();
     }, 4000);
 
     return () => clearInterval(interval);
   }, [isPrintStation]);
 
-  // Filtered tables
-  const filteredTables = useMemo(() => {
-    if (statusFilter === 'all') return tables;
-    return tables.filter((t) => t.status === statusFilter);
-  }, [tables, statusFilter]);
-
-  // Statistics
+  // Statistics for Table View
   const stats = useMemo(() => {
     const total = tables.length;
     const available = tables.filter((t) => t.status === 'available').length;
     const occupied = tables.filter((t) => t.status === 'occupied').length;
     const reserved = tables.filter((t) => t.status === 'reserved').length;
-    return { total, available, occupied, reserved };
+    const billed = tables.filter((t) => t.activeOrder && (t.activeOrder as any).status === 'billed').length;
+    return { total, available, occupied, reserved, billed };
   }, [tables]);
 
-  // Open Table Modal
-  const handleTableClick = async (table: Table) => {
-    setSelectedTable(table);
-    setCart({});
-    setRoundCart({});
-    setShowAddRound(false);
-    setMenuSearch('');
-    setRoundSearch('');
-    setMenuCatFilter('all');
-    setRoundCatFilter('all');
-
-    if (table.status === 'occupied') {
-      try {
-        setOrderModalLoading(true);
-        const res = await ordersApi.getActiveForTable(table._id);
-        setActiveOrder(res.data);
-        setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
-        setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
-        setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
-      } catch (err) {
-        console.error('Error fetching active order:', err);
-      } finally {
-        setOrderModalLoading(false);
+  // Grouped tables by section
+  const sectionGroupedTables = useMemo(() => {
+    const filtered = tables.filter((t) => {
+      if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+      if (tableSearch.trim()) {
+        return t.tableNumber.toLowerCase().includes(tableSearch.toLowerCase());
       }
-    } else {
-      setActiveOrder(null);
-    }
-  };
+      return true;
+    });
 
-  // Close Order Modal
-  const closeOrderModal = () => {
-    setSelectedTable(null);
-    setActiveOrder(null);
-    setCart({});
-    setRoundCart({});
-    setShowAddRound(false);
-  };
+    const groups: Record<TableSection, Table[]> = {
+      Indoor: [],
+      Outdoor: [],
+      'Pick Up': [],
+      Other: [],
+    };
+
+    filtered.forEach((table) => {
+      const sec = getTableSection(table.tableNumber);
+      groups[sec].push(table);
+    });
+
+    return groups;
+  }, [tables, statusFilter, tableSearch]);
 
   // Helper to compute composite cart key for variants/addons
   const getCartKey = (itemId: string, variantName?: string, addonsList?: Array<{ name: string }>) => {
@@ -301,7 +442,7 @@ export default function TablesPage() {
     return parts.join('__');
   };
 
-  // Helper to get all applicable addons for a MenuItem (item-level + category-level default addons)
+  // Helper to get applicable addons for a MenuItem
   const getItemApplicableAddons = (item: MenuItem): Addon[] => {
     const itemAddons = (item.addons || [])
       .map((a) => (typeof a === 'object' ? a : addons.find((ad) => ad._id === a)))
@@ -325,32 +466,223 @@ export default function TablesPage() {
     return Array.from(map.values());
   };
 
-  // Handle clicking an item from the menu
-  const handleItemClick = (item: MenuItem, target: 'cart' | 'roundCart' = 'cart') => {
+  // ── Table Card Click Handlers ──
+  // 1. Click Blank Table -> Open POS Order Screen for Round 1
+  const handleBlankTableClick = (table: Table) => {
+    setSelectedTable(table);
+    setActiveOrder(null);
+    setIsRound2Mode(false);
+    setCart({});
+    setServiceType('dine_in');
+    setGuestCount(table.capacity || 1);
+    setOrderNotes('');
+    setActiveView('pos_order');
+  };
+
+  // 2. Click Occupied Table Body -> Takes orders for Round 2 directly per user requirement!
+  const handleOccupiedTableBodyClick = async (table: Table) => {
+    setSelectedTable(table);
+    setIsRound2Mode(true);
+    setCart({});
+    setServiceType('dine_in');
+    setGuestCount(table.capacity || 1);
+    setOrderNotes('');
+
+    try {
+      setOrderModalLoading(true);
+      const res = await ordersApi.getActiveForTable(table._id);
+      setActiveOrder(res.data);
+      if (res.data) {
+        setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
+        setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
+        setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
+      }
+      setActiveView('pos_order');
+    } catch (err) {
+      console.error('Error fetching active order for table:', err);
+    } finally {
+      setOrderModalLoading(false);
+    }
+  };
+
+  // 3. Click Eye (View Items) Icon -> Opens full order details & settlement modal
+  const handleViewOrderDetails = async (table: Table, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedTable(table);
+    setShowOrderDetailsModal(true);
+    try {
+      setOrderModalLoading(true);
+      const res = await ordersApi.getActiveForTable(table._id);
+      setActiveOrder(res.data);
+      if (res.data) {
+        setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
+        setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
+        setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
+      }
+    } catch (err) {
+      console.error('Error loading order details:', err);
+    } finally {
+      setOrderModalLoading(false);
+    }
+  };
+
+  // 3b. Click Move KOT / Table Transfer Icon -> Opens Move Modal (Matching Petpooja Screenshots)
+  const handleOpenMoveModal = async (table: Table, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedTable(table);
+    let ord = table.activeOrder as Order | null;
+    if (!ord || !ord.items) {
+      try {
+        const res = await ordersApi.getActiveForTable(table._id);
+        ord = res.data;
+      } catch (err) {
+        console.error('Error loading active order for move:', err);
+      }
+    }
+    if (!ord) {
+      toast.warning(`Table ${table.tableNumber} does not have an active order to move.`);
+      return;
+    }
+
+    setMoveModal({
+      open: true,
+      sourceTable: table,
+      activeOrder: ord,
+    });
+    setMoveTab('table');
+    setSelectedTargetTableId('');
+
+    // Default select all KOT round numbers
+    const roundNums = (ord.kotRounds || []).map((r) => r.roundNumber);
+    setSelectedKotRounds(roundNums);
+
+    // Default select all active items with full quantities
+    const initQtyMap: Record<string, number> = {};
+    (ord.items || []).forEach((it) => {
+      if (it._id && it.status !== 'cancelled') {
+        initQtyMap[it._id] = it.quantity;
+      }
+    });
+    setItemTransferQuantities(initQtyMap);
+  };
+
+  // Execute Move KOT / Items / Table Transfer
+  const handleExecuteMove = async () => {
+    if (!moveModal.sourceTable || !moveModal.activeOrder) return;
+    if (!selectedTargetTableId) {
+      toast.error('Please select a destination table');
+      return;
+    }
+
+    const targetTb = tables.find((t) => t._id === selectedTargetTableId);
+    if (!targetTb) {
+      toast.error('Destination table not found');
+      return;
+    }
+
+    setMoveLoading(true);
+    try {
+      const payload: any = {
+        targetTableId: selectedTargetTableId,
+        transferType: moveTab,
+      };
+
+      if (moveTab === 'kot') {
+        if (selectedKotRounds.length === 0) {
+          toast.error('Please select at least one KOT round to move');
+          setMoveLoading(false);
+          return;
+        }
+        payload.kotRoundNumbers = selectedKotRounds;
+      } else if (moveTab === 'item') {
+        const itemTransfers = Object.entries(itemTransferQuantities)
+          .filter(([_, qty]) => qty > 0)
+          .map(([itemId, quantity]) => ({ itemId, quantity }));
+
+        if (itemTransfers.length === 0) {
+          toast.error('Please select at least one item quantity to move');
+          setMoveLoading(false);
+          return;
+        }
+        payload.itemTransfers = itemTransfers;
+      }
+
+      const res = await ordersApi.transfer(moveModal.activeOrder._id, payload);
+      const successMsg = res.data?.message || `Moved to Table ${targetTb.tableNumber} successfully!`;
+      toast.success(successMsg);
+      setNoticeMessage(successMsg);
+      setTimeout(() => setNoticeMessage(null), 5000);
+      setMoveModal({ open: false, sourceTable: null, activeOrder: null });
+      const tblRes = await tablesApi.list();
+      setTables(tblRes.data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to move KOT/Table');
+    } finally {
+      setMoveLoading(false);
+    }
+  };
+
+  // 4. Click Printer Icon on Table Card -> Direct Print Bill or KOT
+  const handleQuickPrintFromTable = async (table: Table, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await ordersApi.getActiveForTable(table._id);
+      const ord = res.data;
+      if (!ord) {
+        toast.warning('No active order found for this table');
+        return;
+      }
+      if (isPrintStation || printMode === 'test') {
+        handlePrintCustomerBill(ord);
+        toast.success(`Printing customer bill for Table ${table.tableNumber}`);
+      } else {
+        await ordersApi.queueBillPrint(ord._id);
+        const printMsg = `Customer bill for Table ${table.tableNumber} sent to Counter Printer 🖨️`;
+        toast.info(printMsg);
+        setNoticeMessage(printMsg);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error('Failed to print bill from table card:', err);
+      toast.error('Could not retrieve order for printing');
+    }
+  };
+
+  // 5. "+ New Order" button on Top Bar -> Opens POS Order Screen
+  const handleStartNewOrder = () => {
+    setSelectedTable(null);
+    setActiveOrder(null);
+    setIsRound2Mode(false);
+    setCart({});
+    setServiceType('dine_in');
+    setGuestCount(1);
+    setOrderNotes('');
+    setActiveView('pos_order');
+  };
+
+  // Handle clicking an item from the menu grid
+  const handleItemClick = (item: MenuItem) => {
     const applicableAddons = getItemApplicableAddons(item);
     const hasMultipleVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
 
-    // If item has variants OR has addons, open the customization modal
     if (hasMultipleVariants || applicableAddons.length > 0) {
       setCustomizingItem(item);
-      setCustomizingTarget(target);
       setSelectedVariant(hasMultipleVariants && item.variants ? item.variants[0] : null);
       setSelectedAddonIds([]);
       setCustomizingNotes('');
       setCustomizingQty(1);
+      setAddonSearch('');
       return;
     }
 
-    // Otherwise, fast 1-tap addition
-    updateDirectCartQty(item, target, 1);
+    // 1-tap direct addition
+    updateDirectCartQty(item, 1);
   };
 
-  // Fast direct 1-tap cart +/-
-  const updateDirectCartQty = (item: MenuItem, target: 'cart' | 'roundCart', delta: number) => {
+  // Direct 1-tap cart +/-
+  const updateDirectCartQty = (item: MenuItem, delta: number) => {
     const key = item._id;
-    const setter = target === 'cart' ? setCart : setRoundCart;
-
-    setter((prev) => {
+    setCart((prev) => {
       const current = prev[key];
       const newQty = (current ? current.quantity : 0) + delta;
       if (newQty <= 0) {
@@ -370,10 +702,9 @@ export default function TablesPage() {
     });
   };
 
-  // Update existing cart entry quantity (+1 / -1)
-  const updateCartEntryQty = (cartKey: string, delta: number, target: 'cart' | 'roundCart' = 'cart') => {
-    const setter = target === 'cart' ? setCart : setRoundCart;
-    setter((prev) => {
+  // Stepper in Cart Panel
+  const updateCartEntryQty = (cartKey: string, delta: number) => {
+    setCart((prev) => {
       const current = prev[cartKey];
       if (!current) return prev;
       const newQty = current.quantity + delta;
@@ -389,9 +720,18 @@ export default function TablesPage() {
     });
   };
 
-  const updateCartEntryNotes = (cartKey: string, notes: string, target: 'cart' | 'roundCart' = 'cart') => {
-    const setter = target === 'cart' ? setCart : setRoundCart;
-    setter((prev) => {
+  // Remove Item from Cart
+  const removeCartEntry = (cartKey: string) => {
+    setCart((prev) => {
+      const next = { ...prev };
+      delete next[cartKey];
+      return next;
+    });
+  };
+
+  // Update Cart Entry Notes
+  const updateCartEntryNotes = (cartKey: string, notes: string) => {
+    setCart((prev) => {
       const current = prev[cartKey];
       if (!current) return prev;
       return {
@@ -401,33 +741,32 @@ export default function TablesPage() {
     });
   };
 
-  // Confirm custom item selection from modal
+  // Confirm Customization from Add-on Modal (Image 4)
   const handleConfirmCustomization = () => {
     if (!customizingItem) return;
+
     const applicableAddons = getItemApplicableAddons(customizingItem);
     const chosenAddons = applicableAddons
       .filter((a) => selectedAddonIds.includes(a._id))
       .map((a) => ({ addonId: a._id, name: a.name, price: a.price }));
 
-    const variantObj = selectedVariant ? { name: selectedVariant.name, price: selectedVariant.price } : undefined;
     const basePrice = selectedVariant ? selectedVariant.price : customizingItem.price;
-    const addonsPrice = chosenAddons.reduce((sum, a) => sum + a.price, 0);
-    const unitPrice = basePrice + addonsPrice;
+    const addonsTotal = chosenAddons.reduce((sum, a) => sum + a.price, 0);
+    const unitPrice = basePrice + addonsTotal;
 
-    const key = getCartKey(customizingItem._id, variantObj?.name, chosenAddons);
-    const setter = customizingTarget === 'cart' ? setCart : setRoundCart;
+    const cartKey = getCartKey(customizingItem._id, selectedVariant?.name, chosenAddons);
 
-    setter((prev) => {
-      const existing = prev[key];
-      const newQty = (existing ? existing.quantity : 0) + customizingQty;
+    setCart((prev) => {
+      const current = prev[cartKey];
+      const existingQty = current ? current.quantity : 0;
       return {
         ...prev,
-        [key]: {
+        [cartKey]: {
           menuItemId: customizingItem._id,
-          quantity: newQty,
-          notes: customizingNotes.trim() || existing?.notes || '',
-          variant: variantObj,
-          selectedAddons: chosenAddons,
+          quantity: existingQty + customizingQty,
+          notes: customizingNotes.trim() || current?.notes || '',
+          variant: selectedVariant ? { name: selectedVariant.name, price: selectedVariant.price } : undefined,
+          selectedAddons: chosenAddons.length > 0 ? chosenAddons : undefined,
           unitPrice,
         },
       };
@@ -436,280 +775,303 @@ export default function TablesPage() {
     setCustomizingItem(null);
   };
 
-  // Cart total preview
+  // Cart Summary calculations
   const cartSummary = useMemo(() => {
+    const items = Object.values(cart);
+    const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
+
     let subtotal = 0;
     let taxAmount = 0;
-    let itemCount = 0;
 
-    Object.values(cart).forEach((entry) => {
-      if (entry.quantity > 0) {
-        const item = menuItems.find((i) => i._id === entry.menuItemId);
-        const line = entry.unitPrice * entry.quantity;
-        const tax = (line * (item?.taxPercent || 5)) / 100;
-        subtotal += line;
-        taxAmount += tax;
-        itemCount += entry.quantity;
-      }
+    items.forEach((entry) => {
+      const item = menuItems.find((i) => i._id === entry.menuItemId);
+      const taxRate = item?.taxPercent || 0;
+      const lineSubtotal = entry.unitPrice * entry.quantity;
+      subtotal += lineSubtotal;
+      taxAmount += (lineSubtotal * taxRate) / 100;
     });
 
-    return {
-      subtotal,
-      taxAmount,
-      total: Math.round((subtotal + taxAmount) * 100) / 100,
-      itemCount,
-    };
+    subtotal = Math.round(subtotal * 100) / 100;
+    taxAmount = Math.round(taxAmount * 100) / 100;
+    const total = Math.round((subtotal + taxAmount) * 100) / 100;
+
+    return { itemCount, subtotal, taxAmount, total };
   }, [cart, menuItems]);
 
-  // Submit New Order (Open Order / First KOT)
-  const handleOpenOrder = async () => {
-    if (!selectedTable) return;
-    const items = Object.values(cart)
-      .filter((d) => d.quantity > 0)
-      .map((d) => ({
-        menuItemId: d.menuItemId,
-        quantity: d.quantity,
-        notes: d.notes,
-        variant: d.variant,
-        selectedAddons: d.selectedAddons,
-      }));
-
-    if (items.length === 0) {
-      alert('Please add at least one item to open an order');
+  // ── Dispatch KOT / Save Actions ──
+  // User Rule: "once the kot is sent it should return to table view"
+  const handleSendKOT = async (shouldPrint: boolean) => {
+    if (!canManageOrders) {
+      toast.error('Order dispatching is restricted to Managers and Administrators.');
       return;
     }
 
+    if (cartSummary.itemCount === 0) {
+      toast.error('Please add at least one item to send KOT.');
+      return;
+    }
+
+    // Require selecting a table if Dine In
+    let targetTable = selectedTable;
+    if (!targetTable && serviceType === 'dine_in') {
+      const availTables = tables.filter((t) => t.status === 'available');
+      if (availTables.length === 0) {
+        toast.error('No available tables found! Please select or add a table first.');
+        return;
+      }
+      const chosen = availTables[0];
+      targetTable = chosen;
+      setSelectedTable(chosen);
+    }
+
+    const payloadItems = Object.values(cart).map((entry) => ({
+      menuItemId: entry.menuItemId,
+      quantity: entry.quantity,
+      notes: entry.notes || undefined,
+      variant: entry.variant,
+      selectedAddons: entry.selectedAddons,
+    }));
+
     try {
       setActionLoading(true);
-      const res = await ordersApi.create({ tableId: selectedTable._id, items });
-      setActiveOrder(res.data);
+      setSubmittingAction(shouldPrint ? 'kot_print' : 'kot');
+
+      if (isRound2Mode && activeOrder) {
+        // CASE: Add round to existing table order
+        const roundNum = (activeOrder.kotRounds?.length || 1) + 1;
+        const res = await ordersApi.addItems(activeOrder._id, payloadItems);
+        const updatedOrder = res.data;
+
+        if (shouldPrint) {
+          const printableItems = Object.values(cart).map((c) => {
+            const mi = menuItems.find((m) => m._id === c.menuItemId);
+            return {
+              name: mi?.name || 'Item',
+              quantity: c.quantity,
+              notes: c.notes,
+              variantName: c.variant?.name,
+              addons: c.selectedAddons?.map((a) => a.name),
+            };
+          });
+
+          const kotNumberStr = `KOT-${updatedOrder.orderNumber || updatedOrder._id.slice(-4)}-R${roundNum}`;
+          const tokenNoStr = updatedOrder.orderNumber
+            ? String(updatedOrder.orderNumber).slice(-2)
+            : updatedOrder._id.slice(-2);
+
+          printKOT({
+            tableNumber: targetTable?.tableNumber || 'Takeaway',
+            kotNumber: kotNumberStr,
+            orderNumber: updatedOrder.orderNumber,
+            tokenNo: tokenNoStr,
+            billerName: user?.name || 'Staff',
+            roundTag: `[ROUND ${roundNum} - ADD-ON]`,
+            createdAt: new Date(),
+            items: printableItems,
+          });
+        }
+
+        const msg = `Round ${roundNum} KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        toast.success(msg);
+        setNoticeMessage(msg);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      } else {
+        // CASE: Initial Order (Round 1)
+        const res = await ordersApi.create({
+          tableId: targetTable?._id || tables[0]?._id,
+          items: payloadItems,
+        });
+        const createdOrder = res.data;
+
+        if (shouldPrint) {
+          const printableItems = Object.values(cart).map((c) => {
+            const mi = menuItems.find((m) => m._id === c.menuItemId);
+            return {
+              name: mi?.name || 'Item',
+              quantity: c.quantity,
+              notes: c.notes,
+              variantName: c.variant?.name,
+              addons: c.selectedAddons?.map((a) => a.name),
+            };
+          });
+
+          const kotNumberStr = `KOT-${createdOrder.orderNumber || createdOrder._id.slice(-4)}-R1`;
+          const tokenNoStr = createdOrder.orderNumber
+            ? String(createdOrder.orderNumber).slice(-2)
+            : createdOrder._id.slice(-2);
+
+          printKOT({
+            tableNumber: targetTable?.tableNumber || 'Takeaway',
+            kotNumber: kotNumberStr,
+            orderNumber: createdOrder.orderNumber,
+            tokenNo: tokenNoStr,
+            billerName: user?.name || 'Staff',
+            roundTag: '[INITIAL ORDER]',
+            createdAt: new Date(),
+            items: printableItems,
+          });
+        }
+
+        const msg = `KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        toast.success(msg);
+        setNoticeMessage(msg);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      }
+
+      // Clear cart & return to Table View per user requirement!
       setCart({});
-
-      // Auto-print KOT for Initial Order (Round 1)
-      const round1Items = items.map((it) => {
-        const mi = menuItems.find((m) => m._id === it.menuItemId);
-        return {
-          name: mi?.name || 'Menu Item',
-          quantity: it.quantity,
-          notes: it.notes,
-          variantName: it.variant?.name,
-          addons: it.selectedAddons?.map((a) => a.name),
-        };
-      });
-
-      const orderNum = res.data.orderNumber || res.data._id;
-      if (isPrintStation) {
-        printKOT({
-          tableNumber: selectedTable.tableNumber,
-          kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-1`,
-          orderNumber: orderNum,
-          tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
-          billerName: res.data.createdBy?.name || 'Staff',
-          roundTag: '[INITIAL ORDER]',
-          createdAt: res.data.createdAt,
-          items: round1Items,
-        });
-        if (res.data.kotRounds?.[0]?._id) {
-          await ordersApi.markKotPrinted(res.data._id, res.data.kotRounds[0]._id);
-        }
-      } else {
-        setNoticeMessage(`Table ${selectedTable.tableNumber} order opened! KOT sent to Counter Printer 🖨️`);
-        setTimeout(() => setNoticeMessage(null), 4000);
-      }
-
+      setSelectedTable(null);
+      setActiveOrder(null);
+      setIsRound2Mode(false);
       await loadData();
+      setActiveView('table_view');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to open order');
+      toast.error(err.response?.data?.message || 'Failed to dispatch KOT');
     } finally {
       setActionLoading(false);
+      setSubmittingAction(null);
     }
   };
 
-  // Submit additional KOT round
-  const handleAddRound = async () => {
-    if (!activeOrder) return;
-    const items = Object.values(roundCart)
-      .filter((d) => d.quantity > 0)
-      .map((d) => ({
-        menuItemId: d.menuItemId,
-        quantity: d.quantity,
-        notes: d.notes,
-        variant: d.variant,
-        selectedAddons: d.selectedAddons,
-      }));
-
-    if (items.length === 0) {
-      alert('Please select items for this KOT round');
+  // Save / Save & Print (for billing)
+  const handleSaveOrder = async (shouldPrintBill: boolean) => {
+    if (!canManageOrders) {
+      toast.error('Action restricted to Managers and Administrators.');
       return;
     }
 
-    try {
-      setActionLoading(true);
-      const res = await ordersApi.addItems(activeOrder._id, items);
-      setActiveOrder(res.data);
-      setRoundCart({});
-      setShowAddRound(false);
+    // If there are unsent items in the cart, first dispatch them
+    if (cartSummary.itemCount > 0) {
+      await handleSendKOT(false);
+      return;
+    }
 
-      // Auto-print KOT for newly added round items only
-      const roundItems = items.map((it) => {
-        const mi = menuItems.find((m) => m._id === it.menuItemId);
-        return {
-          name: mi?.name || 'Menu Item',
-          quantity: it.quantity,
-          notes: it.notes,
-          variantName: it.variant?.name,
-          addons: it.selectedAddons?.map((a) => a.name),
-        };
-      });
-
-      const orderNum = res.data.orderNumber || res.data._id;
-      const roundNum = res.data.kotCount || 2;
-      if (isPrintStation) {
-        printKOT({
-          tableNumber: selectedTable?.tableNumber || 'Table',
-          kotNumber: `KOT-${res.data.orderNumber ? res.data.orderNumber : res.data._id.slice(-4)}-${roundNum}`,
-          orderNumber: orderNum,
-          tokenNo: res.data.orderNumber ? String(res.data.orderNumber).slice(-2) : res.data._id.slice(-2),
-          billerName: res.data.createdBy?.name || 'Staff',
-          roundTag: `[ROUND ${roundNum} - ADD-ON]`,
-          createdAt: new Date(),
-          items: roundItems,
-        });
-        const latestRound = res.data.kotRounds?.[res.data.kotRounds.length - 1];
-        if (latestRound?._id) {
-          await ordersApi.markKotPrinted(res.data._id, latestRound._id);
+    // If table is occupied and has active order, finalize bill and print
+    if (activeOrder) {
+      try {
+        setActionLoading(true);
+        setSubmittingAction(shouldPrintBill ? 'save_print' : 'save');
+        let finalOrder = activeOrder;
+        if (activeOrder.status !== 'billed' && activeOrder.status !== 'paid') {
+          const res = await ordersApi.bill(activeOrder._id);
+          finalOrder = res.data;
         }
-      } else {
-        setNoticeMessage(`Added Round ${roundNum} for Table ${selectedTable?.tableNumber || ''}! KOT sent to Counter Printer 🖨️`);
-        setTimeout(() => setNoticeMessage(null), 4000);
+
+        if (shouldPrintBill) {
+          if (isPrintStation || printMode === 'test') {
+            handlePrintCustomerBill(finalOrder);
+          } else {
+            await ordersApi.queueBillPrint(finalOrder._id);
+            setNoticeMessage(`Bill for Table ${selectedTable?.tableNumber || ''} sent to Counter Printer 🖨️`);
+            setTimeout(() => setNoticeMessage(null), 4000);
+          }
+        }
+
+        toast.success(`Bill finalized for Table ${selectedTable?.tableNumber || ''} (${formatCurrency(finalOrder.total)})`);
+        await loadData();
+        setActiveView('table_view');
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Failed to finalize bill');
+      } finally {
+        setActionLoading(false);
+        setSubmittingAction(null);
       }
-
-      await loadData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to add KOT round');
-    } finally {
-      setActionLoading(false);
     }
   };
 
-  // Update item status in live order
-  const handleItemStatusChange = async (itemId: string, status: string) => {
-    if (!activeOrder) return;
-    try {
-      const res = await ordersApi.updateItem(activeOrder._id, itemId, { status });
-      setActiveOrder(res.data);
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to update item status');
-    }
-  };
-
-  // Soft cancel an item from live order
-  const handleCancelItem = async (itemId: string, itemName: string) => {
-    if (!confirm(`Cancel "${itemName}" from this order?`)) return;
-    if (!activeOrder) return;
-    try {
-      const res = await ordersApi.cancelItem(activeOrder._id, itemId);
-      setActiveOrder(res.data);
-      await loadData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to cancel item');
-    }
-  };
-
-  // Apply discount to live order
-  // Apply discount to live order
-  const handleApplyDiscount = async () => {
-    if (!activeOrder) return;
-    try {
-      const res = await ordersApi.applyDiscount(activeOrder._id, {
-        discountType,
-        discountValue: Number(discountInput) || 0,
-      });
-      setActiveOrder(res.data);
-      setSettlementInput(String(res.data.total));
-      await loadData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to apply discount');
-    }
-  };
-
-  // Finalize Bill
-  const handleFinalizeBill = async () => {
-    if (!activeOrder) return;
-    try {
-      setActionLoading(true);
-      const res = await ordersApi.bill(activeOrder._id);
-      setActiveOrder(res.data);
-      setSettlementInput(String(res.data.total));
-      await loadData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to finalize bill');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Print Customer Bill (80mm)
+  // Thermal Customer Bill Printing
   const handlePrintCustomerBill = (orderToPrint?: Order, isPaidStatus: boolean = false) => {
     const targetOrder = orderToPrint || activeOrder;
-    if (!targetOrder || !selectedTable) return;
+    if (!targetOrder) return;
 
-    const billItems: BillItem[] = targetOrder.items
-      ?.filter((i: any) => i.status !== 'cancelled')
-      .map((i: any) => ({
-        name: i.name,
-        quantity: i.quantity,
-        price: i.price,
-        taxPercent: i.taxPercent,
-        variantName: i.variant?.name,
-        addons: i.selectedAddons?.map((a: any) => ({ name: a.name, price: a.price })),
-      })) || [];
+    // Convert items into thermal printable format
+    const printableBillItems: BillItem[] = (targetOrder.items || [])
+      .filter((it) => it.status !== 'cancelled')
+      .map((it) => ({
+        name: it.name || 'Item',
+        quantity: it.quantity || 1,
+        price: it.price || 0,
+        taxPercent: it.taxPercent,
+        variantName: it.variant?.name,
+        addons: it.selectedAddons?.map((a) => ({ name: a.name, price: a.price || 0 })),
+      }));
 
-    const orderNum = targetOrder.orderNumber || targetOrder._id;
-    const tokenNo = targetOrder.orderNumber ? String(targetOrder.orderNumber).slice(-2) : targetOrder._id.slice(-2);
-
-    const enteredSettlement = settlementInput.trim() !== '' ? Number(settlementInput) : targetOrder.total;
-    const finalSettled = targetOrder.settledAmount !== null && targetOrder.settledAmount !== undefined
-      ? targetOrder.settledAmount
-      : (paymentMethod === 'part' ? totalPartAllocated : (isNaN(enteredSettlement) ? targetOrder.total : enteredSettlement));
-    const finalWaived = targetOrder.waivedAmount !== undefined
-      ? targetOrder.waivedAmount
-      : Math.max(0, targetOrder.total - finalSettled);
-    const finalBreakdown = targetOrder.paymentBreakdown || (paymentMethod === 'part' ? {
-      cash: numPartCash,
-      upi: numPartUpi,
-      card: numPartCard,
-      other: numPartOther,
-    } : undefined);
+    const billerDisplayName = user?.name || 'Staff';
+    const isPaid = isPaidStatus || targetOrder.status === 'paid';
 
     printCustomerBill({
-      orderNumber: orderNum,
-      tableNumber: selectedTable.tableNumber,
-      billerName: targetOrder.createdBy?.name || 'biller',
-      tokenNo: tokenNo,
-      createdAt: targetOrder.createdAt,
-      items: billItems,
+      orderNumber: targetOrder.orderNumber,
+      tokenNo: targetOrder.orderNumber ? String(targetOrder.orderNumber).slice(-2) : targetOrder._id.slice(-2),
+      tableNumber: selectedTable?.tableNumber || 'Takeaway',
+      billerName: billerDisplayName,
+      createdAt: new Date(targetOrder.createdAt || Date.now()),
+      items: printableBillItems,
       subtotal: targetOrder.subtotal,
       taxAmount: targetOrder.taxAmount,
       discount: targetOrder.discount,
       discountType: targetOrder.discountType,
       discountValue: targetOrder.discountValue,
       total: targetOrder.total,
-      settledAmount: finalSettled,
-      waivedAmount: finalWaived,
-      paymentMethod: targetOrder.paymentMethod || paymentMethod,
-      paymentBreakdown: finalBreakdown,
-      isPaid: isPaidStatus || targetOrder.status === 'paid',
+      settledAmount: targetOrder.settledAmount ?? undefined,
+      waivedAmount: targetOrder.waivedAmount,
+      paymentMethod: targetOrder.paymentMethod || undefined,
+      paymentBreakdown: targetOrder.paymentBreakdown,
+      isPaid,
     });
   };
 
-  // Collect Payment
+  // Cancel Item inside Order
+  const handleCancelItem = async (itemId: string, itemName: string) => {
+    if (!activeOrder) return;
+    if (!confirm(`Cancel "${itemName}" from this order?`)) return;
+    try {
+      setActionLoading(true);
+      const res = await ordersApi.cancelItem(activeOrder._id, itemId);
+      setActiveOrder(res.data);
+      toast.success(`"${itemName}" cancelled from order`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to cancel item');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Apply Discount
+  const handleApplyDiscount = async () => {
+    if (!activeOrder) return;
+    try {
+      setActionLoading(true);
+      const res = await ordersApi.applyDiscount(activeOrder._id, {
+        discountType,
+        discountValue: discountInput,
+      });
+      setActiveOrder(res.data);
+      setSettlementInput(String(res.data.total));
+      toast.success(`Discount applied! New total: ${formatCurrency(res.data.total)}`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to apply discount');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Collect Payment / Settlement
+  const numPartCash = Math.max(0, parseFloat(partCash) || 0);
+  const numPartUpi = Math.max(0, parseFloat(partUpi) || 0);
+  const numPartCard = Math.max(0, parseFloat(partCard) || 0);
+  const numPartOther = Math.max(0, parseFloat(partOther) || 0);
+  const totalPartAllocated = Math.round((numPartCash + numPartUpi + numPartCard + numPartOther) * 100) / 100;
+  const partDifference = activeOrder ? Math.round((activeOrder.total - totalPartAllocated) * 100) / 100 : 0;
+  const partRemaining = Math.max(0, partDifference);
+
   const handleCollectPayment = async () => {
     if (!activeOrder) return;
 
     if (paymentMethod === 'part') {
       if (totalPartAllocated <= 0) {
-        alert('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
+        toast.error('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
         return;
       }
 
@@ -736,8 +1098,14 @@ export default function TablesPage() {
           other: numPartOther,
         };
         const res = await ordersApi.pay(activeOrder._id, 'part', totalPartAllocated, breakdownPayload);
-        handlePrintCustomerBill(res.data, true);
-        alert(`Part payment of ${formatCurrency(res.data.settledAmount ?? totalPartAllocated)} recorded successfully!${waived > 0 ? ` (Waived: ${formatCurrency(waived)})` : ''} Table ${selectedTable?.tableNumber} is now available.`);
+        if (isPrintStation || printMode === 'test') {
+          handlePrintCustomerBill(res.data, true);
+        } else {
+          await ordersApi.queueBillPrint(res.data._id);
+          setNoticeMessage(`Part payment recorded! Receipt for Table ${selectedTable?.tableNumber} sent to Counter Printer 🖨️`);
+          setTimeout(() => setNoticeMessage(null), 4000);
+        }
+        toast.success(`Part payment recorded successfully! Table ${selectedTable?.tableNumber} is now available.`);
 
         if (typeof window !== 'undefined') {
           localStorage.removeItem('peyala_sales_list_cache_v1');
@@ -746,14 +1114,13 @@ export default function TablesPage() {
           window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
         }
 
-        setPartCash('');
-        setPartUpi('');
-        setPartCard('');
-        setPartOther('');
-        closeOrderModal();
+        setShowOrderDetailsModal(false);
+        setActiveOrder(null);
+        setSelectedTable(null);
         await loadData();
+        setActiveView('table_view');
       } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to collect part payment');
+        toast.error(err.response?.data?.message || 'Failed to collect part payment');
       } finally {
         setActionLoading(false);
       }
@@ -762,7 +1129,7 @@ export default function TablesPage() {
 
     const enteredSettlement = settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total;
     if (isNaN(enteredSettlement) || enteredSettlement < 0) {
-      alert('Please enter a valid non-negative settlement amount');
+      toast.error('Please enter a valid non-negative settlement amount');
       return;
     }
 
@@ -776,9 +1143,15 @@ export default function TablesPage() {
     try {
       setActionLoading(true);
       const res = await ordersApi.pay(activeOrder._id, paymentMethod, enteredSettlement);
-      handlePrintCustomerBill(res.data, true);
-      alert(`Payment of ${formatCurrency(res.data.settledAmount ?? enteredSettlement)} recorded successfully!${waived > 0 ? ` (Waived: ${formatCurrency(waived)})` : ''} Table ${selectedTable?.tableNumber} is now available.`);
-      // Invalidate sales, dashboard, and accounts caches so newly collected sales appear instantly across tabs/pages
+      if (isPrintStation || printMode === 'test') {
+        handlePrintCustomerBill(res.data, true);
+      } else {
+        await ordersApi.queueBillPrint(res.data._id);
+        setNoticeMessage(`Payment recorded! Receipt for Table ${selectedTable?.tableNumber} sent to Counter Printer 🖨️`);
+        setTimeout(() => setNoticeMessage(null), 4000);
+      }
+      toast.success(`Payment recorded successfully! Table ${selectedTable?.tableNumber} is now available.`);
+
       if (typeof window !== 'undefined') {
         localStorage.removeItem('peyala_sales_list_cache_v1');
         localStorage.removeItem('peyala_dashboard_cache_v1');
@@ -786,27 +1159,33 @@ export default function TablesPage() {
         window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
       }
 
-      closeOrderModal();
+      setShowOrderDetailsModal(false);
+      setActiveOrder(null);
+      setSelectedTable(null);
       await loadData();
+      setActiveView('table_view');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to collect payment');
+      toast.error(err.response?.data?.message || 'Failed to collect payment');
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Cancel Order
+  // Cancel entire order
   const handleCancelOrder = async () => {
     if (!activeOrder) return;
-    if (!confirm(`Are you sure you want to cancel the entire order for Table ${selectedTable?.tableNumber}? This will free the table.`)) return;
-
+    if (!confirm(`Cancel entire order for Table ${selectedTable?.tableNumber}? This will free the table.`)) return;
     try {
       setActionLoading(true);
       await ordersApi.cancel(activeOrder._id);
-      closeOrderModal();
+      toast.success(`Order for Table ${selectedTable?.tableNumber} cancelled`);
+      setShowOrderDetailsModal(false);
+      setActiveOrder(null);
+      setSelectedTable(null);
       await loadData();
+      setActiveView('table_view');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to cancel order');
+      toast.error(err.response?.data?.message || 'Failed to cancel order');
     } finally {
       setActionLoading(false);
     }
@@ -830,104 +1209,47 @@ export default function TablesPage() {
   };
 
   const saveTable = async () => {
-    if (!tableForm.tableNumber.trim()) return alert('Table number is required');
+    if (!tableForm.tableNumber.trim()) {
+      toast.error('Table number is required');
+      return;
+    }
+    setTableSaving(true);
     try {
       if (tableModal === 'edit' && editingTable) {
         await tablesApi.update(editingTable._id, tableForm);
+        toast.success(`Table ${tableForm.tableNumber} updated successfully`);
       } else {
         await tablesApi.create(tableForm);
+        toast.success(`Table ${tableForm.tableNumber} created successfully`);
       }
       setTableModal(null);
       await loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to save table');
+      toast.error(err.response?.data?.message || 'Failed to save table');
+    } finally {
+      setTableSaving(false);
     }
   };
 
   const deleteTable = async (table: Table) => {
     if (table.status === 'occupied') {
-      alert('Cannot delete an occupied table');
+      toast.error('Cannot delete an occupied table');
       return;
     }
     if (!confirm(`Delete Table ${table.tableNumber}?`)) return;
     try {
       await tablesApi.delete(table._id);
+      toast.success(`Table ${table.tableNumber} deleted`);
       await loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to delete table');
+      toast.error(err.response?.data?.message || 'Failed to delete table');
     }
   };
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <LayoutGrid className="w-5 h-5 text-brand-500" />
-              Dine-In POS & Tables
-            </h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Live table status, KOT orders, billing, and settlement
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={togglePrintMode}
-              type="button"
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm',
-                printMode === 'test'
-                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700 hover:bg-amber-100'
-                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100'
-              )}
-              title="Click to toggle between Test Mode (Visual Preview & PDF) and Auto-Print Production Mode"
-            >
-              {printMode === 'test' ? (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span>🧪 Test Mode (Preview &amp; PDF)</span>
-                </>
-              ) : (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>🚀 Auto-Print (Production)</span>
-                </>
-              )}
-            </button>
-            {/* Print Station Toggle */}
-            <button
-              onClick={togglePrintStation}
-              type="button"
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shadow-xs',
-                isPrintStation
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-md ring-2 ring-emerald-500/30'
-                  : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-gray-400'
-              )}
-              title={
-                isPrintStation
-                  ? 'Print Station ACTIVE: This device catches and auto-prints KOTs placed from mobile devices.'
-                  : 'Enable on the Windows counter laptop to auto-print orders placed from mobile devices.'
-              }
-            >
-              <Printer className={cn('w-4 h-4', isPrintStation && 'animate-pulse text-white')} />
-              <span>{isPrintStation ? 'Print Station: ON' : 'Print Station: OFF'}</span>
-            </button>
-            <button onClick={loadData} className="btn-secondary flex items-center gap-1.5" title="Refresh">
-              <RefreshCw className="w-4 h-4" />
-            </button>
-            {isAdmin && (
-              <button onClick={openCreateTable} className="btn-primary flex items-center gap-1.5">
-                <Plus className="w-4 h-4" />
-                Add Table
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Toast / Notification Banner for Mobile Orders */}
+      <div className="space-y-3 pb-8">
+        {/* Toast / Notification Banner */}
         {noticeMessage && (
           <div className="flex items-center justify-between p-3 bg-emerald-100 dark:bg-emerald-950/60 border-2 border-emerald-400 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-900 dark:text-emerald-200 shadow-sm">
             <div className="flex items-center gap-2">
@@ -942,371 +1264,597 @@ export default function TablesPage() {
 
         {/* Print Station Live Hub Banner */}
         {isPrintStation && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 shadow-2xs">
             <div className="flex items-center gap-2 font-medium">
               <span className="relative flex h-2.5 w-2.5 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
               </span>
-              <span className="font-black text-emerald-900 dark:text-emerald-300">Print Station Active:</span>
-              <span>Reconciling mobile orders and auto-printing KOTs directly to connected printer.</span>
+              <span className="font-black text-emerald-900 dark:text-emerald-300">Counter Print Station Active:</span>
+              <span>Catching mobile orders &amp; auto-printing KOTs and finalized customer bills.</span>
             </div>
-            {lastPrintedKOT && (
-              <span className="text-[11px] font-bold bg-emerald-200/90 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 shrink-0">
-                Last printed: {lastPrintedKOT}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Non-Admin / Non-Manager Notice Banner */}
-        {!canManageOrders && (
-          <div className="flex items-center gap-2.5 p-3.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 rounded-xl text-xs text-blue-800 dark:text-blue-300">
-            <ShieldAlert className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
-            <div>
-              <span className="font-bold">Staff View (Read-Only POS):</span> Order creation, item updates, billing, discounts, and settlements are restricted to Manager and Administrator accounts. You can monitor live table occupancy and reprint customer receipts/KOTs.
+            <div className="flex items-center gap-2 flex-wrap">
+              {lastPrintedKOT && (
+                <span className="text-[10px] font-bold bg-emerald-200/90 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700">
+                  Last KOT: {lastPrintedKOT}
+                </span>
+              )}
+              {lastPrintedBill && (
+                <span className="text-[10px] font-bold bg-blue-200/90 dark:bg-blue-900/60 text-blue-900 dark:text-blue-200 px-2 py-0.5 rounded border border-blue-300 dark:border-blue-700">
+                  Last Bill: {lastPrintedBill}
+                </span>
+              )}
             </div>
           </div>
         )}
 
-        {/* Status Summary & Filter Chips */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={cn(
-              'card p-4 text-left transition-all border-2',
-              statusFilter === 'all'
-                ? 'border-brand-500 ring-2 ring-brand-500/20 shadow-md'
-                : 'border-transparent hover:border-gray-200'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-500 uppercase">All Tables</span>
-              <LayoutGrid className="w-4 h-4 text-gray-400" />
-            </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{stats.total}</p>
-          </button>
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* VIEW A: TABLE VIEW / FLOOR PLAN (Matches Image 2)              */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {activeView === 'table_view' && (
+          <div className="space-y-4">
+            {/* Top Bar matching Image 2 */}
+            <div className="bg-white dark:bg-gray-900 p-3 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid className="w-5 h-5 text-red-600" />
+                  <h1 className="text-lg font-black text-gray-900 dark:text-white tracking-tight">
+                    Table View
+                  </h1>
+                </div>
 
-          <button
-            onClick={() => setStatusFilter('available')}
-            className={cn(
-              'card p-4 text-left transition-all border-2',
-              statusFilter === 'available'
-                ? 'border-green-500 ring-2 ring-green-500/20 shadow-md'
-                : 'border-transparent hover:border-green-100'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase">Available</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-            </div>
-            <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-2">{stats.available}</p>
-          </button>
+                <button
+                  onClick={handleStartNewOrder}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  + Contactless / New Order
+                </button>
 
-          <button
-            onClick={() => setStatusFilter('occupied')}
-            className={cn(
-              'card p-4 text-left transition-all border-2',
-              statusFilter === 'occupied'
-                ? 'border-red-500 ring-2 ring-red-500/20 shadow-md'
-                : 'border-transparent hover:border-red-100'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase">Occupied</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-            </div>
-            <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-2">{stats.occupied}</p>
-          </button>
+                {/* Move KOT / Items Toggle Button */}
+                <button
+                  onClick={() => toast.info('To move a KOT, click the Move icon (⇄) directly on any occupied table card.')}
+                  className="bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors"
+                >
+                  Move KOT / Items
+                </button>
+              </div>
 
-          <button
-            onClick={() => setStatusFilter('reserved')}
-            className={cn(
-              'card p-4 text-left transition-all border-2',
-              statusFilter === 'reserved'
-                ? 'border-yellow-500 ring-2 ring-yellow-500/20 shadow-md'
-                : 'border-transparent hover:border-yellow-100'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-yellow-600 dark:text-yellow-400 uppercase">Reserved</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-            </div>
-            <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400 mt-2">{stats.reserved}</p>
-          </button>
-        </div>
+              {/* Status Legend Badges with clearly distinct colors per user instruction! */}
+              <div className="flex items-center gap-2 flex-wrap text-[11px] font-semibold">
+                {/* Blank Table: grey dashed border */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border-2 border-dashed border-gray-400 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/60 text-gray-700 dark:text-gray-300">
+                  <span className="w-2 h-2 rounded-full border border-gray-500 bg-transparent" />
+                  <span>Blank Table</span>
+                </div>
 
-        {/* Table Cards Grid */}
-        {loading ? (
-          <div className="py-24 flex justify-center">
-            <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : filteredTables.length === 0 ? (
-          <div className="card p-12 text-center">
-            <LayoutGrid className="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-            <h3 className="font-semibold text-gray-700 dark:text-gray-300 text-base">No tables found</h3>
-            <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-              Add your restaurant tables to start seating guests and recording orders.
-            </p>
-            {isAdmin && (
-              <button onClick={openCreateTable} className="btn-primary mt-4 inline-flex items-center gap-1.5">
-                <Plus className="w-4 h-4" /> Add First Table
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5 sm:gap-3">
-            {filteredTables.map((table) => {
-              const isOccupied = table.status === 'occupied';
-              const isAvailable = table.status === 'available';
-              const isReserved = table.status === 'reserved';
-              const order = table.activeOrder;
+                {/* Running Table: soft blue */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-blue-400 bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span>Running Table</span>
+                </div>
 
-              return (
-                <div
-                  key={table._id}
-                  onClick={() => handleTableClick(table)}
+                {/* Printed Table: soft green */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Printed Table</span>
+                </div>
+
+                {/* Paid Table: soft orange */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-400 bg-orange-50 dark:bg-orange-950/40 text-orange-900 dark:text-orange-200">
+                  <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  <span>Paid Table</span>
+                </div>
+
+                {/* Running KOT Table: soft yellow */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-amber-400 bg-amber-100/90 dark:bg-amber-950/60 text-amber-950 dark:text-amber-100">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Running KOT Table</span>
+                </div>
+              </div>
+
+              {/* Right Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Print Mode button */}
+                <button
+                  onClick={togglePrintMode}
                   className={cn(
-                    'card p-2.5 sm:p-3 transition-all duration-200 cursor-pointer border-2 relative overflow-hidden flex flex-col justify-between group min-h-[105px] sm:min-h-[112px]',
-                    isOccupied && 'border-red-400/80 bg-red-50/25 dark:bg-red-950/15 hover:border-red-500 hover:shadow-md',
-                    isAvailable && 'border-green-300 dark:border-green-900/50 bg-green-50/10 dark:bg-green-950/10 hover:border-green-500 hover:shadow-md',
-                    isReserved && 'border-yellow-400/80 bg-yellow-50/25 dark:bg-yellow-950/15 hover:border-yellow-500 hover:shadow-md'
+                    'px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                    printMode === 'test'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                      : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                  )}
+                  title="Toggle between Test Preview & Production Thermal Auto-Print"
+                >
+                  {printMode === 'test' ? '🧪 Test Print' : '🚀 Auto-Print'}
+                </button>
+
+                {/* Print Station button */}
+                <button
+                  onClick={togglePrintStation}
+                  className={cn(
+                    'px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1',
+                    isPrintStation
+                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                      : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 hover:border-gray-400'
+                  )}
+                  title="Remote KOT auto-print receiver for Windows Counter Laptop"
+                >
+                  <Printer className={cn('w-3.5 h-3.5', isPrintStation && 'animate-pulse text-white')} />
+                  <span>{isPrintStation ? 'Station ON' : 'Station OFF'}</span>
+                </button>
+
+                <button
+                  onClick={loadData}
+                  className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  title="Refresh Tables"
+                >
+                  <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+                </button>
+
+                {isAdmin && (
+                  <button
+                    onClick={openCreateTable}
+                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    + Add Table
+                  </button>
+                )}
+
+                {/* Delivery & Pick Up buttons matching Image 2 */}
+                <button
+                  onClick={() => {
+                    setServiceType('delivery');
+                    handleStartNewOrder();
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition-colors"
+                >
+                  <Bike className="w-3.5 h-3.5" />
+                  Delivery
+                </button>
+
+                <button
+                  onClick={() => {
+                    setServiceType('pickup');
+                    handleStartNewOrder();
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition-colors"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  Pick Up
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Section Tabs & Search Bar */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                {(['all', 'Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sec) => {
+                  if (sec !== 'all' && (!sectionGroupedTables[sec] || sectionGroupedTables[sec].length === 0)) {
+                    return null;
+                  }
+                  return (
+                    <button
+                      key={sec}
+                      onClick={() => setSectionFilter(sec)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',
+                        sectionFilter === sec
+                          ? 'bg-red-600 text-white shadow-xs'
+                          : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100'
+                      )}
+                    >
+                      {sec === 'all' ? 'All Sections' : sec}
+                      {sec !== 'all' && (
+                        <span className="ml-1 opacity-80 text-[10px]">
+                          ({sectionGroupedTables[sec].length})
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={tableSearch}
+                  onChange={(e) => setTableSearch(e.target.value)}
+                  placeholder="Search table number / name..."
+                  className="input pl-8 py-1 text-xs h-8 bg-white dark:bg-gray-900"
+                />
+              </div>
+            </div>
+
+            {/* Grouped Floor Sections: Indoor, Outdoor, Pick Up, Other (Matching Image 2) */}
+            {loading ? (
+              <div className="py-20 flex justify-center">
+                <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : tables.length === 0 ? (
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-12 text-center">
+                <LayoutGrid className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">No tables configured</h3>
+                <p className="text-xs text-gray-500 mt-1">Add tables to start seating guests and recording orders.</p>
+                {isAdmin && (
+                  <button onClick={openCreateTable} className="btn-primary mt-3 text-xs">
+                    + Add First Table
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                  if (sectionFilter !== 'all' && sectionFilter !== sectionName) return null;
+                  const secTables = sectionGroupedTables[sectionName];
+                  if (!secTables || secTables.length === 0) return null;
+
+                  return (
+                    <div key={sectionName} className="space-y-2.5">
+                      {/* Section Heading */}
+                      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-1.5">
+                        <span className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200">
+                          {sectionName}
+                        </span>
+                        <span className="text-[11px] font-bold text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-0.2 rounded-full">
+                          {secTables.length} tables
+                        </span>
+                      </div>
+
+                      {/* Tables Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5">
+                        {secTables.map((table) => {
+                          const isOccupied = table.status === 'occupied';
+                          const isAvailable = table.status === 'available';
+                          const isReserved = table.status === 'reserved';
+                          const order = table.activeOrder;
+                          const isBilled = order && order.status === 'billed';
+                          const isPaid = order && order.status === 'paid';
+                          const kotMins = isOccupied && order ? getKotElapsedMinutes(order) : null;
+
+                          // Distinct status styles per user instruction:
+                          // Blank Table: grey dashed border
+                          // Running Table: blue
+                          // Running KOT Table: yellow (#fff9c4)
+                          // Printed Table (Billed): green
+                          // Paid Table: orange
+                          const isRunningKOT = isOccupied && !isBilled && !isPaid && (order?.kotRounds?.length || 0) > 0;
+                          const isRunningBlue = isOccupied && !isRunningKOT && !isBilled && !isPaid;
+
+                          return (
+                            <div
+                              key={table._id}
+                              onClick={() => {
+                                if (isAvailable) {
+                                  handleBlankTableClick(table);
+                                } else if (isOccupied) {
+                                  // User instruction: apart for print bill & eye icon, clicking body takes orders for round 2!
+                                  handleOccupiedTableBodyClick(table);
+                                }
+                              }}
+                              className={cn(
+                                'rounded-xl p-2.5 sm:p-3 transition-all duration-150 cursor-pointer relative overflow-hidden flex flex-col justify-between group min-h-[110px] sm:min-h-[118px] select-none',
+                                // Blank Table
+                                isAvailable &&
+                                  'border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 hover:border-red-400 hover:shadow-md',
+                                // Running KOT Table (Yellow)
+                                isRunningKOT &&
+                                  'border-2 border-amber-400 bg-amber-100/90 dark:bg-amber-950/60 text-amber-950 dark:text-amber-100 shadow-xs hover:border-amber-500 hover:shadow-md',
+                                // Running Table (Blue)
+                                isRunningBlue &&
+                                  'border-2 border-blue-400 bg-blue-50/90 dark:bg-blue-950/40 text-blue-950 dark:text-blue-100 shadow-xs hover:border-blue-500 hover:shadow-md',
+                                // Printed Table (Green)
+                                isBilled &&
+                                  'border-2 border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-100 shadow-xs hover:border-emerald-500 hover:shadow-md',
+                                // Paid Table (Orange)
+                                isPaid &&
+                                  'border-2 border-orange-400 bg-orange-50 dark:bg-orange-950/40 text-orange-950 dark:text-orange-100 shadow-xs hover:border-orange-500 hover:shadow-md',
+                                // Reserved Table
+                                isReserved &&
+                                  'border-2 border-purple-300 bg-purple-50 dark:bg-purple-950/30 text-purple-950 dark:text-purple-100 shadow-xs'
+                              )}
+                            >
+                              {/* Top Row: Elapsed Time Badge & Status Pill */}
+                              <div>
+                                <div className="flex items-center justify-between gap-1">
+                                  {isOccupied && kotMins !== null ? (
+                                    <span
+                                      className={cn(
+                                        'inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded shadow-2xs',
+                                        isRunningKOT
+                                          ? 'bg-amber-200/90 text-amber-950 border border-amber-300'
+                                          : isBilled
+                                          ? 'bg-emerald-200/90 text-emerald-950 border border-emerald-300'
+                                          : 'bg-blue-200/90 text-blue-950 border border-blue-300'
+                                      )}
+                                      title={`Time since latest KOT: ${kotMins} min`}
+                                    >
+                                      <Clock className="w-2.5 h-2.5" />
+                                      <span>{kotMins <= 0 ? '< 1 Min' : `${kotMins} Min`}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-400 font-medium">Ready</span>
+                                  )}
+
+                                  {/* Table Status Badge */}
+                                  <div>
+                                    {isAvailable && (
+                                      <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                                        Blank
+                                      </span>
+                                    )}
+                                    {isRunningKOT && (
+                                      <span className="text-[9px] font-black uppercase tracking-wider bg-amber-300/80 text-amber-950 px-1.5 py-0.2 rounded">
+                                        KOT Active
+                                      </span>
+                                    )}
+                                    {isRunningBlue && (
+                                      <span className="text-[9px] font-black uppercase tracking-wider bg-blue-200 text-blue-900 px-1.5 py-0.2 rounded">
+                                        Running
+                                      </span>
+                                    )}
+                                    {isBilled && (
+                                      <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-900 px-1.5 py-0.2 rounded">
+                                        Printed
+                                      </span>
+                                    )}
+                                    {isPaid && (
+                                      <span className="text-[9px] font-black uppercase tracking-wider bg-orange-200 text-orange-900 px-1.5 py-0.2 rounded">
+                                        Paid
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Table Name & Capacity */}
+                                <div className="mt-1.5 text-center sm:text-left">
+                                  <h3 className="font-black text-sm sm:text-base tracking-tight leading-tight">
+                                    {table.tableNumber}
+                                  </h3>
+                                </div>
+                              </div>
+
+                              {/* Middle / Bottom Info */}
+                              <div className="mt-2 pt-1.5 border-t border-black/10 dark:border-white/10 flex items-center justify-between">
+                                {isOccupied && order ? (
+                                  <span className="text-xs sm:text-sm font-black text-gray-950 dark:text-white">
+                                    {formatCurrency(order.total)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 font-semibold">
+                                    Tap to order
+                                  </span>
+                                )}
+
+                                {/* Bottom Quick Action Icons:
+                                    Apart for the print bill and view items (eye) icon,
+                                    clicking the card body takes orders for round 2! */}
+                                <div className="flex items-center gap-1">
+                                  {isOccupied && (
+                                    <>
+                                      {/* Quick Print Bill Icon */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleQuickPrintFromTable(table, e)}
+                                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                        title="Print Customer Bill / KOT"
+                                      >
+                                        <Printer className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      {/* Move KOT / Transfer Table Icon */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleOpenMoveModal(table, e)}
+                                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                        title="Move KOT / Transfer Table"
+                                      >
+                                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      {/* View Items (Eye) Icon */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleViewOrderDetails(table, e)}
+                                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                        title="View Ordered Items & Settle Bill"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {isAdmin && !isOccupied && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditTable(table);
+                                      }}
+                                      className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded"
+                                      title="Edit Table"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* VIEW B: 3-COLUMN POS ORDER TAKING SCREEN (Matches Images 1 & 3) */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {activeView === 'pos_order' && (
+          <div className="space-y-3">
+            {/* Top Navigation Bar */}
+            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setActiveView('table_view')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 font-bold text-xs hover:bg-red-100 transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  Table View
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="font-black text-sm sm:text-base text-gray-900 dark:text-white tracking-tight">
+                    PEYALA POS
+                  </span>
+                  {selectedTable && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-200 border border-orange-300 dark:border-orange-800">
+                      {selectedTable.tableNumber} {isRound2Mode ? '(Round 2+)' : ''}
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleStartNewOrder}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  New Order
+                </button>
+              </div>
+
+              {/* Quick Search & Status Indicators */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowLookupModal('bill')}
+                  className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
+                >
+                  <Search className="w-3.5 h-3.5 text-gray-400" />
+                  <span>Bill No.</span>
+                </button>
+
+                <button
+                  onClick={() => setShowLookupModal('kot')}
+                  className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1"
+                >
+                  <Search className="w-3.5 h-3.5 text-gray-400" />
+                  <span>KOT No.</span>
+                </button>
+
+                <button
+                  onClick={togglePrintMode}
+                  className={cn(
+                    'px-2.5 py-1 text-xs font-semibold rounded-lg border',
+                    printMode === 'test'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                      : 'bg-emerald-50 text-emerald-800 border-emerald-300'
                   )}
                 >
-                  {/* Top table info */}
-                  <div>
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-black text-sm sm:text-base text-gray-900 dark:text-white group-hover:text-brand-600 transition-colors truncate">
-                        {table.tableNumber}
-                      </span>
+                  {printMode === 'test' ? '🧪 Test' : '🚀 Auto-Print'}
+                </button>
 
-                      {/* Status Badge */}
-                      <div>
-                        {isAvailable && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-100/80 dark:bg-green-950/50 px-1.5 py-0.5 rounded-full">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                            <span className="hidden min-[380px]:inline">Avail</span>
-                          </span>
-                        )}
-                        {isOccupied && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 dark:text-red-400 bg-red-100/80 dark:bg-red-950/50 px-1.5 py-0.5 rounded-full">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                            <span className="hidden min-[380px]:inline">Occupied</span>
-                          </span>
-                        )}
-                        {isReserved && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-yellow-700 dark:text-yellow-400 bg-yellow-100/80 dark:bg-yellow-950/50 px-1.5 py-0.5 rounded-full">
-                            <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                            <span className="hidden min-[380px]:inline">Reserved</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Middle: Order Status & KOT Elapsed Time or Helper */}
-                    <div className="mt-1.5">
-                      {isOccupied && order ? (
-                        <div className="space-y-1">
-                          {/* Time passed since KOT creation badge */}
-                          {(() => {
-                            const kotMins = getKotElapsedMinutes(order);
-                            if (kotMins === null) return null;
-                            const isLongWait = kotMins >= 30;
-                            const isMediumWait = kotMins >= 15 && kotMins < 30;
-                            return (
-                              <div className="flex items-center justify-between gap-1 text-[10px]">
-                                <span
-                                  className={cn(
-                                    'inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-bold tracking-tight',
-                                    isLongWait
-                                      ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-800'
-                                      : isMediumWait
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
-                                      : 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                  )}
-                                  title={`KOT dispatched ${kotMins} minute${kotMins === 1 ? '' : 's'} ago`}
-                                >
-                                  <Clock className="w-2.5 h-2.5" />
-                                  <span>{kotMins <= 0 ? '< 1m' : `${kotMins}m`}</span>
-                                </span>
-
-                                <span
-                                  className={cn(
-                                    'font-bold uppercase text-[9px] px-1 py-0.5 rounded',
-                                    order.status === 'billed' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' :
-                                    order.status === 'served' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' :
-                                    'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                                  )}
-                                >
-                                  {order.status}
-                                </span>
-                              </div>
-                            );
-                          })()}
-
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
-                            {order.items?.filter((i) => i.status !== 'cancelled').length || 0} item{(order.items?.filter((i) => i.status !== 'cancelled').length || 0) === 1 ? '' : 's'}
-                          </div>
-                        </div>
-                      ) : isAvailable ? (
-                        <div className="text-[10px] text-gray-400 dark:text-gray-500 py-0.5 flex items-center gap-1">
-                          <Utensils className="w-3 h-3 text-green-500/70" />
-                          <span className="truncate">Tap to seat</span>
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-gray-400 py-0.5 truncate">Reserved</div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Bottom: Total / Actions */}
-                  <div className="mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-800/80 flex items-center justify-between">
-                    {isOccupied && order ? (
-                      <span className="text-xs sm:text-sm font-black text-gray-900 dark:text-white">
-                        {formatCurrency(order.total)}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-gray-400">Ready</span>
-                    )}
-
-                    {isAdmin && (
-                      <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditTable(table);
-                          }}
-                          className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                          title="Edit Table"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        {!isOccupied && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteTable(table);
-                            }}
-                            className="p-1 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 dark:hover:bg-red-950/40"
-                            title="Delete Table"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ───────────────────────────────────────────────────────── */}
-      {/* Table Detail & Order Management Modal */}
-      {/* ───────────────────────────────────────────────────────── */}
-      <Modal
-        open={!!selectedTable}
-        onClose={closeOrderModal}
-        title={
-          selectedTable
-            ? `${selectedTable.tableNumber} — ${
-                selectedTable.status === 'occupied' ? 'Live Dine-In Order' : 'New Order'
-              }`
-            : ''
-        }
-        size="xl"
-      >
-        {selectedTable && (
-          <div>
-            {orderModalLoading ? (
-              <div className="py-20 flex justify-center">
-                <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                {isPrintStation && (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-2 py-1 rounded-lg">
+                    Hub Active
+                  </span>
+                )}
               </div>
-            ) : selectedTable.status === 'available' || !activeOrder ? (
-              /* ── CASE 1: Table is Available -> Open Order Screen ── */
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900/40 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                    <span className="text-sm font-medium text-green-800 dark:text-green-300">
-                      Table is Available — Select items to generate KOT &amp; Seat Guests
-                    </span>
-                  </div>
-                  {selectedTable.status === 'reserved' && canManageOrders && (
+            </div>
+
+            {/* 3-Column Layout: Left Category Rail (Col 1) | Middle Menu Grid (Col 2) | Right Order Cart (Col 3) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-210px)]">
+              {/* ── COLUMN 1: Category Rail (2 cols on lg) ── */}
+              <div className="lg:col-span-2 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-row lg:flex-col overflow-x-auto lg:overflow-y-auto max-h-[140px] lg:max-h-[calc(100vh-220px)] divide-y divide-gray-100 dark:divide-gray-800 divide-x lg:divide-x-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('all')}
+                  className={cn(
+                    'p-2.5 text-left text-xs font-bold transition-all whitespace-nowrap flex items-center justify-between shrink-0',
+                    selectedCategory === 'all'
+                      ? 'bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border-l-4 border-l-red-600'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                  )}
+                >
+                  <span>All Items</span>
+                  <span className="text-[10px] opacity-70">({menuItems.length})</span>
+                </button>
+
+                {categories.map((cat) => {
+                  const isActive = selectedCategory === cat._id;
+                  const count = menuItems.filter((i) => {
+                    const cId = typeof i.category === 'object' && i.category !== null ? i.category._id : i.category;
+                    return cId === cat._id;
+                  }).length;
+
+                  return (
                     <button
-                      onClick={async () => {
-                        await tablesApi.update(selectedTable._id, { status: 'available' });
-                        selectedTable.status = 'available';
-                        await loadData();
-                      }}
-                      className="btn-secondary text-xs py-1"
+                      key={cat._id}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat._id)}
+                      className={cn(
+                        'p-2.5 text-left text-xs font-bold transition-all whitespace-nowrap flex items-center justify-between shrink-0',
+                        isActive
+                          ? 'bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border-l-4 border-l-red-600'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                      )}
                     >
-                      Clear Reservation
+                      <span className="truncate pr-1">{cat.name}</span>
+                      <span className="text-[10px] opacity-70">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ── COLUMN 2: Item Grid & Search (6 cols on lg) ── */}
+              <div className="lg:col-span-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3 flex flex-col justify-between space-y-3">
+                {/* Search Bar matching Image 1 & 3 */}
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={menuSearch}
+                    onChange={(e) => setMenuSearch(e.target.value)}
+                    placeholder="Search item..."
+                    className="input pl-9 text-sm h-10 bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700"
+                  />
+                  {menuSearch && (
+                    <button
+                      onClick={() => setMenuSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
                     </button>
                   )}
                 </div>
 
-                {!canManageOrders && (
-                  <div className="flex items-center gap-2.5 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-lg text-xs text-amber-800 dark:text-amber-300">
-                    <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600" />
-                    <span><strong>Manager or Admin Permission Required:</strong> Order handling is allowed through Manager and Admin accounts only. You can browse the menu and cart preview, but opening orders and sending KOTs is restricted.</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                  {/* Left Column: Menu Picker (7 cols) */}
-                  <div className="md:col-span-7 space-y-3">
-                    {/* Search & Category Tabs */}
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                          type="text"
-                          value={menuSearch}
-                          onChange={(e) => setMenuSearch(e.target.value)}
-                          placeholder="Search items for order..."
-                          className="input pl-9 text-xs"
-                        />
-                      </div>
-
-                      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                        <button
-                          onClick={() => setMenuCatFilter('all')}
-                          className={cn(
-                            'px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors',
-                            menuCatFilter === 'all'
-                              ? 'bg-brand-500 text-white'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'
-                          )}
-                        >
-                          All
-                        </button>
-                        {categories.map((c) => (
-                          <button
-                            key={c._id}
-                            onClick={() => setMenuCatFilter(c._id)}
-                            className={cn(
-                              'px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors',
-                              menuCatFilter === c._id
-                                ? 'bg-brand-500 text-white'
-                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'
-                            )}
-                          >
-                            {c.name}
-                          </button>
-                        ))}
-                      </div>
+                {/* Items Grid with Veg / Non-Veg Colored Left Border */}
+                <div className="flex-1 overflow-y-auto max-h-[calc(100vh-300px)] pr-1">
+                  {menuItems.filter((item) => {
+                    if (selectedCategory !== 'all') {
+                      const cId = typeof item.category === 'object' && item.category !== null ? item.category._id : item.category;
+                      if (cId !== selectedCategory) return false;
+                    }
+                    if (menuSearch.trim()) {
+                      return item.name.toLowerCase().includes(menuSearch.toLowerCase());
+                    }
+                    return true;
+                  }).length === 0 ? (
+                    <div className="py-16 text-center text-gray-400 text-sm">
+                      No menu items match your search.
                     </div>
-
-                    {/* Menu Items List */}
-                    <div className="max-h-96 overflow-y-auto space-y-2 pr-1 divide-y divide-gray-100 dark:divide-gray-800">
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                       {menuItems
                         .filter((item) => {
-                          if (menuCatFilter !== 'all') {
+                          if (selectedCategory !== 'all') {
                             const cId = typeof item.category === 'object' && item.category !== null ? item.category._id : item.category;
-                            if (cId !== menuCatFilter) return false;
+                            if (cId !== selectedCategory) return false;
                           }
                           if (menuSearch.trim()) {
                             return item.name.toLowerCase().includes(menuSearch.toLowerCase());
@@ -1318,1004 +1866,389 @@ export default function TablesPage() {
                           const hasVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
                           const isCustomizable = hasVariants || applicableAddons.length > 0;
 
-                          const inCartQty = Object.values(cart)
-                            .filter((c) => c.menuItemId === item._id)
-                            .reduce((sum, c) => sum + c.quantity, 0);
+                          // Check if this item is currently in the active cart
+                          const cartEntries = Object.values(cart).filter((c) => c.menuItemId === item._id);
+                          const totalInCart = cartEntries.reduce((sum, c) => sum + c.quantity, 0);
+                          const isInCart = totalInCart > 0;
 
                           return (
-                            <div key={item._id} className="pt-2 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    'w-3 h-3 border rounded-sm flex items-center justify-center p-0.5',
-                                    item.isVeg ? 'border-green-600' : 'border-red-600'
+                            <div
+                              key={item._id}
+                              onClick={() => handleItemClick(item)}
+                              className={cn(
+                                'p-3 rounded-xl border text-left transition-all cursor-pointer relative bg-white dark:bg-gray-800/80 shadow-2xs hover:shadow-sm flex flex-col justify-between min-h-[92px]',
+                                // Veg / Non-Veg Left Border Stripe (matching Petpooja Image 1 & 3)
+                                item.isVeg
+                                  ? 'border-l-4 border-l-emerald-600'
+                                  : 'border-l-4 border-l-red-600',
+                                // Active item outline when in cart (matches Image 3)
+                                isInCart
+                                  ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50/20 dark:bg-blue-950/20'
+                                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                              )}
+                            >
+                              <div>
+                                <div className="flex items-start justify-between gap-1">
+                                  <p className="text-sm font-bold text-gray-900 dark:text-white line-clamp-2 leading-snug">
+                                    {item.name}
+                                  </p>
+                                  {isInCart && (
+                                    <span className="text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shrink-0">
+                                      {totalInCart}
+                                    </span>
                                   )}
-                                >
-                                  <span className={cn('w-1.5 h-1.5 rounded-full', item.isVeg ? 'bg-green-600' : 'bg-red-600')} />
-                                </span>
-                                <div>
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <p className="text-xs font-semibold text-gray-900 dark:text-white leading-tight">{item.name}</p>
+                                </div>
+
+                                {isCustomizable && (
+                                  <div className="flex items-center gap-1.5 mt-1.5">
                                     {hasVariants && (
-                                      <span className="text-[9px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold px-1 rounded">
-                                        Variants
+                                      <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded">
+                                        Portions
                                       </span>
                                     )}
                                     {applicableAddons.length > 0 && (
-                                      <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold px-1 rounded">
+                                      <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 px-1.5 py-0.5 rounded">
                                         Addons
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-[11px] text-gray-500 font-medium">
-                                    {formatCurrency(item.price)} <span className="text-gray-400">+{item.taxPercent}%</span>
-                                  </p>
-                                </div>
+                                )}
                               </div>
 
-                              {/* Cart Actions */}
-                              <div className="flex items-center gap-1.5">
-                                {isCustomizable ? (
-                                  <button
-                                    onClick={() => handleItemClick(item, 'cart')}
-                                    className={cn(
-                                      'px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors flex items-center gap-1',
-                                      inCartQty > 0
-                                        ? 'bg-brand-50 border-brand-300 text-brand-700 dark:bg-brand-950/40 dark:border-brand-700 dark:text-brand-300'
-                                        : 'border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:text-brand-500'
-                                    )}
-                                  >
-                                    <Sparkles className="w-3 h-3 text-brand-500" />
-                                    {inCartQty > 0 ? `${inCartQty} in order · +` : '+ Customize'}
-                                  </button>
-                                ) : inCartQty > 0 ? (
-                                  <div className="flex items-center gap-1.5 bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800/60 rounded-lg p-0.5">
-                                    <button onClick={() => updateDirectCartQty(item, 'cart', -1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
-                                      <MinusCircle className="w-3.5 h-3.5" />
-                                    </button>
-                                    <span className="text-xs font-bold text-brand-600 px-1">{inCartQty}</span>
-                                    <button onClick={() => updateDirectCartQty(item, 'cart', 1)} className="p-1 text-brand-600 hover:bg-brand-100 rounded">
-                                      <PlusCircle className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    onClick={() => updateDirectCartQty(item, 'cart', 1)}
-                                    className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 hover:border-brand-500 hover:text-brand-500 transition-colors"
-                                  >
-                                    + Add
-                                  </button>
-                                )}
+                              <div className="mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                                <span className="text-sm font-black text-gray-900 dark:text-white">
+                                  {formatCurrency(item.price)}
+                                </span>
+                                <span className="text-xs font-medium text-gray-400">
+                                  {isCustomizable ? '+ Custom' : '+ 1 Tap'}
+                                </span>
                               </div>
                             </div>
                           );
                         })}
                     </div>
-                  </div>
-
-                  {/* Right Column: Order Cart & Open Order (5 cols) */}
-                  <div className="md:col-span-5 bg-gray-50 dark:bg-gray-800/40 p-4 rounded-xl border border-gray-200 dark:border-gray-800 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 mb-3">
-                        <span className="font-semibold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                          Initial Order (KOT Round 1)
-                        </span>
-                        <span className="badge-green text-[10px]">{cartSummary.itemCount} item(s)</span>
-                      </div>
-
-                      {cartSummary.itemCount === 0 ? (
-                        <div className="py-12 text-center text-gray-400 text-xs">
-                          Select menu items from the left to start this table&apos;s order.
-                        </div>
-                      ) : (
-                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                          {Object.entries(cart).map(([cartKey, d]) => {
-                            const item = menuItems.find((i) => i._id === d.menuItemId);
-                            if (!item) return null;
-                            return (
-                              <div key={cartKey} className="text-xs bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 space-y-1.5">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div>
-                                    <div className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                                      <span>{item.name}</span>
-                                      {d.variant?.name && (
-                                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
-                                          {d.variant.name}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {d.selectedAddons && d.selectedAddons.length > 0 && (
-                                      <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                                        + {d.selectedAddons.map((a) => `${a.name} (₹${a.price})`).join(', ')}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <span className="font-bold text-gray-900 dark:text-white shrink-0">
-                                    {formatCurrency(d.unitPrice * d.quantity)}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 pt-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <button onClick={() => updateCartEntryQty(cartKey, -1, 'cart')} className="text-gray-400 hover:text-red-500">
-                                      <MinusCircle className="w-3.5 h-3.5" />
-                                    </button>
-                                    <span className="font-bold text-xs">{d.quantity}</span>
-                                    <button onClick={() => updateCartEntryQty(cartKey, 1, 'cart')} className="text-gray-400 hover:text-green-500">
-                                      <PlusCircle className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                  <input
-                                    type="text"
-                                    value={d.notes || ''}
-                                    onChange={(e) => updateCartEntryNotes(cartKey, e.target.value, 'cart')}
-                                    placeholder="Add kitchen note..."
-                                    className="input text-[11px] py-0.5 px-2 w-40"
-                                  />
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Cart Summary & Open Order Button */}
-                    <div className="pt-4 mt-4 border-t border-gray-200 dark:border-gray-800 space-y-2">
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>Items Subtotal:</span>
-                        <span>{formatCurrency(cartSummary.subtotal)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>Tax / GST:</span>
-                        <span>{formatCurrency(cartSummary.taxAmount)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm font-bold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-800">
-                        <span>Estimated Total:</span>
-                        <span>{formatCurrency(cartSummary.total)}</span>
-                      </div>
-
-                      <button
-                        onClick={handleOpenOrder}
-                        disabled={!canManageOrders || cartSummary.itemCount === 0 || actionLoading}
-                        className="btn-primary w-full mt-3 flex items-center justify-center gap-1.5 disabled:opacity-50"
-                      >
-                        <ChefHat className="w-4 h-4" />
-                        {!canManageOrders
-                          ? 'Staff Mode (Read-Only)'
-                          : actionLoading
-                          ? 'Creating Order...'
-                          : 'Open Order & Send KOT'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* ── CASE 2: Table is Occupied -> Live Order, KOT Rounds, Billing & Payment ── */
-              <div className="space-y-5">
-                {!canManageOrders && (
-                  <div className="flex items-center gap-2.5 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl text-xs text-blue-800 dark:text-blue-300">
-                    <ShieldAlert className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                    <span><strong>Staff Mode (Read-Only Order View):</strong> You can review items and print customer receipts/KOTs. Adding KOT rounds, discounts, billing, and settlements are restricted to Managers and Administrators.</span>
-                  </div>
-                )}
-
-                {/* Order Meta Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-800 rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        'badge text-xs font-bold uppercase tracking-wider px-2.5 py-1',
-                        activeOrder.status === 'billed' ? 'badge-purple' :
-                        activeOrder.status === 'served' ? 'badge-blue' :
-                        'badge-yellow'
-                      )}
-                    >
-                      Status: {activeOrder.status}
-                    </span>
-                    <span className="text-xs text-gray-500 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
-                      Opened {new Date(activeOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    {activeOrder.createdBy && (
-                      <span className="text-xs text-gray-400">By {activeOrder.createdBy.name}</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        const activeItems = activeOrder.items
-                          ?.filter((i: any) => i.status !== 'cancelled')
-                          .map((i: any) => ({
-                            name: i.name,
-                            quantity: i.quantity,
-                            notes: i.notes,
-                          })) || [];
-                        const orderNum = activeOrder.orderNumber || activeOrder._id;
-                        const tokenNo = activeOrder.orderNumber ? String(activeOrder.orderNumber).slice(-2) : activeOrder._id.slice(-2);
-
-                        if (isPrintStation || printMode === 'test') {
-                          printKOT({
-                            tableNumber: selectedTable.tableNumber,
-                            kotNumber: `KOT-${activeOrder.orderNumber ? activeOrder.orderNumber : activeOrder._id.slice(-4)}-ALL`,
-                            orderNumber: orderNum,
-                            tokenNo: tokenNo,
-                            billerName: activeOrder.createdBy?.name || 'Staff',
-                            roundTag: '[FULL KOT REPRINT]',
-                            createdAt: activeOrder.createdAt,
-                            items: activeItems,
-                          });
-                        } else {
-                          try {
-                            await ordersApi.reprintOrderKot(activeOrder._id);
-                            setNoticeMessage(`KOT reprint for Table ${selectedTable.tableNumber} sent to Counter Printer 🖨️`);
-                            setTimeout(() => setNoticeMessage(null), 4000);
-                          } catch (err) {
-                            // Fallback to local print
-                            printKOT({
-                              tableNumber: selectedTable.tableNumber,
-                              kotNumber: `KOT-${activeOrder.orderNumber ? activeOrder.orderNumber : activeOrder._id.slice(-4)}-ALL`,
-                              orderNumber: orderNum,
-                              tokenNo: tokenNo,
-                              billerName: activeOrder.createdBy?.name || 'Staff',
-                              roundTag: '[FULL KOT REPRINT]',
-                              createdAt: activeOrder.createdAt,
-                              items: activeItems,
-                            });
-                          }
-                        }
-                      }}
-                      className="btn-secondary text-xs py-1.5 flex items-center gap-1 text-gray-700 dark:text-gray-300"
-                      title={isPrintStation ? 'Print 80mm KOT ticket on local printer' : 'Dispatch KOT reprint to Counter Printer'}
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      {isPrintStation ? 'Print KOT' : 'Send KOT to Printer'}
-                    </button>
-                    {canManageOrders && activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && (
-                      <button
-                        onClick={() => setShowAddRound(!showAddRound)}
-                        className={cn(
-                          'btn-secondary text-xs py-1.5 flex items-center gap-1',
-                          showAddRound && 'bg-brand-50 border-brand-300 text-brand-600 dark:bg-brand-950/30'
-                        )}
-                      >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        {showAddRound ? 'Close Menu' : '+ Add KOT Round'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Optional Collapsible "Add KOT Round" Menu Picker */}
-                {showAddRound && (
-                  <div className="p-4 border-2 border-dashed border-brand-300 dark:border-brand-900 rounded-xl bg-brand-50/20 dark:bg-brand-950/10 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-brand-600 flex items-center gap-1.5">
-                        <ChefHat className="w-4 h-4" /> Add Another KOT Round
-                      </h4>
-                      <span className="text-xs text-gray-500">{Object.keys(roundCart).length} selected</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Search & Categories */}
-                      <div className="space-y-2">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input
-                            type="text"
-                            value={roundSearch}
-                            onChange={(e) => setRoundSearch(e.target.value)}
-                            placeholder="Filter items..."
-                            className="input text-xs py-1 pl-8"
-                          />
-                        </div>
-
-                        <div className="max-h-48 overflow-y-auto space-y-1 pr-1 divide-y divide-gray-100 dark:divide-gray-800">
-                          {menuItems
-                            .filter((item) => {
-                              if (roundSearch.trim()) {
-                                return item.name.toLowerCase().includes(roundSearch.toLowerCase());
-                              }
-                              return true;
-                            })
-                            .map((item) => {
-                              const applicableAddons = getItemApplicableAddons(item);
-                              const hasVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
-                              const isCustomizable = hasVariants || applicableAddons.length > 0;
-
-                              const inRoundQty = Object.values(roundCart)
-                                .filter((c) => c.menuItemId === item._id)
-                                .reduce((sum, c) => sum + c.quantity, 0);
-
-                              return (
-                                <div key={item._id} className="pt-1.5 flex items-center justify-between text-xs">
-                                  <div>
-                                    <span className="font-medium text-gray-900 dark:text-white">{item.name}</span>
-                                    <span className="text-gray-500 text-[11px] ml-1">({formatCurrency(item.price)})</span>
-                                    {hasVariants && (
-                                      <span className="text-[9px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold px-1 rounded ml-1">
-                                        Variants
-                                      </span>
-                                    )}
-                                    {applicableAddons.length > 0 && (
-                                      <span className="text-[9px] bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold px-1 rounded ml-1">
-                                        Addons
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    {isCustomizable ? (
-                                      <button
-                                        onClick={() => handleItemClick(item, 'roundCart')}
-                                        className={cn(
-                                          'btn-secondary text-[10px] py-0.5 px-2 flex items-center gap-1 font-semibold',
-                                          inRoundQty > 0 && 'bg-brand-50 border-brand-300 text-brand-700 dark:bg-brand-950/40'
-                                        )}
-                                      >
-                                        <Sparkles className="w-2.5 h-2.5 text-brand-500" />
-                                        {inRoundQty > 0 ? `${inRoundQty} in round · +` : '+ Customize'}
-                                      </button>
-                                    ) : inRoundQty > 0 ? (
-                                      <div className="flex items-center gap-1 bg-white dark:bg-gray-900 px-1 py-0.5 rounded border">
-                                        <button onClick={() => updateDirectCartQty(item, 'roundCart', -1)} className="text-gray-500 hover:text-red-500">
-                                          <MinusCircle className="w-3 h-3" />
-                                        </button>
-                                        <span className="font-bold text-xs">{inRoundQty}</span>
-                                        <button onClick={() => updateDirectCartQty(item, 'roundCart', 1)} className="text-gray-500 hover:text-green-500">
-                                          <PlusCircle className="w-3 h-3" />
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button onClick={() => updateDirectCartQty(item, 'roundCart', 1)} className="btn-secondary text-[10px] py-0.5 px-2">
-                                        + Add
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
-
-                      {/* Selected Round Items Preview & Confirm */}
-                      <div className="bg-white dark:bg-gray-900 p-3 rounded-lg border flex flex-col justify-between">
-                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                          <p className="text-[11px] font-semibold text-gray-500 uppercase">Selected for this round:</p>
-                          {Object.keys(roundCart).length === 0 ? (
-                            <p className="text-xs text-gray-400 py-3 text-center">No items chosen yet</p>
-                          ) : (
-                            Object.entries(roundCart).map(([cartKey, d]) => {
-                              const item = menuItems.find((i) => i._id === d.menuItemId);
-                              return (
-                                <div key={cartKey} className="text-xs space-y-1 border-b pb-1">
-                                  <div className="flex justify-between font-medium">
-                                    <div className="flex items-center gap-1 flex-wrap">
-                                      <span>{item?.name}</span>
-                                      {d.variant?.name && (
-                                        <span className="text-[9px] font-bold px-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                                          {d.variant.name}
-                                        </span>
-                                      )}
-                                      <span className="text-gray-500 font-bold">x {d.quantity}</span>
-                                    </div>
-                                    <span className="font-bold">{formatCurrency(d.unitPrice * d.quantity)}</span>
-                                  </div>
-                                  {d.selectedAddons && d.selectedAddons.length > 0 && (
-                                    <p className="text-[10px] text-gray-500 font-medium">
-                                      + {d.selectedAddons.map((a) => `${a.name} (₹${a.price})`).join(', ')}
-                                    </p>
-                                  )}
-                                  <div className="flex items-center gap-1 pt-0.5">
-                                    <button onClick={() => updateCartEntryQty(cartKey, -1, 'roundCart')} className="text-gray-400 hover:text-red-500">
-                                      <MinusCircle className="w-3 h-3" />
-                                    </button>
-                                    <span className="font-bold text-[11px] px-1">{d.quantity}</span>
-                                    <button onClick={() => updateCartEntryQty(cartKey, 1, 'roundCart')} className="text-gray-400 hover:text-green-500">
-                                      <PlusCircle className="w-3 h-3" />
-                                    </button>
-                                    <input
-                                      type="text"
-                                      value={d.notes || ''}
-                                      onChange={(e) => updateCartEntryNotes(cartKey, e.target.value, 'roundCart')}
-                                      placeholder="Round notes (optional)..."
-                                      className="input text-[10px] py-0.5 px-1.5 w-full ml-1"
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-
-                        <button
-                          onClick={handleAddRound}
-                          disabled={Object.keys(roundCart).length === 0 || actionLoading}
-                          className="btn-primary text-xs py-1.5 w-full mt-2 disabled:opacity-50 flex items-center justify-center gap-1"
-                        >
-                          <ChefHat className="w-3.5 h-3.5" />
-                          Send KOT to Kitchen
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Ordered Items Table */}
-                <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-800">
-                      <tr>
-                        <th className="table-th">Item</th>
-                        <th className="table-th">Qty</th>
-                        <th className="table-th">Price</th>
-                        <th className="table-th">Tax</th>
-                        <th className="table-th">Line Total</th>
-                        <th className="table-th">Item Status</th>
-                        <th className="table-th text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {activeOrder.items?.map((item: any) => {
-                        const isCancelled = item.status === 'cancelled';
-                        const lineTotal = item.price * item.quantity;
-
-                        return (
-                          <tr
-                            key={item._id}
-                            className={cn(
-                              'transition-colors',
-                              isCancelled && 'opacity-40 bg-gray-50/50 dark:bg-gray-900/30'
-                            )}
-                          >
-                            <td className="table-td font-medium">
-                              <span className={cn(isCancelled && 'line-through')}>{item.name}</span>
-                              {item.notes && (
-                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">
-                                  Note: {item.notes}
-                                </p>
-                              )}
-                            </td>
-                            <td className="table-td font-bold">{item.quantity}</td>
-                            <td className="table-td text-gray-500">{formatCurrency(item.price)}</td>
-                            <td className="table-td text-gray-400">+{item.taxPercent || 0}%</td>
-                            <td className="table-td font-bold text-gray-900 dark:text-white">
-                              {isCancelled ? '—' : formatCurrency(lineTotal)}
-                            </td>
-                            <td className="table-td">
-                              {isCancelled ? (
-                                <span className="badge-red text-[10px]">Cancelled</span>
-                              ) : !canManageOrders ? (
-                                <span
-                                  className={cn(
-                                    'text-[11px] font-semibold py-1 px-2 rounded-md border inline-block uppercase tracking-wider',
-                                    item.status === 'served' ? 'bg-green-50 border-green-300 text-green-700' :
-                                    item.status === 'preparing' ? 'bg-blue-50 border-blue-300 text-blue-700' :
-                                    'bg-yellow-50 border-yellow-300 text-yellow-700'
-                                  )}
-                                >
-                                  {item.status}
-                                </span>
-                              ) : (
-                                <select
-                                  value={item.status}
-                                  onChange={(e) => handleItemStatusChange(item._id, e.target.value)}
-                                  className={cn(
-                                    'text-[11px] font-semibold py-1 px-2 rounded-md border focus:outline-none transition-colors',
-                                    item.status === 'served' ? 'bg-green-50 border-green-300 text-green-700' :
-                                    item.status === 'preparing' ? 'bg-blue-50 border-blue-300 text-blue-700' :
-                                    'bg-yellow-50 border-yellow-300 text-yellow-700'
-                                  )}
-                                >
-                                  <option value="pending">Pending</option>
-                                  <option value="preparing">Preparing</option>
-                                  <option value="served">Served</option>
-                                </select>
-                              )}
-                            </td>
-                            <td className="table-td text-right">
-                              {!isCancelled && activeOrder.status !== 'paid' && canManageOrders ? (
-                                <button
-                                  onClick={() => handleCancelItem(item._id, item.name)}
-                                  className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors"
-                                  title="Cancel Item"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              ) : (
-                                <span className="text-gray-300">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Financial Breakdown & Discount Box */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 dark:bg-gray-800/30 p-4 rounded-xl border border-gray-200 dark:border-gray-800">
-                  {/* Left: Discount Adjustment */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="label text-xs font-semibold">Apply Discount</label>
-                      {canManageOrders && (
-                        <div className="inline-flex rounded-lg bg-gray-200 dark:bg-gray-700 p-0.5 text-[11px] font-semibold">
-                          <button
-                            type="button"
-                            onClick={() => setDiscountType('flat')}
-                            className={cn(
-                              'px-2.5 py-0.5 rounded-md transition-all',
-                              discountType === 'flat'
-                                ? 'bg-white dark:bg-gray-900 text-brand-600 shadow-sm'
-                                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-                            )}
-                          >
-                            Flat (₹)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDiscountType('percentage')}
-                            className={cn(
-                              'px-2.5 py-0.5 rounded-md transition-all',
-                              discountType === 'percentage'
-                                ? 'bg-white dark:bg-gray-900 text-brand-600 shadow-sm'
-                                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-                            )}
-                          >
-                            Percentage (%)
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {canManageOrders ? (
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-xs font-semibold">
-                            {discountType === 'flat' ? '₹' : '%'}
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={discountType === 'percentage' ? 100 : undefined}
-                            step="any"
-                            value={discountInput}
-                            onChange={(e) => setDiscountInput(Math.max(0, +e.target.value))}
-                            placeholder={discountType === 'flat' ? '0.00' : '0%'}
-                            className="input pl-6 text-xs h-9"
-                          />
-                        </div>
-                        <button
-                          onClick={handleApplyDiscount}
-                          className="btn-secondary text-xs px-3 whitespace-nowrap h-9"
-                        >
-                          Apply Discount
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-500 italic py-1">
-                        Discounts can only be configured by Managers and Administrators.
-                      </p>
-                    )}
-
-                    {discountType === 'percentage' && discountInput > 0 && (
-                      <p className="text-[11px] text-gray-500">
-                        ≈ {formatCurrency(Math.round(((activeOrder.subtotal * discountInput) / 100) * 100) / 100)} off subtotal
-                      </p>
-                    )}
-
-                    {activeOrder.discount > 0 && (
-                      <p className="text-[11px] text-green-600 font-medium">
-                        Discount of {formatCurrency(activeOrder.discount)} ({activeOrder.discountType === 'percentage' ? `${activeOrder.discountValue}%` : 'Flat'}) applied to bill.
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Right: Totals */}
-                  <div className="space-y-1.5 text-xs text-right">
-                    <div className="flex justify-between text-gray-500">
-                      <span>Subtotal:</span>
-                      <span className="font-semibold">{formatCurrency(activeOrder.subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-gray-500">
-                      <span>Tax / GST:</span>
-                      <span className="font-semibold">{formatCurrency(activeOrder.taxAmount)}</span>
-                    </div>
-                    {activeOrder.discount > 0 && (
-                      <div className="flex justify-between text-green-600">
-                        <span>
-                          Discount {activeOrder.discountType === 'percentage' ? `(${activeOrder.discountValue}%)` : ''}:
-                        </span>
-                        <span className="font-semibold">−{formatCurrency(activeOrder.discount)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-base font-black text-gray-900 dark:text-white pt-2 border-t border-gray-200 dark:border-gray-800">
-                      <span>Grand Total:</span>
-                      <span className="text-brand-600">{formatCurrency(activeOrder.total)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Context-Aware Action Workflow Bar */}
-                <div className="pt-3 border-t border-gray-200 dark:border-gray-800 space-y-3">
-                  {/* Secondary actions row & Finalize Bill */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      {/* Cancel order button (allowed for manager/admin unless paid) */}
-                      {activeOrder.status !== 'paid' && canManageOrders && (
-                        <button
-                          onClick={handleCancelOrder}
-                          disabled={actionLoading}
-                          className="btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 text-xs py-2 px-3 w-full sm:w-auto"
-                        >
-                          Cancel Order
-                        </button>
-                      )}
-
-                      {/* Manual Print Bill Button */}
-                      <button
-                        onClick={() => handlePrintCustomerBill()}
-                        className="btn-secondary text-gray-700 dark:text-gray-300 text-xs py-2 px-3 flex items-center justify-center gap-1.5 w-full sm:w-auto"
-                        title="Print 80mm Customer Receipt"
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                        Print Bill
-                      </button>
-                    </div>
-
-                    {/* Flow 1: Not Billed -> "Finalize Bill" */}
-                    {activeOrder.status !== 'billed' && activeOrder.status !== 'paid' && canManageOrders && (
-                      <button
-                        onClick={handleFinalizeBill}
-                        disabled={actionLoading}
-                        className="btn-primary text-xs py-2.5 px-6 flex items-center justify-center gap-1.5 w-full sm:w-auto ml-auto"
-                      >
-                        <Receipt className="w-4 h-4" />
-                        {actionLoading ? 'Finalizing...' : 'Finalize Bill'}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Flow 2: Once Billed -> Settlement Box & Payment Collection */}
-                  {activeOrder.status === 'billed' && (
-                    canManageOrders ? (
-                      <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl space-y-3">
-                        {/* Settlement Input & Waived Indicator */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-bold text-gray-800 dark:text-gray-200 whitespace-nowrap">
-                              Settlement Amount:
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-xs font-bold">₹</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={settlementInput}
-                                onChange={(e) => setSettlementInput(e.target.value)}
-                                placeholder={String(activeOrder.total)}
-                                className="input pl-6 py-1 text-sm font-bold w-36 h-9 bg-white dark:bg-gray-900"
-                              />
-                            </div>
-                            {settlementInput !== '' && Number(settlementInput) !== activeOrder.total && (
-                              <button
-                                type="button"
-                                onClick={() => setSettlementInput(String(activeOrder.total))}
-                                className="text-[11px] text-brand-600 hover:underline font-medium"
-                              >
-                                Reset to {formatCurrency(activeOrder.total)}
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Waived off alert */}
-                          {(() => {
-                            const entered = settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total;
-                            const waived = !isNaN(entered) && entered < activeOrder.total
-                              ? Math.max(0, Math.round((activeOrder.total - entered) * 100) / 100)
-                              : 0;
-                            if (waived > 0) {
-                              return (
-                                <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/50 px-2.5 py-1 rounded-md border border-amber-300 dark:border-amber-800">
-                                  Waived Off: <span className="font-bold underline">{formatCurrency(waived)}</span> (discrepancy recorded)
-                                </div>
-                              );
-                            }
-                            return (
-                              <div className="text-xs text-gray-500 font-medium">
-                                Full settlement: {formatCurrency(activeOrder.total)}
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Payment Mode Selector & Collect Button */}
-                        <div className="space-y-3 pt-2 border-t border-amber-200/60 dark:border-amber-900/30">
-                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                            {/* Payment mode buttons - 2x3 grid on mobile, flex row on sm+ */}
-                            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 bg-white dark:bg-gray-900 p-1.5 rounded-lg border border-gray-200 dark:border-gray-800 w-full sm:w-auto">
-                              {[
-                                { id: 'cash', label: 'Cash', icon: Wallet },
-                                { id: 'upi', label: 'UPI', icon: Smartphone },
-                                { id: 'card', label: 'Card', icon: CreditCard },
-                                { id: 'other', label: 'Other', icon: Building2 },
-                                { id: 'part', label: 'Part Payment', icon: Layers },
-                              ].map(({ id, label, icon: Icon }) => (
-                                <button
-                                  key={id}
-                                  type="button"
-                                  onClick={() => setPaymentMethod(id as any)}
-                                  className={cn(
-                                    'px-3 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center gap-1 transition-colors',
-                                    paymentMethod === id
-                                      ? 'bg-brand-600 text-white shadow-sm'
-                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-                                  )}
-                                >
-                                  <Icon className="w-3.5 h-3.5" />
-                                  {label}
-                                </button>
-                              ))}
-                            </div>
-
-                            <button
-                              onClick={handleCollectPayment}
-                              disabled={actionLoading || (paymentMethod === 'part' && totalPartAllocated <= 0)}
-                              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto ml-auto"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                              {actionLoading
-                                ? 'Settling...'
-                                : paymentMethod === 'part'
-                                ? `Collect Part: ${formatCurrency(totalPartAllocated)}`
-                                : `Collect ${formatCurrency(
-                                    settlementInput.trim() !== '' && !isNaN(Number(settlementInput))
-                                      ? Number(settlementInput)
-                                      : activeOrder.total
-                                  )}`}
-                            </button>
-                          </div>
-
-                          {/* Split Payment Allocation Box */}
-                          {paymentMethod === 'part' && (
-                            <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-amber-300 dark:border-amber-800/80 shadow-sm space-y-3">
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-1 border-b border-gray-100 dark:border-gray-800">
-                                <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                                  <Layers className="w-4 h-4 text-amber-600" />
-                                  Part Payment Split Breakdown
-                                </span>
-                                <div className="text-xs text-gray-600 dark:text-gray-400">
-                                  Total Bill: <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(activeOrder.total)}</span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                                {/* Cash */}
-                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
-                                    <span className="flex items-center gap-1">
-                                      <Wallet className="w-3.5 h-3.5 text-emerald-600" /> Cash Counter
-                                    </span>
-                                    {partDifference > 0 && numPartCash === 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPartCash(String(partDifference))}
-                                        className="text-[10px] text-brand-600 hover:underline font-bold"
-                                      >
-                                        + Fill {formatCurrency(partDifference)}
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className="relative">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      value={partCash}
-                                      onChange={(e) => setPartCash(e.target.value)}
-                                      placeholder="0.00"
-                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* UPI */}
-                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
-                                    <span className="flex items-center gap-1">
-                                      <Smartphone className="w-3.5 h-3.5 text-blue-600" /> UPI / QR
-                                    </span>
-                                    {partDifference > 0 && numPartUpi === 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPartUpi(String(partDifference))}
-                                        className="text-[10px] text-brand-600 hover:underline font-bold"
-                                      >
-                                        + Fill {formatCurrency(partDifference)}
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className="relative">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      value={partUpi}
-                                      onChange={(e) => setPartUpi(e.target.value)}
-                                      placeholder="0.00"
-                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* Card */}
-                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
-                                    <span className="flex items-center gap-1">
-                                      <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> Card / POS
-                                    </span>
-                                    {partDifference > 0 && numPartCard === 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPartCard(String(partDifference))}
-                                        className="text-[10px] text-brand-600 hover:underline font-bold"
-                                      >
-                                        + Fill {formatCurrency(partDifference)}
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className="relative">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      value={partCard}
-                                      onChange={(e) => setPartCard(e.target.value)}
-                                      placeholder="0.00"
-                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* Other */}
-                                <div className="p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
-                                    <span className="flex items-center gap-1">
-                                      <Building2 className="w-3.5 h-3.5 text-purple-600" /> Other / Bank
-                                    </span>
-                                    {partDifference > 0 && numPartOther === 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPartOther(String(partDifference))}
-                                        className="text-[10px] text-brand-600 hover:underline font-bold"
-                                      >
-                                        + Fill {formatCurrency(partDifference)}
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className="relative">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      value={partOther}
-                                      onChange={(e) => setPartOther(e.target.value)}
-                                      placeholder="0.00"
-                                      className="input pl-6 py-1 text-sm font-bold w-full h-8 bg-white dark:bg-gray-900"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Part Payment Live Status */}
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800/80 border border-gray-200/80 dark:border-gray-700/80 text-xs">
-                                <div className="text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                                  <span>Total Allocated: <span className="font-bold text-gray-900 dark:text-white text-sm">{formatCurrency(totalPartAllocated)}</span></span>
-                                  {numPartCash > 0 && <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Cash: {formatCurrency(numPartCash)}</span>}
-                                  {(numPartUpi + numPartCard + numPartOther) > 0 && (
-                                    <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">Digital: {formatCurrency(numPartUpi + numPartCard + numPartOther)}</span>
-                                  )}
-                                </div>
-
-                                <div>
-                                  {partDifference === 0 && totalPartAllocated > 0 ? (
-                                    <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
-                                      ✓ Exact match with bill
-                                    </span>
-                                  ) : partDifference > 0 ? (
-                                    <span className="text-amber-700 dark:text-amber-400 font-semibold">
-                                      {formatCurrency(partDifference)} unallocated (will be recorded as waived off)
-                                    </span>
-                                  ) : (
-                                    <span className="text-red-600 dark:text-red-400 font-bold">
-                                      ⚠ Over-allocated by {formatCurrency(Math.abs(partDifference))}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 bg-purple-50/80 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
-                        <div className="text-xs text-purple-900 dark:text-purple-300 text-center sm:text-left">
-                          <span className="font-bold">Bill Finalized ({formatCurrency(activeOrder.total)}).</span> Waiting for a Manager or Administrator to collect payment settlement and clear Table {selectedTable?.tableNumber}.
-                        </div>
-                        <button
-                          onClick={() => handlePrintCustomerBill()}
-                          className="btn-primary text-xs py-2 px-4 flex items-center justify-center gap-1.5 w-full sm:w-auto shrink-0"
-                        >
-                          <Receipt className="w-4 h-4" />
-                          Print Customer Bill
-                        </button>
-                      </div>
-                    )
                   )}
                 </div>
               </div>
-            )}
+
+              {/* ── COLUMN 3: Live Order / Cart Panel (4 cols on lg) (Matches Image 1 & 3) ── */}
+              <div className="lg:col-span-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3.5 flex flex-col justify-start gap-3">
+                {/* Service Type Tabs: Dine In | Delivery | Pick Up */}
+                <div className="grid grid-cols-3 gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                  {(
+                    [
+                      { id: 'dine_in', label: 'Dine In', icon: Utensils },
+                      { id: 'delivery', label: 'Delivery', icon: Bike },
+                      { id: 'pickup', label: 'Pick Up', icon: ShoppingBag },
+                    ] as const
+                  ).map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setServiceType(id)}
+                      className={cn(
+                        'py-1.5 text-xs sm:text-sm font-bold rounded-md flex items-center justify-center gap-1.5 transition-colors',
+                        serviceType === id
+                          ? 'bg-red-600 text-white shadow-xs'
+                          : 'text-gray-600 dark:text-gray-300 hover:text-gray-900'
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Table Info & Guest Controls */}
+                <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-700 dark:text-gray-300">Table:</span>
+                    {selectedTable ? (
+                      <span className="font-black text-sm px-2.5 py-1 rounded bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200 border border-orange-300 dark:border-orange-800">
+                        {selectedTable.tableNumber}
+                      </span>
+                    ) : (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const t = tables.find((tb) => tb._id === e.target.value);
+                          if (t) setSelectedTable(t);
+                        }}
+                        className="text-sm font-bold bg-white dark:bg-gray-900 border rounded px-2 py-1"
+                      >
+                        <option value="">Select Table...</option>
+                        {tables.map((t) => (
+                          <option key={t._id} value={t._id}>
+                            {t.tableNumber} ({t.status})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {isRound2Mode && (
+                      <span className="text-xs font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 rounded border border-amber-300">
+                        Round {activeOrder?.kotRounds?.length ? activeOrder.kotRounds.length + 1 : 2}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Guest count */}
+                  <div className="flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-gray-500" />
+                    <button
+                      type="button"
+                      onClick={() => setGuestCount((g) => Math.max(1, g - 1))}
+                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5"
+                    >
+                      <MinusCircle className="w-4 h-4" />
+                    </button>
+                    <span className="font-black text-sm min-w-[1.25rem] text-center">{guestCount}</span>
+                    <button
+                      type="button"
+                      onClick={() => setGuestCount((g) => g + 1)}
+                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Items Table Header: ITEMS | CHECK ITEMS | QTY. | PRICE */}
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden flex-1 flex flex-col justify-start min-h-[220px]">
+                  <div className="bg-gray-50 dark:bg-gray-800/80 px-3 py-2 border-b border-gray-200 dark:border-gray-800 grid grid-cols-12 text-xs font-extrabold text-gray-700 dark:text-gray-200 uppercase tracking-wider shrink-0">
+                    <span className="col-span-6">ITEMS</span>
+                    <span className="col-span-2 text-center">CHECK</span>
+                    <span className="col-span-2 text-center">QTY.</span>
+                    <span className="col-span-2 text-right">PRICE</span>
+                  </div>
+
+                  {/* Cart Items List with indented addons (Matches Image 1 & 3) */}
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto max-h-[360px] pr-0.5 flex-1 flex flex-col justify-start items-stretch">
+                    {/* If occupied in Round 2, show previous rounds collapsible */}
+                    {isRound2Mode && activeOrder && (
+                      <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 dark:border-amber-900/40 shrink-0">
+                        <div className="flex items-center justify-between font-bold text-amber-900 dark:text-amber-200">
+                          <span>Previous Rounds: {activeOrder.items?.filter((i) => i.status !== 'cancelled').length} item(s)</span>
+                          <span>{formatCurrency(activeOrder.total)}</span>
+                        </div>
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                          Add new items below for Round {activeOrder.kotRounds?.length ? activeOrder.kotRounds.length + 1 : 2}
+                        </p>
+                      </div>
+                    )}
+
+                    {Object.keys(cart).length === 0 ? (
+                      <div className="py-10 text-center text-gray-400 text-sm font-medium">
+                        No items selected yet. Tap menu items on the left to add.
+                      </div>
+                    ) : (
+                      Object.entries(cart).map(([cartKey, d]) => {
+                        const item = menuItems.find((i) => i._id === d.menuItemId);
+                        if (!item) return null;
+                        const lineTotal = d.unitPrice * d.quantity;
+
+                        return (
+                          <div key={cartKey} className="p-2.5 text-sm space-y-1 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
+                            <div className="grid grid-cols-12 items-start gap-1">
+                              {/* Col: Delete + Name + Indented Addons */}
+                              <div className="col-span-6 flex items-start gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => removeCartEntry(cartKey)}
+                                  className="text-red-500 hover:text-red-700 mt-0.5 p-0.5"
+                                  title="Delete Item"
+                                >
+                                  <X className="w-4 h-4 stroke-[2.5]" />
+                                </button>
+                                <div>
+                                  <p className="text-sm sm:text-base font-bold text-gray-900 dark:text-white leading-tight">
+                                    {item.name}
+                                  </p>
+                                  {d.variant?.name && (
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
+                                      Portion: {d.variant.name}
+                                    </p>
+                                  )}
+                                  {d.selectedAddons && d.selectedAddons.length > 0 && (
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-2 mt-0.5">
+                                      {d.selectedAddons.map((a) => `${a.name}`).join(', ')}
+                                    </p>
+                                  )}
+                                  {d.notes && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400 pl-2 font-medium mt-0.5">
+                                      Note: {d.notes}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Col: Check Items */}
+                              <div className="col-span-2 flex justify-center items-center pt-0.5">
+                                <CheckSquare className="w-4 h-4 text-emerald-600" />
+                              </div>
+
+                              {/* Col: Qty Stepper [-] 1 [+] */}
+                              <div className="col-span-2 flex items-center justify-center gap-1.5 pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartEntryQty(cartKey, -1)}
+                                  className="text-gray-500 hover:text-red-600 p-0.5"
+                                >
+                                  <MinusCircle className="w-4 h-4" />
+                                </button>
+                                <span className="font-extrabold text-sm sm:text-base min-w-[1.25rem] text-center">{d.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartEntryQty(cartKey, 1)}
+                                  className="text-gray-500 hover:text-emerald-600 p-0.5"
+                                >
+                                  <PlusCircle className="w-4 h-4" />
+                                </button>
+                              </div>
+
+                              {/* Col: Price */}
+                              <div className="col-span-2 text-right font-extrabold text-sm sm:text-base text-gray-900 dark:text-white pt-0.5">
+                                {formatCurrency(lineTotal)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Financial Summary */}
+                <div className="space-y-1.5 pt-2.5 border-t border-gray-200 dark:border-gray-800 text-sm">
+                  <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
+                    <span>Subtotal:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">
+                      {formatCurrency(
+                        (isRound2Mode && activeOrder ? activeOrder.subtotal : 0) + cartSummary.subtotal
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
+                    <span>Tax / GST:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">
+                      {formatCurrency(
+                        (isRound2Mode && activeOrder ? activeOrder.taxAmount : 0) + cartSummary.taxAmount
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-base font-bold text-gray-900 dark:text-white pt-1.5 border-t border-gray-200 dark:border-gray-800">
+                    <span>Grand Total:</span>
+                    <span className="text-red-600 dark:text-red-400 text-lg sm:text-xl font-black">
+                      {formatCurrency(
+                        (isRound2Mode && activeOrder ? activeOrder.total : 0) + cartSummary.total
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Payment Chips & It's Paid Checkbox (Matching Image 1 & 3) */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      {[
+                        { id: 'cash', label: 'Cash' },
+                        { id: 'card', label: 'Card' },
+                        { id: 'upi', label: 'Due / UPI' },
+                        { id: 'part', label: 'Part' },
+                      ].map(({ id, label }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setPaymentMethod(id as any)}
+                          className={cn(
+                            'px-2.5 py-1.5 text-xs font-bold rounded-md border transition-colors',
+                            paymentMethod === id
+                              ? 'bg-red-600 text-white border-red-700 shadow-2xs'
+                              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                          )}
+                        >
+                          {label} {paymentMethod === id ? '✓' : ''}
+                        </button>
+                      ))}
+                    </div>
+
+                    <label className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isPaidChecked}
+                        onChange={(e) => setIsPaidChecked(e.target.checked)}
+                        className="rounded text-red-600 focus:ring-red-500 w-4 h-4"
+                      />
+                      <span>It&apos;s Paid</span>
+                    </label>
+                  </div>
+
+                  {/* Petpooja Action Buttons row:
+                      [ Save ] (Red)
+                      [ Save & Print ] (Red)
+                      [ KOT ] (Charcoal dark gray)
+                      [ KOT & Print ] (Charcoal dark gray)
+                      Notice: Save & EBill removed per user instructions!
+                      Rule: "once the kot is sent it should return to table view" */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    {/* [ Save ] */}
+                    <button
+                      type="button"
+                      onClick={() => handleSaveOrder(false)}
+                      disabled={actionLoading}
+                      className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                    >
+                      {submittingAction === 'save' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {submittingAction === 'save' ? 'Saving...' : 'Save'}
+                    </button>
+
+                    {/* [ Save & Print ] */}
+                    <button
+                      type="button"
+                      onClick={() => handleSaveOrder(true)}
+                      disabled={actionLoading}
+                      className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                    >
+                      {submittingAction === 'save_print' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {submittingAction === 'save_print' ? 'Saving & Printing...' : 'Save & Print'}
+                    </button>
+
+                    {/* [ KOT ] (Dark Gray) - Automatically returns to Table View */}
+                    <button
+                      type="button"
+                      onClick={() => handleSendKOT(false)}
+                      disabled={actionLoading || cartSummary.itemCount === 0}
+                      className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                    >
+                      {submittingAction === 'kot' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {submittingAction === 'kot' ? 'Sending KOT...' : 'KOT'}
+                    </button>
+
+                    {/* [ KOT & Print ] (Dark Gray) - Automatically returns to Table View */}
+                    <button
+                      type="button"
+                      onClick={() => handleSendKOT(true)}
+                      disabled={actionLoading || cartSummary.itemCount === 0}
+                      className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                    >
+                      {submittingAction === 'kot_print' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {submittingAction === 'kot_print' ? 'Sending & Printing...' : 'KOT & Print'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
-      </Modal>
+      </div>
 
       {/* ───────────────────────────────────────────────────────── */}
-      {/* Create / Edit Table Modal */}
-      {/* ───────────────────────────────────────────────────────── */}
-      <Modal
-        open={tableModal === 'create' || tableModal === 'edit'}
-        onClose={() => setTableModal(null)}
-        title={tableModal === 'create' ? 'Add New Dining Table' : 'Edit Dining Table'}
-        size="sm"
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="label">Table Number / Name *</label>
-            <input
-              type="text"
-              className="input"
-              value={tableForm.tableNumber}
-              onChange={(e) => setTableForm({ ...tableForm, tableNumber: e.target.value })}
-              placeholder="e.g. Table 01, Patio 2, Bar 1"
-            />
-          </div>
-
-          <div>
-            <label className="label">Initial Status</label>
-            <select
-              className="input"
-              value={tableForm.status}
-              onChange={(e) => setTableForm({ ...tableForm, status: e.target.value as 'available' | 'reserved' })}
-            >
-              <option value="available">Available</option>
-              <option value="reserved">Reserved</option>
-            </select>
-          </div>
-
-          <div className="flex gap-3 pt-3">
-            <button onClick={saveTable} className="btn-primary flex-1">
-              {tableModal === 'create' ? 'Create Table' : 'Update Table'}
-            </button>
-            <button onClick={() => setTableModal(null)} className="btn-secondary">
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ───────────────────────────────────────────────────────── */}
-      {/* Item Customization Pop-Up Modal (Variants & Add-ons) */}
+      {/* VIEW C: ADD-ON & VARIANT CUSTOMIZATION MODAL (Matches Image 4) */}
       {/* ───────────────────────────────────────────────────────── */}
       <Modal
         open={!!customizingItem}
         onClose={() => setCustomizingItem(null)}
-        title={customizingItem ? `Customize: ${customizingItem.name}` : ''}
+        title={customizingItem ? `${customizingItem.name} | ${formatCurrency(customizingItem.price)}` : ''}
         size="md"
       >
         {customizingItem && (() => {
@@ -2327,48 +2260,35 @@ export default function TablesPage() {
           const unitPrice = basePrice + addonsPrice;
           const lineTotal = unitPrice * customizingQty;
 
+          // Filter addons based on search input
+          const filteredAddons = applicableAddons.filter((a) => {
+            if (!addonSearch.trim()) return true;
+            return a.name.toLowerCase().includes(addonSearch.toLowerCase());
+          });
+
           return (
             <div className="space-y-4">
-              {/* Item Overview & Veg / Non-Veg */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-800">
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className={cn(
-                      'w-4 h-4 border-2 flex items-center justify-center rounded-xs shrink-0',
-                      customizingItem.isVeg ? 'border-green-600' : 'border-red-600'
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'w-2 h-2 rounded-full',
-                        customizingItem.isVeg ? 'bg-green-600' : 'bg-red-600'
-                      )}
-                    />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">
-                      {customizingItem.name}
-                    </h4>
-                    {customizingItem.description && (
-                      <p className="text-xs text-gray-500 line-clamp-1">{customizingItem.description}</p>
-                    )}
-                  </div>
-                </div>
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                  {hasVariants ? 'Select Portion' : formatCurrency(customizingItem.price)}
-                </span>
+              {/* Search addon item input matching Image 4 */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={addonSearch}
+                  onChange={(e) => setAddonSearch(e.target.value)}
+                  placeholder="Search addon item..."
+                  className="input pl-8 py-1 text-xs h-8 bg-gray-50 dark:bg-gray-800/60"
+                />
               </div>
 
-              {/* Section 1: Variants (Portion Sizes) */}
+              {/* Portions / Variants Section (if applicable) */}
               {hasVariants && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                      <span>Portion / Variant</span>
-                      <span className="text-[10px] text-brand-600 font-semibold bg-brand-50 dark:bg-brand-950/40 px-1.5 py-0.5 rounded">Required</span>
-                    </label>
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                      Portion / Variant (Required)
+                    </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {customizingItem.variants!.map((variant, idx) => {
                       const isSelected = selectedVariant?.name === variant.name;
                       return (
@@ -2377,23 +2297,13 @@ export default function TablesPage() {
                           type="button"
                           onClick={() => setSelectedVariant(variant)}
                           className={cn(
-                            'flex items-center justify-between p-3 rounded-xl border-2 text-left transition-all',
+                            'flex items-center justify-between p-2.5 rounded-lg border text-left transition-all',
                             isSelected
-                              ? 'border-brand-500 bg-brand-50/60 dark:bg-brand-950/30 text-brand-900 dark:text-brand-200 shadow-xs'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
+                              ? 'border-red-600 bg-red-50/50 dark:bg-red-950/30 text-red-900 dark:text-red-200'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-700 dark:text-gray-300'
                           )}
                         >
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={cn(
-                                'w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors',
-                                isSelected ? 'border-brand-600 bg-brand-600' : 'border-gray-300 dark:border-gray-600'
-                              )}
-                            >
-                              {isSelected && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                            </div>
-                            <span className="text-xs font-bold">{variant.name}</span>
-                          </div>
+                          <span className="text-xs font-bold">{variant.name}</span>
                           <span className="text-xs font-black text-gray-900 dark:text-white">
                             {formatCurrency(variant.price)}
                           </span>
@@ -2404,26 +2314,31 @@ export default function TablesPage() {
                 </div>
               )}
 
-              {/* Section 2: Add-ons */}
+              {/* Addons Grid with Veg / Non-Veg Left Stripes (Image 4) */}
               {applicableAddons.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                      <span>Add-ons / Extras</span>
-                      <span className="text-[10px] text-gray-400 font-normal">Optional</span>
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-gray-800 dark:text-gray-200">
+                        Add-ons / Extras
+                      </span>
+                      <span className="text-[10px] font-bold text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                        Min: 0, Max: 5
+                      </span>
+                    </div>
                     {selectedAddonIds.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setSelectedAddonIds([])}
-                        className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                        className="text-[11px] text-gray-400 hover:text-red-500"
                       >
-                        Clear Add-ons
+                        Clear
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                    {applicableAddons.map((addon) => {
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
+                    {filteredAddons.map((addon) => {
                       const isSelected = selectedAddonIds.includes(addon._id);
                       return (
                         <button
@@ -2435,34 +2350,25 @@ export default function TablesPage() {
                             );
                           }}
                           className={cn(
-                            'flex items-center justify-between p-2.5 rounded-xl border text-left transition-all',
+                            'p-2.5 rounded-lg border text-left transition-all flex flex-col justify-between min-h-[64px]',
+                            // Veg / Non-veg left border stripe
+                            addon.isVeg
+                              ? 'border-l-4 border-l-emerald-600'
+                              : 'border-l-4 border-l-red-600',
                             isSelected
-                              ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/20 text-brand-900 dark:text-brand-200'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
+                              ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50/20 dark:bg-blue-950/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                           )}
                         >
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={cn(
-                                'w-4 h-4 rounded border flex items-center justify-center transition-colors',
-                                isSelected ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300 dark:border-gray-600'
-                              )}
-                            >
-                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-medium">{addon.name}</span>
-                              <div
-                                className={cn(
-                                  'w-2.5 h-2.5 border flex items-center justify-center rounded-2xs shrink-0',
-                                  addon.isVeg ? 'border-green-600' : 'border-red-600'
-                                )}
-                              >
-                                <div className={cn('w-1 h-1 rounded-full', addon.isVeg ? 'bg-green-600' : 'bg-red-600')} />
-                              </div>
-                            </div>
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="text-xs font-bold text-gray-900 dark:text-white leading-tight">
+                              {addon.name}
+                            </span>
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 text-blue-600 stroke-[3] shrink-0" />
+                            )}
                           </div>
-                          <span className="text-xs font-bold text-gray-900 dark:text-white">
+                          <span className="text-xs font-black text-gray-700 dark:text-gray-300 mt-1">
                             +{formatCurrency(addon.price)}
                           </span>
                         </button>
@@ -2472,7 +2378,7 @@ export default function TablesPage() {
                 </div>
               )}
 
-              {/* Section 3: Kitchen Notes */}
+              {/* Kitchen Instruction */}
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-1">
                   Kitchen Instruction / Special Request
@@ -2481,16 +2387,15 @@ export default function TablesPage() {
                   type="text"
                   value={customizingNotes}
                   onChange={(e) => setCustomizingNotes(e.target.value)}
-                  placeholder="e.g. Extra spicy, no onion, separate dressing..."
-                  className="input text-xs py-2 w-full"
+                  placeholder="e.g. Extra crispy, no onion..."
+                  className="input text-xs py-1.5 w-full"
                 />
               </div>
 
-              {/* Section 4: Quantity & Pricing Summary */}
-              <div className="pt-3 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
-                {/* Quantity Stepper */}
+              {/* Quantity Stepper & Price Summary */}
+              <div className="pt-2 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-gray-500">Qty:</span>
+                  <span className="text-xs font-bold text-gray-500">Qty:</span>
                   <div className="flex items-center border border-gray-200 dark:border-gray-700 rounded-lg p-0.5 bg-white dark:bg-gray-900">
                     <button
                       type="button"
@@ -2498,38 +2403,32 @@ export default function TablesPage() {
                       disabled={customizingQty <= 1}
                       className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 rounded"
                     >
-                      <MinusCircle className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                      <MinusCircle className="w-3.5 h-3.5 text-gray-600" />
                     </button>
-                    <span className="w-8 text-center text-xs font-bold text-gray-900 dark:text-white">
-                      {customizingQty}
-                    </span>
+                    <span className="w-7 text-center text-xs font-bold">{customizingQty}</span>
                     <button
                       type="button"
                       onClick={() => setCustomizingQty((q) => q + 1)}
                       className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                     >
-                      <PlusCircle className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                      <PlusCircle className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
-                {/* Price Calculation Display */}
                 <div className="text-right">
-                  <div className="text-[11px] text-gray-500">
-                    {formatCurrency(unitPrice)} × {customizingQty}
-                  </div>
-                  <div className="text-base font-black text-brand-600">
+                  <span className="text-base font-black text-red-600">
                     {formatCurrency(lineTotal)}
-                  </div>
+                  </span>
                 </div>
               </div>
 
-              {/* Modal Actions */}
+              {/* Modal Actions matching Image 4: [Cancel] & [Save] (Red) */}
               <div className="flex gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={() => setCustomizingItem(null)}
-                  className="btn-secondary flex-1 text-xs py-2.5"
+                  className="btn-secondary flex-1 text-xs py-2"
                 >
                   Cancel
                 </button>
@@ -2537,15 +2436,730 @@ export default function TablesPage() {
                   type="button"
                   onClick={handleConfirmCustomization}
                   disabled={hasVariants && !selectedVariant}
-                  className="btn-primary flex-2 text-xs py-2.5 font-bold shadow-md flex items-center justify-center gap-1.5"
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-2 px-6 rounded-lg shadow-sm flex-2 text-center"
                 >
-                  <Plus className="w-4 h-4" />
-                  Add to Order • {formatCurrency(lineTotal)}
+                  Save • {formatCurrency(lineTotal)}
                 </button>
               </div>
             </div>
           );
         })()}
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* ORDER DETAILS & SETTLEMENT MODAL (Opened via Eye Icon)    */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={showOrderDetailsModal}
+        onClose={() => setShowOrderDetailsModal(false)}
+        title={selectedTable ? `Table ${selectedTable.tableNumber} — Order Details & Settlement` : 'Order Details'}
+        size="lg"
+      >
+        {selectedTable && (
+          <div>
+            {orderModalLoading ? (
+              <div className="py-20 flex justify-center">
+                <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : !activeOrder ? (
+              <div className="py-12 text-center text-gray-400 text-xs">
+                No active order found for this table.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Order Meta Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-gray-50 dark:bg-gray-800/40 rounded-lg border text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-900">
+                      Status: {activeOrder.status}
+                    </span>
+                    <span className="text-gray-500">
+                      Token #{activeOrder.orderNumber || activeOrder._id.slice(-4)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (isPrintStation || printMode === 'test') {
+                          handlePrintCustomerBill();
+                        } else {
+                          try {
+                            await ordersApi.queueBillPrint(activeOrder._id);
+                            setNoticeMessage(`Customer bill for Table ${selectedTable.tableNumber} sent to Counter Printer 🖨️`);
+                            setTimeout(() => setNoticeMessage(null), 4000);
+                          } catch (err) {
+                            handlePrintCustomerBill();
+                          }
+                        }
+                      }}
+                      className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
+                    >
+                      <Receipt className="w-3.5 h-3.5" />
+                      {isPrintStation ? 'Print Bill' : 'Send Bill to Printer'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowOrderDetailsModal(false);
+                        handleOpenMoveModal(selectedTable);
+                      }}
+                      className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 font-semibold"
+                      title="Move KOT / Transfer Table"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      Move Table
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowOrderDetailsModal(false);
+                        handleOccupiedTableBodyClick(selectedTable);
+                      }}
+                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-3 rounded-lg flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      + Add Round (KOT)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Ordered Items Table */}
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-gray-50 dark:bg-gray-800/60 border-b">
+                      <tr>
+                        <th className="table-th">Item</th>
+                        <th className="table-th">Qty</th>
+                        <th className="table-th">Price</th>
+                        <th className="table-th">Line Total</th>
+                        <th className="table-th">Status</th>
+                        <th className="table-th text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {activeOrder.items?.map((item: any) => {
+                        const isCancelled = item.status === 'cancelled';
+                        const lineTotal = item.price * item.quantity;
+                        return (
+                          <tr key={item._id} className={cn(isCancelled && 'opacity-40 line-through')}>
+                            <td className="table-td font-medium">
+                              {item.name}
+                              {item.notes && <p className="text-[10px] text-amber-600">Note: {item.notes}</p>}
+                            </td>
+                            <td className="table-td font-bold">{item.quantity}</td>
+                            <td className="table-td text-gray-500">{formatCurrency(item.price)}</td>
+                            <td className="table-td font-black">{formatCurrency(lineTotal)}</td>
+                            <td className="table-td">
+                              <span className="text-[10px] uppercase font-bold">{item.status}</span>
+                            </td>
+                            <td className="table-td text-right">
+                              {!isCancelled && activeOrder.status !== 'paid' && canManageOrders && (
+                                <button
+                                  onClick={() => handleCancelItem(item._id, item.name)}
+                                  className="text-gray-400 hover:text-red-500 p-1"
+                                  title="Cancel Item"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Financial Summary & Discount Box */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/30 p-3 rounded-lg border text-xs">
+                  <div>
+                    <label className="label text-xs font-semibold">Apply Discount</label>
+                    <div className="flex gap-2 mt-1">
+                      <select
+                        value={discountType}
+                        onChange={(e) => setDiscountType(e.target.value as any)}
+                        className="input text-xs w-28 h-8 py-0"
+                      >
+                        <option value="flat">Flat (₹)</option>
+                        <option value="percentage">Percent (%)</option>
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInput(Math.max(0, +e.target.value))}
+                        placeholder="0.00"
+                        className="input text-xs flex-1 h-8 py-0"
+                      />
+                      <button onClick={handleApplyDiscount} className="btn-secondary text-xs px-2.5 h-8">
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-right space-y-1">
+                    <div className="flex justify-between text-gray-500">
+                      <span>Subtotal:</span>
+                      <span>{formatCurrency(activeOrder.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-500">
+                      <span>Tax / GST:</span>
+                      <span>{formatCurrency(activeOrder.taxAmount)}</span>
+                    </div>
+                    {activeOrder.discount > 0 && (
+                      <div className="flex justify-between text-emerald-600 font-semibold">
+                        <span>Discount:</span>
+                        <span>−{formatCurrency(activeOrder.discount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm font-black text-gray-900 dark:text-white pt-1 border-t">
+                      <span>Total:</span>
+                      <span className="text-red-600">{formatCurrency(activeOrder.total)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Settlement & Payment Collection */}
+                <div className="space-y-3 pt-2 border-t">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      {[
+                        { id: 'cash', label: 'Cash' },
+                        { id: 'upi', label: 'UPI' },
+                        { id: 'card', label: 'Card' },
+                        { id: 'other', label: 'Other' },
+                        { id: 'part', label: 'Part Payment' },
+                      ].map(({ id, label }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setPaymentMethod(id as any)}
+                          className={cn(
+                            'px-2.5 py-1 text-xs font-bold rounded-md border transition-colors',
+                            paymentMethod === id
+                              ? 'bg-red-600 text-white border-red-700'
+                              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={handleCollectPayment}
+                      disabled={actionLoading || (paymentMethod === 'part' && totalPartAllocated <= 0)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-5 rounded-lg shadow-sm"
+                    >
+                      {actionLoading
+                        ? 'Settling...'
+                        : paymentMethod === 'part'
+                        ? `Collect Part: ${formatCurrency(totalPartAllocated)}`
+                        : `Collect Payment: ${formatCurrency(activeOrder.total)}`}
+                    </button>
+                  </div>
+
+                  {/* Part Payment Split breakdown */}
+                  {paymentMethod === 'part' && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-500">Cash</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={partCash}
+                          onChange={(e) => setPartCash(e.target.value)}
+                          placeholder="0.00"
+                          className="input h-8 text-xs py-0"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-500">UPI</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={partUpi}
+                          onChange={(e) => setPartUpi(e.target.value)}
+                          placeholder="0.00"
+                          className="input h-8 text-xs py-0"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-500">Card</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={partCard}
+                          onChange={(e) => setPartCard(e.target.value)}
+                          placeholder="0.00"
+                          className="input h-8 text-xs py-0"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-500">Other</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={partOther}
+                          onChange={(e) => setPartOther(e.target.value)}
+                          placeholder="0.00"
+                          className="input h-8 text-xs py-0"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cancel Order */}
+                  {activeOrder.status !== 'paid' && canManageOrders && (
+                    <div className="pt-2 flex justify-between items-center">
+                      <button
+                        onClick={handleCancelOrder}
+                        className="text-xs text-red-600 hover:underline font-semibold"
+                      >
+                        Cancel Entire Order &amp; Free Table
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* TABLE CRUD MODAL (Create / Edit Table for Admin)          */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={tableModal === 'create' || tableModal === 'edit'}
+        onClose={() => setTableModal(null)}
+        title={tableModal === 'create' ? 'Add Dining Table' : 'Edit Dining Table'}
+        size="sm"
+      >
+        <div className="space-y-4 text-xs">
+          <div>
+            <label className="label">Table Number / Name *</label>
+            <input
+              type="text"
+              className="input"
+              value={tableForm.tableNumber}
+              onChange={(e) => setTableForm({ ...tableForm, tableNumber: e.target.value })}
+              placeholder="e.g. In 1, Out 4, Pickup 1, Patio 2"
+            />
+          </div>
+
+          <div>
+            <label className="label">Initial Status</label>
+            <select
+              className="input"
+              value={tableForm.status}
+              onChange={(e) => setTableForm({ ...tableForm, status: e.target.value as 'available' | 'reserved' })}
+            >
+              <option value="available">Available (Blank Table)</option>
+              <option value="reserved">Reserved</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={saveTable}
+              disabled={tableSaving}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg flex-1 disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              {tableSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {tableSaving
+                ? (tableModal === 'create' ? 'Creating Table...' : 'Updating Table...')
+                : (tableModal === 'create' ? 'Create Table' : 'Update Table')}
+            </button>
+            <button onClick={() => setTableModal(null)} disabled={tableSaving} className="btn-secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* QUICK BILL / KOT LOOKUP MODAL                             */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={showLookupModal !== null}
+        onClose={() => setShowLookupModal(null)}
+        title={showLookupModal === 'bill' ? 'Quick Bill Lookup' : 'Quick KOT Lookup'}
+        size="sm"
+      >
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="label">Enter {showLookupModal === 'bill' ? 'Bill Number' : 'KOT Number'}</label>
+            <input
+              type="text"
+              value={lookupQuery}
+              onChange={(e) => setLookupQuery(e.target.value)}
+              placeholder="e.g. 1042"
+              className="input"
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (!lookupQuery.trim()) {
+                toast.error('Please enter a number to search');
+                return;
+              }
+              toast.info(`Searching for ${showLookupModal?.toUpperCase()} #${lookupQuery}...`);
+              setShowLookupModal(null);
+            }}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg w-full"
+          >
+            Find Order
+          </button>
+        </div>
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* MOVE KOT / ITEMS MODAL (Matching Petpooja Screenshots)    */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={moveModal.open}
+        onClose={() => setMoveModal({ open: false, sourceTable: null, activeOrder: null })}
+        title={`Move KOT/Items - ${moveModal.sourceTable?.tableNumber || ''}`}
+        size="xl"
+      >
+        <div className="space-y-4 text-xs">
+          {/* Top Tabs Bar: Table Wise | KOT Wise | Item Wise (Matching Image 1 & 2) */}
+          <div className="flex border-b border-gray-200 dark:border-gray-700 -mt-2 -mx-3.5 sm:-mx-6 px-3.5 sm:px-6">
+            {[
+              { id: 'table', label: 'Table Wise' },
+              { id: 'kot', label: 'KOT Wise' },
+              { id: 'item', label: 'Item Wise' },
+            ].map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setMoveTab(id as any)}
+                className={cn(
+                  'px-6 py-2.5 text-xs sm:text-sm font-bold border-b-2 transition-colors',
+                  moveTab === id
+                    ? 'bg-red-50 dark:bg-red-950/40 text-red-600 border-red-600'
+                    : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* 1. TABLE WISE TAB */}
+          {moveTab === 'table' && (
+            <div className="space-y-4 pt-1 max-h-[55vh] overflow-y-auto pr-1">
+              {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                const sectionTables = tables.filter((t) => {
+                  if (t._id === moveModal.sourceTable?._id) return false;
+                  return getTableSection(t.tableNumber) === sectionName;
+                });
+                if (sectionTables.length === 0) return null;
+
+                return (
+                  <div key={sectionName} className="space-y-2">
+                    <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                      {sectionName}
+                    </h4>
+                    <div className="flex flex-wrap gap-2.5">
+                      {sectionTables.map((t) => {
+                        const isSelected = selectedTargetTableId === t._id;
+                        const isOccupied = t.status === 'occupied' || !!t.activeOrder;
+                        return (
+                          <button
+                            key={t._id}
+                            type="button"
+                            onClick={() => setSelectedTargetTableId(t._id)}
+                            className={cn(
+                              'px-3.5 py-2 rounded text-xs font-semibold transition-all select-none',
+                              isSelected
+                                ? 'border-2 border-dashed border-red-600 text-red-600 font-bold bg-red-50/60 dark:bg-red-950/40 shadow-xs'
+                                : 'border border-dashed border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            )}
+                          >
+                            {t.tableNumber}
+                            {isOccupied && (
+                              <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 font-normal">
+                                (Merge)
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 2. KOT WISE TAB */}
+          {moveTab === 'kot' && (
+            <div className="space-y-4 pt-1 max-h-[55vh] overflow-y-auto pr-1">
+              <div>
+                <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Select KOT Round(s) to Move
+                </h4>
+                {(!moveModal.activeOrder?.kotRounds || moveModal.activeOrder.kotRounds.length === 0) ? (
+                  <div className="p-3 text-center text-gray-400 text-xs border rounded-lg">
+                    No KOT rounds recorded for this order yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {moveModal.activeOrder.kotRounds.map((round) => {
+                      const isChecked = selectedKotRounds.includes(round.roundNumber);
+                      return (
+                        <label
+                          key={round.roundNumber}
+                          className={cn(
+                            'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors text-xs',
+                            isChecked
+                              ? 'border-red-500 bg-red-50/40 dark:bg-red-950/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedKotRounds([...selectedKotRounds, round.roundNumber]);
+                              } else {
+                                setSelectedKotRounds(selectedKotRounds.filter((rn) => rn !== round.roundNumber));
+                              }
+                            }}
+                            className="mt-0.5 rounded text-red-600 focus:ring-red-500"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-gray-900 dark:text-white">
+                                Round #{round.roundNumber} {round.roundTag}
+                              </span>
+                              <span className="text-[10px] text-gray-400">
+                                {round.createdAt ? new Date(round.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+                              {round.items?.map((it, idx) => (
+                                <span key={idx} className="bg-white dark:bg-gray-800 border px-1.5 py-0.5 rounded">
+                                  {it.quantity}x {it.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Select Destination Table
+                </h4>
+                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                  const sectionTables = tables.filter((t) => {
+                    if (t._id === moveModal.sourceTable?._id) return false;
+                    return getTableSection(t.tableNumber) === sectionName;
+                  });
+                  if (sectionTables.length === 0) return null;
+
+                  return (
+                    <div key={sectionName} className="space-y-1.5 mb-3">
+                      <span className="text-[11px] font-bold text-gray-600 dark:text-gray-400">
+                        {sectionName}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {sectionTables.map((t) => {
+                          const isSelected = selectedTargetTableId === t._id;
+                          const isOccupied = t.status === 'occupied' || !!t.activeOrder;
+                          return (
+                            <button
+                              key={t._id}
+                              type="button"
+                              onClick={() => setSelectedTargetTableId(t._id)}
+                              className={cn(
+                                'px-3 py-1.5 rounded text-xs font-semibold transition-all select-none',
+                                isSelected
+                                  ? 'border-2 border-dashed border-red-600 text-red-600 font-bold bg-red-50/60 dark:bg-red-950/40 shadow-xs'
+                                  : 'border border-dashed border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                              )}
+                            >
+                              {t.tableNumber}
+                              {isOccupied && (
+                                <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 font-normal">
+                                  (Merge)
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 3. ITEM WISE TAB */}
+          {moveTab === 'item' && (
+            <div className="space-y-4 pt-1 max-h-[55vh] overflow-y-auto pr-1">
+              <div>
+                <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Select Items &amp; Quantities to Move
+                </h4>
+                <div className="space-y-2">
+                  {(moveModal.activeOrder?.items || [])
+                    .filter((it) => it.status !== 'cancelled')
+                    .map((item) => {
+                      const currentTransferQty = itemTransferQuantities[item._id || ''] || 0;
+                      return (
+                        <div
+                          key={item._id}
+                          className={cn(
+                            'flex items-center justify-between p-2.5 rounded-lg border text-xs',
+                            currentTransferQty > 0
+                              ? 'border-red-400 bg-red-50/40 dark:bg-red-950/20'
+                              : 'border-gray-200 dark:border-gray-700'
+                          )}
+                        >
+                          <div>
+                            <div className="font-bold text-gray-900 dark:text-white">
+                              {item.name}
+                              {item.variant?.name && <span className="ml-1 text-[11px] text-gray-500">({item.variant.name})</span>}
+                            </div>
+                            <div className="text-[10px] text-gray-400">
+                              Original Qty: {item.quantity} · Price: {formatCurrency(item.price)}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">Move:</span>
+                            <div className="flex items-center border rounded-md bg-white dark:bg-gray-800">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!item._id) return;
+                                  setItemTransferQuantities({
+                                    ...itemTransferQuantities,
+                                    [item._id]: Math.max(0, currentTransferQty - 1),
+                                  });
+                                }}
+                                className="p-1 text-gray-500 hover:text-black dark:hover:text-white"
+                              >
+                                <MinusCircle className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="w-6 text-center font-bold text-xs">{currentTransferQty}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!item._id) return;
+                                  setItemTransferQuantities({
+                                    ...itemTransferQuantities,
+                                    [item._id]: Math.min(item.quantity, currentTransferQty + 1),
+                                  });
+                                }}
+                                className="p-1 text-gray-500 hover:text-black dark:hover:text-white"
+                              >
+                                <PlusCircle className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Select Destination Table
+                </h4>
+                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                  const sectionTables = tables.filter((t) => {
+                    if (t._id === moveModal.sourceTable?._id) return false;
+                    return getTableSection(t.tableNumber) === sectionName;
+                  });
+                  if (sectionTables.length === 0) return null;
+
+                  return (
+                    <div key={sectionName} className="space-y-1.5 mb-3">
+                      <span className="text-[11px] font-bold text-gray-600 dark:text-gray-400">
+                        {sectionName}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {sectionTables.map((t) => {
+                          const isSelected = selectedTargetTableId === t._id;
+                          const isOccupied = t.status === 'occupied' || !!t.activeOrder;
+                          return (
+                            <button
+                              key={t._id}
+                              type="button"
+                              onClick={() => setSelectedTargetTableId(t._id)}
+                              className={cn(
+                                'px-3 py-1.5 rounded text-xs font-semibold transition-all select-none',
+                                isSelected
+                                  ? 'border-2 border-dashed border-red-600 text-red-600 font-bold bg-red-50/60 dark:bg-red-950/40 shadow-xs'
+                                  : 'border border-dashed border-gray-400 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                              )}
+                            >
+                              {t.tableNumber}
+                              {isOccupied && (
+                                <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 font-normal">
+                                  (Merge)
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Footer Bar: Table No. Input + Cancel & Move Buttons (Matching Image 2) */}
+          <div className="pt-3 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Table No.</span>
+              <input
+                type="text"
+                value={tables.find((t) => t._id === selectedTargetTableId)?.tableNumber || ''}
+                onChange={(e) => {
+                  const typed = e.target.value;
+                  const match = tables.find(
+                    (t) => t.tableNumber.toLowerCase() === typed.toLowerCase().trim()
+                  );
+                  if (match && match._id !== moveModal.sourceTable?._id) {
+                    setSelectedTargetTableId(match._id);
+                  }
+                }}
+                placeholder="Select a table"
+                className="input h-8 w-32 sm:w-40 text-xs font-bold bg-white dark:bg-gray-800"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMoveModal({ open: false, sourceTable: null, activeOrder: null })}
+                className="px-5 py-2 text-xs font-semibold rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!selectedTargetTableId || moveLoading}
+                onClick={handleExecuteMove}
+                className="px-6 py-2 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm disabled:opacity-50 transition-colors"
+              >
+                {moveLoading ? 'Moving...' : 'Move'}
+              </button>
+            </div>
+          </div>
+        </div>
       </Modal>
     </AppLayout>
   );

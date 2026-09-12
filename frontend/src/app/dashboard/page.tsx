@@ -12,7 +12,7 @@ import {
 
 const COLORS = ['#e26411', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-const CACHE_KEY = 'peyala_dashboard_cache_v1';
+const CACHE_KEY = 'peyala_dashboard_cache_v2';
 
 function readCache() {
   try {
@@ -42,10 +42,27 @@ export default function DashboardPage() {
   const fetchFresh = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const r = await dashboardApi.summary();
-      setData(r.data);
-      writeCache(r.data);
-      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      const [r, noteRes] = await Promise.allSettled([
+        dashboardApi.summary(),
+        ownerNoteApi.get(),
+      ]);
+
+      let noteText = '';
+      if (noteRes.status === 'fulfilled' && noteRes.value.data?.note !== undefined) {
+        noteText = noteRes.value.data.note || '';
+        setOwnerNote(noteText);
+      }
+
+      if (r.status === 'fulfilled') {
+        const d = r.value.data;
+        if (!noteText && d.ownerNote) {
+          noteText = d.ownerNote;
+          setOwnerNote(noteText);
+        }
+        setData(d);
+        writeCache({ ...d, ownerNote: noteText });
+        setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     } finally {
@@ -55,19 +72,28 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    // 1. Always fetch live owner note so any updates in settings appear immediately
+    ownerNoteApi.get().then(r => {
+      const note = r.data.note || '';
+      setOwnerNote(note);
+    }).catch(() => {});
+
+    // 2. Read local dashboard cache
     const cached = readCache();
     if (cached?.data) {
       setData(cached.data);
+      if (cached.data.ownerNote) {
+        setOwnerNote(cached.data.ownerNote);
+      }
       if (cached.savedAt) {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setLoading(false);
-      // Only fetch upon manually clicking refresh; otherwise only show browser storage data
       return;
     }
-    // Only hit server on initial load if no cache exists
+
+    // 3. Only hit server on initial load if no cache exists
     fetchFresh();
-    ownerNoteApi.get().then(r => setOwnerNote(r.data.note || '')).catch(() => {});
   }, []);
 
   if (loading) return (
