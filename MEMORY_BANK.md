@@ -25,7 +25,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 ### Backend
 - **Framework**: Node.js & Express.js (`backend/src/server.js`).
 - **Database**: MongoDB via Mongoose (`backend/src/config/db.js`).
-- **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration) and `managerOrAdmin` (for operational POS orders, KOT rounds, billing, discounts, settlements, and table status updates) in `backend/src/middleware/auth.js`.
+- **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration), `managerOrAdmin` (for table metadata and menu add-on configurations), and `staffOrAdmin` (granting staff, manager, and admin users operational access for taking orders, KOT rounds, billing, printing, discounts, and payment settlements) in `backend/src/middleware/auth.js`.
 - **Timezone Standardization**: All daily consolidation and reporting logic operates strictly under Indian Standard Time (`Asia/Kolkata`, UTC+05:30) via `backend/src/utils/date.js` (`getIstDayRange()`).
 
 ### Frontend
@@ -47,13 +47,16 @@ Peyala v8 is a production-grade restaurant operations and management system buil
        - `Blank Table`: Grey dashed border (`border-dashed border-gray-400`). Tapping opens POS Order Screen for Round 1.
        - `Running Table`: Soft blue (`border-blue-400 bg-blue-50/90 text-blue-950`).
        - `Running KOT Table`: Soft yellow (`border-amber-400 bg-amber-100/90 text-amber-950`).
-       - `Printed Table` (Billed): Soft green (`border-emerald-400 bg-emerald-50 text-emerald-950`).
-       - `Paid Table`: Soft orange (`border-orange-400 bg-orange-50 text-orange-950`).
-     - **Dual-Action Table Card Interaction**:
-       - `Quick Print Bill Icon (<Printer />)`: Directly prints customer bill / KOT without opening order taker.
-       - `View Items (<Eye />)`: Opens full order details modal (status tracking, item cancellation, discount engine, bill finalization, and payment settlement).
-       - `Card Body Click`: Clicking the body of an occupied table immediately switches to the POS Order Taking Screen in **Round 2 / Add Items mode**, ready to select more items for the table!
-     - **Live KOT Elapsed Minutes Indicator**: Live badge displaying minutes passed since latest KOT creation (`<Clock /> {kotMins} Min`), auto-updating every 30 seconds.
+        - `Bill Given Table` (Billed / Printed): Distinct emerald green (`border-2 border-emerald-500 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-400/40`) with pulsing `Bill Given` pill, indicating bill has been delivered to customer and table is awaiting payment collection.
+        - `Paid Table`: Soft orange (`border-orange-400 bg-orange-50 text-orange-950`).
+      - **Context-Aware Table Card Interaction**:
+        - `Card Body Click (Running Table)`: Clicking the body of an occupied table in blue/yellow state opens POS Order Taking in **Round 2 / Add Items mode**.
+        - `Card Body Click (Bill Given / Green Table)`: Clicking the body of a green table directly opens the **Payment Collection & Settlement Dialog**!
+        - `Quick Settle Button ([ 💵 Settle ])`: Dedicated button on green table cards to directly launch payment collection.
+        - `Quick Print Bill Icon (<Printer />)`: Directly prints customer bill on counter printer or sends to print queue from mobile.
+        - `Move Table (<ArrowRightLeft />)`: Opens Petpooja-style table transfer / KOT move modal.
+        - `View Items (<Eye />)`: Opens full order details modal (status tracking, item cancellation, discount engine, bill finalization, and payment settlement).
+      - **Live KOT Elapsed Minutes Indicator**: Live badge displaying minutes passed since latest KOT creation (`<Clock /> {kotMins} Min`), auto-updating every 30 seconds.
    - **View B: Live POS Order Taking Screen (3-Column Layout)**:
      - **Column 1 (Category Rail)**: Fixed vertical list of categories with active crimson red highlight (`border-l-4 border-l-red-600 bg-red-50 text-red-600 font-bold`).
      - **Column 2 (Item Catalog & Search)**: Real-time search bar + item cards grid with **Veg / Non-Veg Left Edge Stripes** (emerald green for veg, red for non-veg), price tags, and blue active ring when present in cart.
@@ -65,20 +68,29 @@ Peyala v8 is a production-grade restaurant operations and management system buil
        - Payment mode chips: `[ Cash ✓ ]`, `[ Card ✓ ]`, `[ Due / UPI ✓ ]`, `[ Part Payment ]` with `It's Paid` checkbox.
        - Petpooja Action buttons: `[ Save ]` (Red), `[ Save & Print ]` (Red), `[ KOT ]` (Charcoal dark gray), `[ KOT & Print ]` (Charcoal dark gray).
        - **Auto-Return Workflow**: As soon as a KOT is dispatched (`[ KOT ]` or `[ KOT & Print ]`), the system sends the ticket to the kitchen, notifies the print station, and **automatically returns to Table View**!
-   - **View C: Add-on & Variant Customization Modal**:
+     - **Mobile POS Zero-Scroll Cart Architecture**:
+       - **Sticky Floating Bottom Bar (`lg:hidden`)**: Shows real-time item count, table badge, live total, and `[ Review & KOT → ]` action button.
+       - **Instant Feedback Pill**: Floating pill `✓ Added {Item} to Cart` confirms every addition without scrolling.
+       - **Slide-Up Cart Drawer Sheet (`lg:hidden`)**: Opens full cart review modal with modifier breakdown, steppers, and direct `[ KOT ]` buttons.
+       - **Top Segmented Switcher**: Quick toggle between Menu Catalog and Cart review.
+   - **View C: Kitchen Display System (KDS) (`/kds`)**:
+     - **Prep Next Station**: Aggregates pending items across all tables with batch quantities, oldest wait times, and batch completion.
+     - **KOT Tickets Queue**: FIFO ticket cards with timers, checklist, and individual/order bump actions.
+     - **Fulfilled History**: Recent completed tickets with 1-tap recall.
+     - **Web Audio Chime**: Dual-tone synthesized chime on incoming KOTs.
+   - **View D: Add-on & Variant Customization Modal**:
      - Modal title with item name and unit price + close `(X)`.
      - Real-time `Search addon item` input.
      - Portions/Variants selection (Required).
      - Grouped Add-ons grid with limit badges (`[ Min: 0, Max: 5 ]`) and veg/non-veg indicator stripes.
      - Kitchen instruction / special request input.
      - Quantity stepper and `[ Cancel ]` / `[ Save ]` (Red) buttons.
-2. **Order Lifecycle**:
-   - `open`: Initial order placed, Round 1 KOT dispatched.
-   - Additional rounds can be added at any time via card body click or `+ Add KOT Round`. Each add-on dispatches an incremental KOT ticket (`[ROUND X - ADD-ON]`) without re-printing earlier rounds.
-   - Item statuses transition: `pending` → `preparing` → `served` (or `cancelled` with reason note).
-   - `billed`: Finalized bill printed for guest. Table card becomes green (Printed Table).
-   - `paid`: Payment collected (Cash, UPI, Card, Other, or Part Payment), table automatically freed back to `available` (Blank Table).
-   - `cancelled`: Order aborted, table freed.
+2. **5-Stage Restaurant POS Order Lifecycle (With Non-Blocking Stage 3)**:
+   - **Stage 1: Taking Order (`available`)**: Blank table (grey dashed). Waiter selects table and enters items/variants/add-ons on the POS order screen.
+   - **Stage 2: Sending KOT (`open` / `preparing`)**: Staff dispatches KOT round (`[ KOT ]` or `[ KOT & Print ]`). Table turns **Yellow** (`Running KOT`) with `KOT Active` status pill and elapsed timer. Food is being cooked in the kitchen. Table card displays **both** an optional `[ 🍽️ Served ]` button and a direct `[ 🖨️ Bill ]` button.
+   - **Stage 3: Food Served (`served` — Optional & Non-Blocking)**: When dishes are delivered to guests, staff can tap `[ 🍽️ Served ]` on table card or `[ Food Served ]` in order details. Table turns **Blue** (`Running Table / Food Served`). Clicking card body allows Round 2 add-ons (reverting to Yellow until new round is served). Table card displays quick `[ 🖨️ Bill ]` button. **Skipping Allowed**: If staff forget or bypass marking food served, they can jump directly to Stage 4 (billing) or Stage 5 (payment) with zero interruption; backend automatically marks `foodServedAt` and updates items to `served`.
+   - **Stage 4: Generating Bill (`billed`)**: Staff prints or queues customer bill. Table turns **Green** (`Bill Given`) with pulsing status pill. Clicking card body or quick `[ 💵 Settle ]` button directly opens payment collection.
+   - **Stage 5: Collecting Payment (`paid`)**: Operator enters payment amount and selects mode (Cash, UPI, Card, Other, Part Payment). Clicking `[ Settle Table & Free ]` commits payment to MongoDB, syncs daily sales accounting and real accounts, prints receipt, and frees table to Available Blank (Stage 1).
 
 ### 3.2 Dual Discount Engine
 - Operators can toggle between **Flat Discount (₹)** and **Percentage Discount (%)**.
@@ -86,13 +98,20 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - Percentage discount is capped between 0% and 100%.
 - Saved on `Order` as `discount`, `discountType`, and `discountValue`, printed on customer receipts.
 
-### 3.3 Settlement Amount & Waived Off Loss Tracking
-- During payment collection on a billed order, the **Settlement Amount** input defaults to the exact `grandTotal`.
-- If the customer is granted a concession or change is rounded down:
-  - `settledAmount`: Actual amount collected (e.g. ₹500). Credited to the cash/bank account and daily sales.
-  - `waivedAmount`: Difference `Math.max(0, grandTotal - settledAmount)` (e.g. ₹24).
-  - An amber discrepancy alert is rendered in the UI, recorded on the order, and logged in audit trails.
-  - Accounts and sales entries are never artificially inflated by the waived amount.
+### 3.3 Payment Collection & Settlement Workflow
+- **Integrated Payment Collection Card**:
+  - Accessible via green table body click, table card `[ 💵 Settle ]` quick button, or Order Details modal.
+  - **Payment Mode Selector**: 5 modes with visual icons and active indicators: Cash (`<Banknote />`), UPI (`<Smartphone />`), Card (`<CreditCard />`), Other (`<Wallet />`), and Part Payment (`<Layers />`).
+  - **Payment Amount Received Input**: Operator can freely enter the tendered amount (prefilled with exact `grandTotal`).
+  - **Quick Action Chips**:
+    - `Exact: ₹{total}`: Instantly restores input to the exact bill balance.
+    - Cash Denominations: When Cash is selected, chips for next common notes (₹100, ₹200, ₹500, ₹1000, ₹2000) are dynamically offered.
+  - **Real-Time Difference Calculation**:
+    - **Cash Tendered > Total**: Displays emerald banner `💵 Cash Tendered: ₹X • Return Change: ₹Y`. (Backend caps `finalSettled = grandTotal` so change returned does not artificially inflate sales).
+    - **Partial Received < Total**: Displays amber banner `⚠️ Receiving Partial: ₹X • Waived Shortage: ₹Y` (`waivedAmount` recorded for discrepancy audits and loss monitoring).
+    - **Exact Total**: Displays emerald `✓ Exact payment` confirmation.
+  - **Part Payment Split**: Supports granular multi-tender entry across Cash, UPI, Card, and Other with live balanced indicators.
+  - **Settle Table & Free**: Single click triggers `ordersApi.pay`, records payment in MongoDB, updates the daily sales row, credits real cash/bank accounts, prints/queues receipt, and frees the table to `available`.
 
 ### 3.4 Single Daily Sales Row Consolidation (IST) & Instant UI Sync
 - Collecting POS orders does **NOT** create individual rows in the daily sales register.
@@ -135,12 +154,12 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Multi-Device Distributed Architecture**:
   - **Mobile Waiter Devices (Ordering Clients)**: Waiters create orders, add KOT rounds, and finalize bills from smartphones/tablets.
     - **Remote KOT Generation**: On mobile devices (`isPrintStation = false`), the POS suppresses local print dialogs, stores the order in MongoDB with `kotRounds` (`printed: false`), and alerts the waiter: *"KOT sent to Counter Printer 🖨️"*.
-    - **Remote Customer Bill Printing**: When staff taps the **Printer icon** on any table card, taps **"Save & Print"** on the live POS order taker, taps **"Print Bill"** in the order details modal, or collects payment via **"Collect Payment"**, the customer bill is queued in MongoDB (`billPrinted = false`) via `POST /api/orders/:orderId/queue-bill-print` and alerts the waiter: *"Customer bill for Table X sent to Counter Printer 🖨️"*. No browser print dialog appears on the phone!
+    - **Remote Customer Bill Printing**: When staff taps the **Printer icon** on any table card, taps **"Save & Print"** on the live POS order taker, taps **"Print Bill"** in the order details modal, or collects payment via **"Collect Payment"**, the customer bill is queued in MongoDB (`billPrintQueued: true`, `billPrintSeq++`, and `status = 'billed'`) via `POST /api/orders/:orderId/queue-bill-print` and alerts the waiter: *"Customer bill for Table X sent to Counter Printer 🖨️"*. No browser print dialog appears on the phone!
   - **Counter Print Station (Windows Laptop with Thermal Printer)**: A designated laptop connected via USB to the 80mm thermal receipt printer runs Chrome in kiosk mode (`start-kiosk.bat`) with the POS `/tables` page open and **"Print Station"** mode toggled **ON** in the header (`?printStation=true` / `localStorage.getItem('peyala_is_print_station')`).
   - **Automated Database Reconciliation**: The Print Station polls both `GET /api/orders/pending-kots` and `GET /api/orders/pending-bills` every 4 seconds (auto-pausing on tab hide/screen lock).
     - **Auto-Printing KOTs**: New unprinted KOT rounds are formatted as 80mm kitchen tickets, sent silently to the printer via `printKOT(job, 'production')`, and marked `printed: true` via `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
-    - **Auto-Printing Bills**: New finalized or settled customer bills are formatted as 80mm receipts (itemized variants, add-ons, discounts, GST/tax, settlement breakdown), sent silently to the printer via `printCustomerBill(job, 'production')`, and marked `billPrinted: true` via `POST /api/orders/:orderId/mark-bill-printed`.
-  - **Concurrency & Deduplication**: To avoid double printing during network latency, in-memory locks (`inFlightKotsRef` and `inFlightBillsRef`) track job keys currently printing.
+    - **Auto-Printing Bills**: Explicitly queued customer bills (`billPrintQueued: true`) are formatted as 80mm receipts (itemized variants, add-ons, discounts, GST/tax, settlement breakdown), sent silently to the printer via `printCustomerBill(job, 'production')`, and marked printed (`billPrintQueued: false`, `billPrinted: true`) via `POST /api/orders/:orderId/mark-bill-printed` with sequence tracking (`seq: billPrintSeq`).
+  - **Concurrency & Deduplication**: To avoid double printing during network latency, in-memory locks (`inFlightKotsRef` and `inFlightBillsRef`) track unique job keys currently printing (e.g. `${orderId}-seq-${billPrintSeq}`). Because reprints increment `billPrintSeq`, duplicate reprints from mobile are never blocked by stale in-flight cache.
   - **Remote KOT Reprint & Bill Queuing**: Waiters can tap "Send KOT to Printer" or tap the printer icon on any occupied table card to queue an immediate print on the counter printer (`POST /api/orders/:orderId/reprint` or `POST /api/orders/:orderId/queue-bill-print`).
 - **Auto-Print Default (`'production'`)**: In Production Mode, KOTs and Bills bypass preview modals and immediately invoke `printThermalSlip(html)` via a hidden iframe.
 - **Bypassing Chrome Print Dialog (Zero-Click Kiosk Printing)**:
@@ -343,7 +362,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | Model | File | Key Fields |
 |-------|------|------------|
 | **`Table`** | `backend/src/models/Table.js` | `tableNumber`, `capacity`, `status` (`available`, `occupied`, `reserved`), `activeOrder` (ref: Order). |
-| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `table` (ref: Table), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `kotCount`, `createdBy`. |
+| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `table` (ref: Table), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `kotCount`, `billPrinted`, `billPrintedAt`, `billPrintQueued`, `billPrintQueuedAt`, `billPrintSeq`, `createdBy`. |
 | **`MenuItem`** | `backend/src/models/MenuItem.js` | `name`, `category` (ref: MenuCategory), `price`, `taxPercent`, `isVeg`, `isAvailable`, `description`. |
 | **`MenuCategory`** | `backend/src/models/MenuCategory.js` | `name`, `description`, `sortOrder`, `isActive`. |
 | **`Addon`** | `backend/src/models/Addon.js` | `name`, `price`, `isVeg`, `isActive`, `sortOrder`. |
@@ -374,9 +393,9 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - Form grids in modals must use responsive classes (`grid-cols-1 sm:grid-cols-2` or `grid-cols-1 sm:grid-cols-3`), never hardcoded multi-column classes like `grid-cols-2` or `grid-cols-3`.
 
 ### 5.4 RBAC Mutation Protection
-- Mutation endpoints on live orders (`POST /api/orders`, items, rounds, discount, bill, pay, cancel) MUST use `managerOrAdmin`.
-- Structural mutations (`POST/DELETE /api/tables`, `/api/users`) MUST remain wrapped with `adminOnly`.
-- In frontend views, wrap POS ordering and settlement buttons in `{canManageOrders && (...)}` (where `canManageOrders = user?.role === 'admin' || user?.role === 'manager'`) and provide descriptive fallback notices for read-only staff accounts.
+- Operational endpoints on live orders (`POST /api/orders`, items, rounds, discount, mark-served, bill, pay, cancel, transfer) MUST use `staffOrAdmin` (granting `staff`, `manager`, and `admin` permission to take orders, dispatch KOTs, generate/print bills, and collect payments).
+- Structural mutations (`POST/DELETE /api/tables`, `/api/users`, `PUT/DELETE /api/orders/:id/settled`) MUST remain wrapped with `adminOnly`.
+- In frontend views, wrap POS ordering, KOT dispatch, and billing buttons in `canManageOrders` (where `canManageOrders = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'staff'`).
 
 ---
 

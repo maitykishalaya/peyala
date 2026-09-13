@@ -10,12 +10,13 @@ import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
   Menu, X, LogOut, ChevronRight, Moon, Sun, Scale, CalendarCheck,
-  LayoutGrid, UtensilsCrossed
+  LayoutGrid, UtensilsCrossed, ChefHat
 } from 'lucide-react';
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/tables', label: 'Tables', icon: LayoutGrid },
+  { href: '/kds', label: 'Kitchen KDS', icon: ChefHat },
   { href: '/menu', label: 'Menu', icon: UtensilsCrossed },
   { href: '/accounts', label: 'Accounts', icon: Wallet },
   { href: '/inventory', label: 'Inventory', icon: Package },

@@ -34,20 +34,28 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 ## 🌟 Key Highlights & Operational Capabilities
 
 ### 1. Dine-In POS & Multi-Round Kitchen Order Tickets (KOT)
-- **Petpooja-Inspired POS Flow & Architecture**:
-  - **View A: Table View (Floor Plan)**:
-    - Section groupings: **Indoor**, **Outdoor**, and **Pick Up** floor sections.
-    - **Differentiated Status Colors & Legend**:
-      - `Blank Table`: Grey dashed border with clean white interior. Tapping opens POS Order Taking Screen for initial order (Round 1).
-      - `Running Table`: Soft blue border and fill (`bg-blue-50`) indicating active table.
-      - `Running KOT Table`: Soft yellow fill (`#fff9c4` / `bg-amber-100`) indicating actively dispatched KOT tickets.
-      - `Printed Table`: Soft green fill (`bg-emerald-50`) indicating bill has been finalized/printed for guest.
-      - `Paid Table`: Soft orange fill (`bg-orange-50`) indicating payment collected.
-    - **Dual-Action Table Card Workflow**:
-      - **Quick Print Bill Icon (`<Printer />`)**: Instantly prints customer bill or KOT ticket without opening order taker.
-      - **View Items Eye Icon (`<Eye />`)**: Opens detailed Order & Settlement modal (item cancellation, status changes, discounts, and payment collection).
-      - **Card Body Tap**: Clicking the body of an occupied table immediately switches to the POS Order Taking Screen in **Round 2 / Add Items mode**, ready to select more items!
-    - **Live KOT Elapsed Minutes Indicator**: Displays minutes passed since latest KOT creation (e.g. `2 Min`, `23 Min`), auto-updating every 30 seconds.
+- **5-Stage Restaurant POS Lifecycle & Architecture**:
+  - **Stage 1: Taking Order (Blank Table)**:
+    - Available tables render with a grey dashed border (`border-2 border-dashed border-gray-300`).
+    - Tapping the table opens the POS Order Screen for Round 1 to choose items, portions, and add-ons.
+  - **Stage 2: Sending KOT (Kitchen Preparation / Running KOT)**:
+    - Tapping `[ KOT ]` or `[ KOT & Print ]` dispatches the kitchen ticket to the counter printer.
+    - Table immediately transitions to **Yellow** (`border-2 border-amber-400 bg-amber-100/90 text-amber-950`) with an active pulsating **`KOT Active`** status pill and elapsed timer (`X Min`).
+    - Table card features both an optional `[ 🍽️ Served ]` quick button and a direct `[ 🖨️ Bill ]` quick button so staff can skip food served and bill immediately without interruption.
+  - **Stage 3: Food Served (Dining / Running Table — Optional & Non-Blocking)**:
+    - When kitchen preparation completes and dishes are delivered to the guest, staff can tap `[ 🍽️ Served ]` on the table card (or `[ Food Served ]` in order details) to transition the table to **Blue** (`border-2 border-blue-400 bg-blue-50/90 text-blue-950`) with a **`Food Served`** status pill.
+    - **Completely Non-Blocking**: If staff forget or skip marking food as served, the order flow is never held back. Staff can tap `[ 🖨️ Bill ]` directly from the Yellow table card or settle payment right away. The backend automatically records `foodServedAt` and marks pending items as `served`.
+    - Clicking the table card body allows guests to order Round 2+ (add-ons revert table to Yellow until newly ordered dishes are served).
+    - Table card features a 1-tap `[ 🖨️ Bill ]` quick button to immediately advance to billing.
+  - **Stage 4: Generating Bill (Bill Given to Customer / Printed Table)**:
+    - Tapping `[ 🖨️ Bill ]` (from Yellow or Blue cards) or the Printer icon prints/queues the 80mm customer bill.
+    - Table transitions to **Emerald Green** (`border-2 border-emerald-500 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-400/40`) with a pulsating **`Bill Given`** status pill.
+    - Floor staff instantly know the bill has been delivered to the customer and payment is pending.
+    - Clicking the table card body (or the dedicated `[ 💵 Settle ]` quick button) directly launches the Payment Collection dialog.
+  - **Stage 5: Collecting Payment (Settle & Free Table)**:
+    - Operator selects payment mode (Cash, UPI, Card, Other, Part Payment) and enters received amount.
+    - Live calculations provide instant change due or waived shortage feedback.
+    - Tapping `[ Settle Table & Free ]` commits payment to MongoDB, syncs daily sales accounting and real balance sheet accounts, prints/queues the final receipt, and immediately frees the table back to **Blank Table (Stage 1)**.
   - **View B: Live POS Order Taking Screen (3-Column Layout)**:
     - **Column 1 (Category Rail)**: Vertical list of menu categories with active crimson red highlight (`border-l-4 border-l-red-600 bg-red-50 text-red-600 font-bold`).
     - **Column 2 (Item Catalog & Search)**: Real-time search bar + item cards grid with **Veg / Non-Veg Left Edge Stripes** (emerald green for veg, red for non-veg), price tags, and blue active ring when present in cart.
@@ -60,7 +68,18 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
       - Payment chips: `[ Cash ✓ ]`, `[ Card ✓ ]`, `[ Due / UPI ✓ ]`, `[ Part Payment ]` with `It's Paid` checkbox.
       - Petpooja Action buttons: `[ Save ]` (Red), `[ Save & Print ]` (Red), `[ KOT ]` (Charcoal dark gray), `[ KOT & Print ]` (Charcoal dark gray).
       - **Auto-Return Workflow**: As soon as a KOT is dispatched (`[ KOT ]` or `[ KOT & Print ]`), the system sends the ticket to the kitchen, notifies the print station, and **automatically returns to Table View**!
-  - **View C: Add-on & Variant Customization Modal**:
+    - **Mobile-Friendly POS Order Taking (Zero-Scroll Cart Architecture)**:
+      - **Sticky Floating Bottom Cart Bar (`lg:hidden`)**: Rendered persistently at the bottom of the screen showing live item count, table badge, live total amount, and a prominent `[ Review & KOT → ]` action button.
+      - **Instant Visual Addition Feedback**: When waitstaff taps an item in the menu grid, a floating confirmation pill pops up (`✓ Added {Item} to Cart`) without requiring the user to scroll anywhere to confirm.
+      - **Slide-Up Mobile Cart Drawer Sheet (`lg:hidden`)**: Tapping the floating bar or header cart badge smoothly slides up an interactive bottom sheet containing all selected items, portion modifiers, special kitchen notes, quantity steppers `[-] 1 [+]`, and direct `[ KOT ]` / `[ Save ]` action buttons.
+      - **Segmented Top View Switcher on Mobile**: Quick toggle tabs (`[ 🍽️ Menu Items ]` vs `[ 🛒 Review Cart ]`) allow switching between catalog browsing and cart inspection in 1 tap.
+  - **View C: Kitchen Display System (KDS) (`/kds`)**:
+    - **Smart "Prep Next" Station (Item-Wise Aggregator)**: Consolidates identical pending dishes across all open tables into high-efficiency prep cards (e.g. *5x Momo, 3x Coffee*), sorted by oldest wait time (FIFO) or highest quantity. Cooks can batch-prepare identical dishes in one go!
+    - **"KOT Tickets" Live Queue**: FIFO order cards with table number, token #, elapsed timer (Green $\le$ 10m, Amber 10-20m, Red $>$ 20m), round tag, checklist of items, and 1-tap `[ Start Prep ]` / `[ Order Ready ]` buttons.
+    - **"Fulfilled History" & Recall**: Allows viewing recently completed tickets with a `[ ↩ Recall ]` button to restore any order bumped by mistake.
+    - **Web Audio API Kitchen Chime**: Synthesizes a dual-tone kitchen bell chime (`880Hz` $\rightarrow$ `1320Hz`) automatically whenever a new KOT arrives from the floor or mobile device.
+    - **Station & Diet Filters**: Instant filters for `All`, `Veg Only`, and `Bar / Beverages`.
+  - **View D: Add-on & Variant Customization Modal**:
     - Item title + unit price header with close `(X)`.
     - Search addon item input.
     - Portions/Variants selection (Required).
@@ -111,13 +130,13 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Multi-Device Architecture**:
   - **Mobile Waiter Devices**: Waiters take orders on phones or tablets connected to the web app (hosted on Vercel or local network).
     - **Remote KOT Dispatch**: When placing an initial order or adding a KOT round, the mobile device saves the order directly to MongoDB without popping open a local print dialog, displaying a confirmation toast: *"KOT sent to Counter Printer 🖨️"*.
-    - **Remote Finalized Bill Printing**: When staff taps the **Printer icon** on any table card, taps **"Save & Print"** on the live POS order taker, taps **"Print Bill"** in the order details modal, or collects payment via **"Collect Payment"**, the customer bill is queued in MongoDB (`billPrinted = false`) and a toast notifies the waiter: *"Customer bill for Table X sent to Counter Printer 🖨️"*. No mobile browser print dialog is shown!
+    - **Remote Finalized Bill Printing**: When staff taps the **Printer icon** on any table card, taps **"Save & Print"** on the live POS order taker, taps **"Print Bill"** in the order details modal, or collects payment via **"Collect Payment"**, the customer bill is explicitly queued in MongoDB (`billPrintQueued: true`, `billPrintSeq++`, and `status = 'billed'`) and a toast notifies the waiter: *"Customer bill for Table X sent to Counter Printer 🖨️"*. No mobile browser print dialog is shown!
   - **Central Windows Counter Laptop**: Connected physically (via USB) to the 80mm thermal receipt printer. It runs Chrome with the POS page (`/tables`) open and the **"Print Station"** mode toggled **ON** in the header.
   - **Automated Database Reconciliation**: The Print Station polls both `GET /api/orders/pending-kots` and `GET /api/orders/pending-bills` every 4 seconds (automatically pausing when minimized or screen is locked to conserve serverless quota).
     - When new unprinted KOT rounds arrive, the station formats the 80mm kitchen slip, prints it silently via `printKOT(job, 'production')`, and marks `printed: true` via `POST /api/orders/:orderId/rounds/:roundId/mark-printed`.
-    - When new finalized or settled customer bills arrive, the station formats the 80mm customer receipt, prints it silently via `printCustomerBill(job, 'production')`, and marks `billPrinted: true` via `POST /api/orders/:orderId/mark-bill-printed`.
+    - When new customer bill requests arrive (`billPrintQueued: true`), the station formats the 80mm customer receipt, prints it silently via `printCustomerBill(job, 'production')`, and marks `billPrinted: true` via `POST /api/orders/:orderId/mark-bill-printed` with sequence tracking (`seq: billPrintSeq`).
   - **Remote KOT Reprint & Bill Queuing**: Waiters on mobile devices can tap "Send KOT to Printer" or tap the table card printer icon to queue immediate remote printing on the counter printer without leaving the guest's table.
-  - **In-Flight Deduplication**: Prevents duplicate concurrent prints during polling using in-memory job locking (`inFlightKotsRef` and `inFlightBillsRef`).
+  - **In-Flight Deduplication & Sequence Tracking**: Prevents duplicate concurrent prints during polling using in-memory job locking (`inFlightKotsRef` and `inFlightBillsRef` with `${orderId}-seq-${billPrintSeq}`). Reprints increment the sequence number so fresh print requests are never blocked by stale cache.
 - **🚀 Production Mode (Default)**: Automatically sends KOTs and Bills straight to the default thermal printer via a hidden print iframe without opening preview dialogs.
 - **Bypassing Chrome Print Dialog & True Kiosk Mode on Windows**:
   - By default, standard Chrome security displays a print dialog and browser chrome (tabs, search bar).
@@ -428,8 +447,8 @@ peyala_v8/
 | `POST` | `/api/tables` | `adminOnly` | Create new dining table |
 | `PUT` | `/api/tables/:id` | `adminOnly` | Update table name/capacity/status |
 | `DELETE` | `/api/tables/:id` | `adminOnly` | Remove unoccupied table |
-| `POST` | `/api/orders` | `adminOnly` | Open table order & generate Round 1 KOT |
-| `POST` | `/api/orders/:id/items` | `adminOnly` | Add items as subsequent KOT round |
+| `POST` | `/api/orders` | `staffOrAdmin` | Open table order & generate Round 1 KOT |
+| `POST` | `/api/orders/:id/items` | `staffOrAdmin` | Add items as subsequent KOT round |
 | `GET` | `/api/orders/pending-kots` | Authenticated | Poll unprinted KOT rounds for Counter Print Station |
 | `POST` | `/api/orders/:orderId/rounds/:roundId/mark-printed` | Authenticated | Acknowledge KOT round printed by Print Station |
 | `POST` | `/api/orders/:orderId/rounds/:roundId/reprint` | Authenticated | Re-queue specific KOT round for printing |
@@ -437,13 +456,13 @@ peyala_v8/
 | `GET` | `/api/orders/pending-bills` | Authenticated | Poll unprinted customer bills for Counter Print Station |
 | `POST` | `/api/orders/:orderId/mark-bill-printed` | Authenticated | Acknowledge customer bill printed by Print Station |
 | `POST` | `/api/orders/:orderId/queue-bill-print` | Authenticated | Queue customer bill print for Counter Print Station |
-| `PATCH` | `/api/orders/:id/items/:itemId` | `adminOnly` | Update item status (`pending`, `preparing`, `served`) |
-| `DELETE` | `/api/orders/:id/items/:itemId` | `adminOnly` | Soft-cancel an ordered item with note |
-| `PATCH` | `/api/orders/:id/discount` | `adminOnly` | Apply Flat (₹) or Percentage (%) discount |
-| `POST` | `/api/orders/:id/bill` | `adminOnly` | Finalize bill for guest review |
-| `POST` | `/api/orders/:id/pay` | `adminOnly` | Collect payment, record settlement & waived amount, free table |
-| `POST` | `/api/orders/:id/cancel` | `adminOnly` | Cancel live order and free table |
-| `POST` | `/api/orders/:id/transfer` | `managerOrAdmin` | Move table, KOT rounds, or items to another table |
+| `PATCH` | `/api/orders/:id/items/:itemId` | `staffOrAdmin` | Update item status (`pending`, `preparing`, `served`) |
+| `DELETE` | `/api/orders/:id/items/:itemId` | `staffOrAdmin` | Soft-cancel an ordered item with note |
+| `PATCH` | `/api/orders/:id/discount` | `staffOrAdmin` | Apply Flat (₹) or Percentage (%) discount |
+| `POST` | `/api/orders/:id/bill` | `staffOrAdmin` | Finalize bill for guest review |
+| `POST` | `/api/orders/:id/pay` | `staffOrAdmin` | Collect payment, record settlement & waived amount, free table |
+| `POST` | `/api/orders/:id/cancel` | `staffOrAdmin` | Cancel live order and free table |
+| `POST` | `/api/orders/:id/transfer` | `staffOrAdmin` | Move table, KOT rounds, or items to another table |
 
 ### Menu & Categories
 | Method | Endpoint | Access | Description |

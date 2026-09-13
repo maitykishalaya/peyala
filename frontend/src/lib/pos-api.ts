@@ -102,6 +102,11 @@ export interface Order {
     card?: number;
     other?: number;
   };
+  billPrinted?: boolean;
+  billPrintedAt?: string | null;
+  billPrintQueued?: boolean;
+  billPrintSeq?: number;
+  foodServedAt?: string | null;
   paidAt?: string | null;
   createdBy?: { _id: string; name: string };
   createdAt: string;
@@ -199,6 +204,7 @@ export interface PendingKotJob {
 export interface PendingBillJob {
   orderId: string;
   orderNumber?: number;
+  billPrintSeq?: number;
   tokenNo?: string | number;
   tableNumber: string;
   billerName?: string;
@@ -272,6 +278,8 @@ export const ordersApi = {
     api.delete<Order>(`/orders/${id}/items/${itemId}`),
   applyDiscount: (id: string, data: { discountValue?: number; discountType?: 'flat' | 'percentage'; discount?: number }) =>
     api.patch<Order>(`/orders/${id}/discount`, data),
+  markServed: (id: string) =>
+    api.post<Order>(`/orders/${id}/mark-served`),
   bill: (id: string) =>
     api.post<Order>(`/orders/${id}/bill`),
   pay: (
@@ -293,8 +301,8 @@ export const ordersApi = {
     api.post<{ success: boolean; message: string }>(`/orders/${orderId}/reprint`),
   getPendingBills: () =>
     api.get<PendingBillJob[]>('/orders/pending-bills'),
-  markBillPrinted: (orderId: string) =>
-    api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/mark-bill-printed`),
+  markBillPrinted: (orderId: string, seq?: number) =>
+    api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/mark-bill-printed`, { seq }),
   queueBillPrint: (orderId: string) =>
     api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/queue-bill-print`),
   updateSettled: (id: string, data: UpdateSettledOrderPayload) =>
@@ -311,4 +319,43 @@ export const ordersApi = {
     }
   ) =>
     api.post<{ success: boolean; message: string; type?: string }>(`/orders/${id}/transfer`, data),
+  getKdsActive: () =>
+    api.get<KdsActiveResponse>('/orders/kds/active'),
+  updateKdsItemStatus: (orderId: string, itemId: string, status: 'pending' | 'preparing' | 'served') =>
+    api.patch<Order>(`/orders/${orderId}/items/${itemId}/kds-status`, { status }),
+  bumpKdsOrder: (orderId: string) =>
+    api.post<Order>(`/orders/${orderId}/kds-bump`),
+  batchBumpKdsItem: (menuItemId: string, variantName?: string) =>
+    api.post<{ success: boolean; message: string }>('/orders/kds/batch-bump', { menuItemId, variantName }),
 };
+
+export interface KdsPrepTableEntry {
+  orderId: string;
+  itemId: string;
+  tableNumber: string;
+  tokenNumber?: number;
+  quantity: number;
+  status: 'pending' | 'preparing' | 'served' | 'cancelled';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface KdsPrepNextItem {
+  key: string;
+  menuItemId: string;
+  name: string;
+  variantName?: string;
+  isVeg: boolean;
+  category?: any;
+  totalQuantity: number;
+  pendingQuantity: number;
+  preparingQuantity: number;
+  oldestOrderAt: string;
+  notes: string[];
+  tables: KdsPrepTableEntry[];
+}
+
+export interface KdsActiveResponse {
+  orders: Order[];
+  prepNext: KdsPrepNextItem[];
+}

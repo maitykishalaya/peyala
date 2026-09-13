@@ -31,4 +31,12 @@ const managerOrAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, adminOnly, managerOrAdmin };
+const staffOrAdmin = (req, res, next) => {
+  if (!req.user || !['admin', 'manager', 'staff'].includes(req.user.role)) {
+    return res.status(403).json({ message: 'Access restricted to authorized staff, managers, and administrators.' });
+  }
+  next();
+};
+
+module.exports = { auth, adminOnly, managerOrAdmin, staffOrAdmin };
+

@@ -75,9 +75,14 @@ const orderSchema = new mongoose.Schema({
   paidAt: { type: Date, default: null },
   billPrinted: { type: Boolean, default: false },
   billPrintedAt: { type: Date, default: null },
+  billPrintQueued: { type: Boolean, default: false },
+  billPrintQueuedAt: { type: Date, default: null },
+  billPrintSeq: { type: Number, default: 0 },
+  foodServedAt: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
+orderSchema.index({ billPrintQueued: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
 
 // Static helper to calculate order financial totals excluding cancelled items

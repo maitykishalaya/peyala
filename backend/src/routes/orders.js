@@ -5,7 +5,7 @@ const MenuItem = require('../models/MenuItem');
 const SalesEntry = require('../models/SalesEntry');
 const Account = require('../models/Account');
 const BalanceSheet = require('../models/BalanceSheet');
-const { auth, adminOnly, managerOrAdmin } = require('../middleware/auth');
+const { auth, adminOnly, managerOrAdmin, staffOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
 
@@ -113,12 +113,11 @@ router.get('/pending-kots', async (req, res) => {
 router.get('/pending-bills', async (req, res) => {
   try {
     const pendingOrders = await Order.find({
-      status: { $in: ['billed', 'paid'] },
-      billPrinted: false,
+      billPrintQueued: true,
     })
       .populate('table', 'tableNumber')
       .populate('createdBy', 'name')
-      .sort({ updatedAt: 1 });
+      .sort({ billPrintQueuedAt: 1, updatedAt: 1 });
 
     const pending = pendingOrders.map((order) => {
       const activeItems = (order.items || [])
@@ -136,6 +135,7 @@ router.get('/pending-bills', async (req, res) => {
       return {
         orderId: order._id,
         orderNumber: order.orderNumber,
+        billPrintSeq: order.billPrintSeq || 1,
         tokenNo: order.orderNumber ? String(order.orderNumber).slice(-2) : String(order._id).slice(-2),
         tableNumber: order.table ? order.table.tableNumber : 'Takeaway',
         billerName: order.createdBy ? order.createdBy.name : 'Staff',
@@ -162,6 +162,235 @@ router.get('/pending-bills', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// GET /api/orders/kds/active — Kitchen Display System Active Feed
+// Returns active cooking orders and smart "Prep Next" aggregated items
+// ─────────────────────────────────────────────────────────────────
+router.get('/kds/active', async (req, res) => {
+  try {
+    const orders = await populateOrder(
+      Order.find({
+        status: { $in: ['open', 'preparing', 'served', 'billed'] },
+      }).sort({ createdAt: 1 })
+    );
+
+    // Filter out orders that have no active items left (all cancelled or already completed)
+    const activeOrders = orders.filter((o) => {
+      if (!Array.isArray(o.items) || o.items.length === 0) return false;
+      return o.items.some((i) => i.status !== 'cancelled');
+    });
+
+    // Compute "Prep Next" (Smart Item-wise Aggregation)
+    const prepMap = new Map();
+
+    for (const order of activeOrders) {
+      if (!Array.isArray(order.items)) continue;
+      const tableNumber = order.table
+        ? typeof order.table === 'object'
+          ? order.table.tableNumber
+          : 'Takeaway'
+        : 'Takeaway';
+      const orderCreatedAt = order.createdAt;
+
+      for (const item of order.items) {
+        if (item.status === 'cancelled' || item.status === 'served') continue;
+
+        const menuItemId = item.menuItem
+          ? typeof item.menuItem === 'object'
+            ? String(item.menuItem._id)
+            : String(item.menuItem)
+          : item.name;
+        const variantName = item.variant?.name || '';
+        const key = `${menuItemId}__${variantName}`;
+
+        const existing = prepMap.get(key);
+        if (!existing) {
+          prepMap.set(key, {
+            key,
+            menuItemId,
+            name: item.name,
+            variantName,
+            isVeg:
+              typeof item.menuItem === 'object' && item.menuItem !== null
+                ? Boolean(item.menuItem.isVeg)
+                : false,
+            category:
+              typeof item.menuItem === 'object' && item.menuItem?.category
+                ? item.menuItem.category
+                : null,
+            totalQuantity: item.quantity,
+            pendingQuantity: item.status === 'pending' ? item.quantity : 0,
+            preparingQuantity: item.status === 'preparing' ? item.quantity : 0,
+            oldestOrderAt: orderCreatedAt,
+            notes: item.notes ? [item.notes] : [],
+            tables: [
+              {
+                orderId: order._id,
+                itemId: item._id,
+                tableNumber,
+                tokenNumber: order.orderNumber,
+                quantity: item.quantity,
+                status: item.status,
+                notes: item.notes || '',
+                createdAt: orderCreatedAt,
+              },
+            ],
+          });
+        } else {
+          existing.totalQuantity += item.quantity;
+          if (item.status === 'pending') existing.pendingQuantity += item.quantity;
+          if (item.status === 'preparing') existing.preparingQuantity += item.quantity;
+          if (new Date(orderCreatedAt) < new Date(existing.oldestOrderAt)) {
+            existing.oldestOrderAt = orderCreatedAt;
+          }
+          if (item.notes && !existing.notes.includes(item.notes)) {
+            existing.notes.push(item.notes);
+          }
+          existing.tables.push({
+            orderId: order._id,
+            itemId: item._id,
+            tableNumber,
+            tokenNumber: order.orderNumber,
+            quantity: item.quantity,
+            status: item.status,
+            notes: item.notes || '',
+            createdAt: orderCreatedAt,
+          });
+        }
+      }
+    }
+
+    const prepNext = Array.from(prepMap.values()).sort(
+      (a, b) => new Date(a.oldestOrderAt).getTime() - new Date(b.oldestOrderAt).getTime()
+    );
+
+    res.json({ orders: activeOrders, prepNext });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/kds/batch-bump — Mark prepared dish ready across all tables
+// ─────────────────────────────────────────────────────────────────
+router.post('/kds/batch-bump', async (req, res) => {
+  try {
+    const { menuItemId, variantName } = req.body;
+    if (!menuItemId) {
+      return res.status(400).json({ message: 'menuItemId is required' });
+    }
+
+    const activeOrders = await Order.find({
+      status: { $in: ['open', 'preparing', 'served', 'billed'] },
+    });
+
+    let updatedOrdersCount = 0;
+
+    for (const order of activeOrders) {
+      let modified = false;
+      for (const item of order.items) {
+        if (item.status === 'cancelled' || item.status === 'served') continue;
+        const mId = item.menuItem ? String(item.menuItem) : item.name;
+        const vName = item.variant?.name || '';
+
+        if (mId === String(menuItemId) && (!variantName || vName === variantName)) {
+          item.status = 'served';
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        const nonCancelled = order.items.filter((i) => i.status !== 'cancelled');
+        const allServed = nonCancelled.length > 0 && nonCancelled.every((i) => i.status === 'served');
+        if (allServed) {
+          if (!order.foodServedAt) order.foodServedAt = new Date();
+          if (!['billed', 'paid', 'cancelled'].includes(order.status)) {
+            order.status = 'served';
+          }
+        }
+        await order.save();
+        updatedOrdersCount++;
+      }
+    }
+
+    res.json({ success: true, message: `Batch updated across ${updatedOrdersCount} orders` });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// PATCH /api/orders/:id/items/:itemId/kds-status — Update prep status from KDS
+// ─────────────────────────────────────────────────────────────────
+router.patch('/:id/items/:itemId/kds-status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['pending', 'preparing', 'served'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid item prep status' });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const item = order.items.id(req.params.itemId);
+    if (!item) {
+      return res.status(404).json({ message: 'Item not found on order' });
+    }
+
+    item.status = status;
+
+    const nonCancelled = order.items.filter((i) => i.status !== 'cancelled');
+    const allServed = nonCancelled.length > 0 && nonCancelled.every((i) => i.status === 'served');
+    if (allServed) {
+      if (!order.foodServedAt) order.foodServedAt = new Date();
+      if (!['billed', 'paid', 'cancelled'].includes(order.status)) {
+        order.status = 'served';
+      }
+    } else if (status === 'preparing' && order.status === 'open') {
+      order.status = 'preparing';
+    }
+
+    await order.save();
+    const populated = await populateOrder(Order.findById(order._id));
+    res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/kds-bump — Mark entire ticket ready/served from KDS
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/kds-bump', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (item.status !== 'cancelled') {
+          item.status = 'served';
+        }
+      });
+    }
+
+    if (!order.foodServedAt) order.foodServedAt = new Date();
+    if (!['billed', 'paid', 'cancelled'].includes(order.status)) {
+      order.status = 'served';
+    }
+
+    await order.save();
+    const populated = await populateOrder(Order.findById(order._id));
+    res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /api/orders/:id — get order by id
 // ─────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -179,7 +408,7 @@ router.get('/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders — open a new order for a table (KOT)
 // ─────────────────────────────────────────────────────────────────
-router.post('/', managerOrAdmin, async (req, res) => {
+router.post('/', staffOrAdmin, async (req, res) => {
   try {
     const { tableId, items } = req.body;
 
@@ -310,7 +539,7 @@ router.post('/', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/items — add another KOT round to existing order
 // ─────────────────────────────────────────────────────────────────
-router.post('/:id/items', managerOrAdmin, async (req, res) => {
+router.post('/:id/items', staffOrAdmin, async (req, res) => {
   try {
     const { items } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
@@ -380,8 +609,8 @@ router.post('/:id/items', managerOrAdmin, async (req, res) => {
       newRoundItems.push(itemObj);
     }
 
-    // If order was billed, adding items re-opens it for billing updates
-    if (order.status === 'billed') {
+    // If order was billed or served, adding items re-opens it for kitchen preparation
+    if (['billed', 'served'].includes(order.status)) {
       order.status = 'open';
     }
 
@@ -430,7 +659,7 @@ router.post('/:id/items', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // PATCH /api/orders/:id/items/:itemId — update one item's status/qty/notes
 // ─────────────────────────────────────────────────────────────────
-router.patch('/:id/items/:itemId', managerOrAdmin, async (req, res) => {
+router.patch('/:id/items/:itemId', staffOrAdmin, async (req, res) => {
   try {
     const { status, quantity, notes } = req.body;
     const order = await Order.findById(req.params.id);
@@ -474,7 +703,7 @@ router.patch('/:id/items/:itemId', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // DELETE /api/orders/:id/items/:itemId — soft-cancel one item
 // ─────────────────────────────────────────────────────────────────
-router.delete('/:id/items/:itemId', managerOrAdmin, async (req, res) => {
+router.delete('/:id/items/:itemId', staffOrAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) {
@@ -516,7 +745,7 @@ router.delete('/:id/items/:itemId', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // PATCH /api/orders/:id/discount — set percentage or flat discount
 // ─────────────────────────────────────────────────────────────────
-router.patch('/:id/discount', managerOrAdmin, async (req, res) => {
+router.patch('/:id/discount', staffOrAdmin, async (req, res) => {
   try {
     const { discount, discountValue, discountType = 'flat' } = req.body;
     const order = await Order.findById(req.params.id);
@@ -555,9 +784,54 @@ router.patch('/:id/discount', managerOrAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/mark-served — status → served (Food Served)
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/mark-served', staffOrAdmin, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    if (['paid', 'cancelled'].includes(order.status)) {
+      return res.status(400).json({ message: `Cannot mark food served on order with status "${order.status}"` });
+    }
+
+    order.status = 'served';
+    order.foodServedAt = new Date();
+
+    // Mark all non-cancelled items as served
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (item.status !== 'cancelled') {
+          item.status = 'served';
+        }
+      });
+    }
+
+    await order.save();
+
+    const tableDoc = await Table.findById(order.table);
+    const tableNum = tableDoc ? tableDoc.tableNumber : '';
+
+    await log({
+      user: req.user,
+      action: 'UPDATE',
+      module: 'Orders',
+      description: `${req.user.name} marked food served for Order on Table ${tableNum}`,
+      metadata: { orderId: order._id, tableNumber: tableNum },
+    });
+
+    const populated = await populateOrder(Order.findById(order._id));
+    res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/bill — status → billed
 // ─────────────────────────────────────────────────────────────────
-router.post('/:id/bill', managerOrAdmin, async (req, res) => {
+router.post('/:id/bill', staffOrAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) {
@@ -569,6 +843,22 @@ router.post('/:id/bill', managerOrAdmin, async (req, res) => {
 
     order.status = 'billed';
     order.billPrinted = false;
+    order.billPrintQueued = true;
+    order.billPrintQueuedAt = new Date();
+    order.billPrintSeq = (order.billPrintSeq || 0) + 1;
+
+    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
+    if (!order.foodServedAt) {
+      order.foodServedAt = new Date();
+    }
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (['pending', 'preparing'].includes(item.status)) {
+          item.status = 'served';
+        }
+      });
+    }
+
     await order.save();
 
     await log({
@@ -588,7 +878,7 @@ router.post('/:id/bill', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/pay — Accounting integration endpoint
 // ─────────────────────────────────────────────────────────────────
-router.post('/:id/pay', managerOrAdmin, async (req, res) => {
+router.post('/:id/pay', staffOrAdmin, async (req, res) => {
   try {
     const { paymentMethod, settlementAmount } = req.body;
     const order = await Order.findById(req.params.id);
@@ -733,6 +1023,19 @@ router.post('/:id/pay', managerOrAdmin, async (req, res) => {
     order.settledAmount = finalSettled;
     order.waivedAmount = waivedAmount;
     order.billPrinted = false;
+
+    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
+    if (!order.foodServedAt) {
+      order.foodServedAt = new Date();
+    }
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (['pending', 'preparing'].includes(item.status)) {
+          item.status = 'served';
+        }
+      });
+    }
+
     await order.save();
 
     if (tableDoc) {
@@ -763,7 +1066,7 @@ router.post('/:id/pay', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/cancel — cancel unpaid order, free table
 // ─────────────────────────────────────────────────────────────────
-router.post('/:id/cancel', managerOrAdmin, async (req, res) => {
+router.post('/:id/cancel', staffOrAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) {
@@ -800,7 +1103,7 @@ router.post('/:id/cancel', managerOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/transfer — Move table / KOT / items
 // ─────────────────────────────────────────────────────────────────
-router.post('/:id/transfer', managerOrAdmin, async (req, res) => {
+router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
   try {
     const { targetTableId, transferType = 'table', kotRoundNumbers = [], itemTransfers = [] } = req.body;
 
@@ -1333,13 +1636,34 @@ router.post('/:orderId/rounds/:roundId/reprint', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 router.post('/:orderId/mark-bill-printed', async (req, res) => {
   try {
+    const { seq } = req.body || {};
     const order = await Order.findById(req.params.orderId);
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    const currentSeq = order.billPrintSeq || 0;
+    if (!seq || Number(seq) >= currentSeq) {
+      order.billPrintQueued = false;
+    }
     order.billPrinted = true;
     order.billPrintedAt = new Date();
+    if (!['paid', 'cancelled'].includes(order.status)) {
+      order.status = 'billed';
+    }
+
+    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
+    if (!order.foodServedAt) {
+      order.foodServedAt = new Date();
+    }
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (['pending', 'preparing'].includes(item.status)) {
+          item.status = 'served';
+        }
+      });
+    }
+
     await order.save();
 
     res.json({ success: true, message: 'Customer bill marked as printed', orderId: order._id });
@@ -1358,10 +1682,36 @@ router.post('/:orderId/queue-bill-print', async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    order.billPrintQueued = true;
+    order.billPrintQueuedAt = new Date();
+    order.billPrintSeq = (order.billPrintSeq || 0) + 1;
     order.billPrinted = false;
+
+    // Advance open table orders to billed status as the bill is being presented to the customer
+    if (!['paid', 'cancelled'].includes(order.status)) {
+      order.status = 'billed';
+    }
+
+    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
+    if (!order.foodServedAt) {
+      order.foodServedAt = new Date();
+    }
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (['pending', 'preparing'].includes(item.status)) {
+          item.status = 'served';
+        }
+      });
+    }
+
     await order.save();
 
-    res.json({ success: true, message: 'Customer bill queued for printer', orderId: order._id });
+    res.json({
+      success: true,
+      message: 'Customer bill queued for printer',
+      orderId: order._id,
+      billPrintSeq: order.billPrintSeq,
+    });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
