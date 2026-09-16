@@ -19,7 +19,7 @@ import {
 
 const SALES_CACHE_KEY = 'peyala_reports_sales_cache_v1';
 const DAILY_CACHE_KEY = 'peyala_reports_daily_cache_v1';
-const PNL_CACHE_KEY = 'peyala_reports_pnl_cache_v1';
+const PNL_CACHE_KEY = 'peyala_reports_pnl_cache_v2';
 
 function readCache(key: string) {
   try {
@@ -512,6 +512,27 @@ export default function ReportsPage() {
     { name: 'Net Profit', value: pnl.netProfit, fill: pnl.netProfit >= 0 ? '#6366f1' : '#f97316' },
   ] : [];
 
+  const formatDayLabel = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const m = parseInt(parts[1], 10) - 1;
+      return `${parseInt(parts[2], 10)} ${months[m] || parts[1]}`;
+    }
+    return dateStr;
+  };
+
+  const dailySalesData = pnl?.dailySales?.map((d: any) => ({
+    fullDate: d.date,
+    displayDate: formatDayLabel(d.date),
+    Sales: d.total || 0,
+    Outlet: d.outlet || 0,
+    Zomato: d.zomato || 0,
+    Fatafat: d.fatafat || 0,
+    Other: d.other || 0,
+  })) || [];
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -565,21 +586,67 @@ export default function ReportsPage() {
             {loading ? <div className="text-center py-16 text-gray-400">Generating...</div> : pnl && (
               <>
                 {/* Summary Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                   {[
                     { label: 'Total Revenue', value: pnl.income.total, color: 'text-brand-600', bg: 'from-brand-50 to-orange-50 dark:from-brand-900/10' },
                     { label: 'Total Expenses', value: pnl.expenses.total, color: 'text-red-500', bg: 'from-red-50 to-rose-50 dark:from-red-900/10' },
                     { label: 'Gross Profit', value: pnl.grossProfit, color: pnl.grossProfit >= 0 ? 'text-green-600' : 'text-red-500', bg: 'from-green-50 to-emerald-50 dark:from-green-900/10' },
                     { label: 'Net Profit', value: pnl.netProfit, color: pnl.netProfit >= 0 ? 'text-indigo-600' : 'text-red-500', bg: 'from-indigo-50 to-blue-50 dark:from-indigo-900/10' },
+                    { label: 'Recorded Wastage', value: pnl.wastage?.total || 0, color: 'text-rose-600', bg: 'from-rose-50 to-pink-50 dark:from-rose-950/20' },
                   ].map(({ label, value, color, bg }) => (
                     <div key={label} className={`card p-5 bg-gradient-to-br ${bg}`}>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide flex items-center justify-between">
+                        <span>{label}</span>
+                        {label === 'Recorded Wastage' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300">
+                            Info
+                          </span>
+                        )}
+                      </p>
                       <p className={`text-2xl font-bold mt-1 ${color}`}>{formatCurrency(value)}</p>
                       {label === 'Gross Profit' && <p className="text-xs text-gray-400 mt-1">{pnl.grossMargin}% margin</p>}
                       {label === 'Net Profit' && <p className="text-xs text-gray-400 mt-1">{pnl.netMargin}% margin</p>}
+                      {label === 'Recorded Wastage' && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {pnl.wastage?.count || 0} entries · {Number((pnl.wastage?.totalQty || 0).toFixed(1))} units
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
+
+                {/* Informational Recorded Wastage Banner */}
+                {pnl.wastage?.total > 0 && (
+                  <div className="card p-4 bg-gradient-to-r from-rose-50/70 via-orange-50/40 to-transparent dark:from-rose-950/20 dark:via-orange-950/10 dark:to-transparent border-rose-200/80 dark:border-rose-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-rose-100 dark:bg-rose-900/40 text-rose-600 rounded-xl flex-shrink-0 mt-0.5">
+                        <Trash2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-gray-900 dark:text-white text-sm">
+                            Recorded Food & Material Wastage in this Period
+                          </h4>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300">
+                            Operational Info
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Total value of discarded or expired food items logged for this date range is{' '}
+                          <strong className="text-rose-600 font-bold">{formatCurrency(pnl.wastage.total)}</strong> across{' '}
+                          {pnl.wastage.count} recorded entries ({Number(pnl.wastage.totalQty.toFixed(1))} units).{' '}
+                          <span className="italic">Note: Provided for operational visibility; does not impact financial net profit.</span>
+                        </p>
+                      </div>
+                    </div>
+                    <a
+                      href="/wastage"
+                      className="btn-secondary text-xs py-2 px-3 self-start sm:self-center whitespace-nowrap flex items-center gap-1 hover:text-brand-600"
+                    >
+                      View Wastage Log <ArrowRight className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Income Breakdown */}
@@ -620,6 +687,48 @@ export default function ReportsPage() {
                       </div>
                     </div>
                   </div>
+                </div>
+
+                {/* Daily Sales Bar Chart for Selected Period */}
+                <div className="card p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                    <div>
+                      <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-brand-500" />
+                        Daily Sales
+                      </h3>
+                      <p className="text-xs text-gray-500">Per-day sales breakdown across the selected period ({range.start} to {range.end})</p>
+                    </div>
+                    {dailySalesData.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">
+                          Total: <strong className="text-gray-900 dark:text-white">{formatCurrency(pnl.income.total)}</strong>
+                        </span>
+                        <span className="text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-2.5 py-0.5 rounded-full">
+                          {dailySalesData.length} {dailySalesData.length === 1 ? 'day' : 'days'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {dailySalesData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={dailySalesData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                        <XAxis dataKey="displayDate" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                        <Tooltip
+                          formatter={(v: any, name: string) => [formatCurrency(v), name]}
+                          labelFormatter={(label, payload) => {
+                            const item = payload?.[0]?.payload;
+                            return item ? `${item.fullDate} (${label})` : label;
+                          }}
+                        />
+                        <Bar dataKey="Sales" fill="#e26411" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-12">No sales entries recorded for this period</p>
+                  )}
                 </div>
 
                 {/* Charts */}

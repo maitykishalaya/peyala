@@ -25,6 +25,8 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Purchases** | `/purchases` | Raw material procurement with quick-add items, GST bills, and auto-crediting/debiting of inventory and supplier dues. |
 | **Suppliers** | `/suppliers` | Vendor ledgers, purchase history, total purchases, and outstanding dues reconciliation. |
 | **Payments** | `/payments` | Outgoing expense ledger categorized into operational, utility, vendor, and maintenance costs. |
+| **Wastage** | `/wastage` | Food and inventory wastage tracking with 3 core entry fields (Item Name, Qty, Approx Value), date filtering, loss analytics, and P&L integration. |
+| **Expense Leak Detector** | `/expense-leak-detector` | Autonomous financial & operational leak detection engine, statistical price/usage spike alerts, sales-adjusted spending anomalies, anti-double-counting clustering, and 30-day dismissal feedback. |
 | **Staff & Attendance** | `/staff`, `/attendance` | Employee directory, monthly attendance calendar with leave cap enforcement, 2-shift duty time tracking (entry/exit), pro-rata salary deductions, advances, bonuses, and salary disbursals. |
 | **Balance Sheet** | `/balancesheet` | Dynamic statement of Assets (bank/cash accounts), Liabilities (GST liability, supplier dues, loans), and Net Equity. |
 | **Settings & Security** | `/settings` | Role-based user administration, audit logging, payment categories, database backup/restore, and dark/light mode. |
@@ -121,7 +123,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
     8. **Staff** (`peyala_staff_cache_v1`)
     9. **Attendance** (`peyala_attendance_staff_cache_v1` & `peyala_attendance_{year}_{month}_v1`)
     10. **Balance Sheet** (`peyala_balancesheet_cache_v1`)
-    11. **Reports** (`peyala_reports_sales_cache_v1`, `peyala_reports_daily_cache_v1`, `peyala_reports_pnl_cache_v1`)
+    11. **Reports** (`peyala_reports_sales_cache_v1`, `peyala_reports_daily_cache_v1`, `peyala_reports_pnl_cache_v2`)
   - **Manual "Refresh" Button with Live Timestamp**: Every single one of these modules features a standard `Refresh` button with an animated spinner and a `Cached (HH:MM)` indicator in its header. Data is only requested from the remote database when the user explicitly clicks Refresh (or upon very first visit if local cache is empty).
   - **Single Daily Sales Consolidation & IST Date Alignment**: Every POS order settled throughout the day automatically updates and bifurcates into **one consolidated daily sales row** in Indian Standard Time (IST, UTC+05:30) via `getIstDayRange`. The dashboard's Yesterday and Today sections match exact IST calendar ranges with order fallback reconciliation, eliminating UTC timezone drift across cloud hosts. When an admin updates the Owner Notice in Settings, the dashboard cache is automatically purged and the notice displays immediately.
   - **Explicit POS Exception (`/tables`)**: The `/tables` Dine-In POS page does **NOT** cache live floor orders in `localStorage`. It always stays fresh after every request (order creation, add-on rounds, status updates, bill finalization, and payment collection). The counter Print Station background polling runs at 4000ms and pauses automatically whenever the browser tab is hidden or laptop screen locked.
@@ -288,6 +290,63 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Daily Aggregate KPI Bar**:
   - Live aggregate footer displaying total staff on duty, total present hours, total shortage hours, total daily gross wages, total deductions, and net day pay.
 
+### 15. Analytics, Daily Averages & Visual Bar Graph Trends (`/dashboard` & `/reports`)
+- **Dashboard 30-Day Revenue Bar Graph (`/dashboard`)**:
+  - Replaced AreaChart with a clean, high-contrast `<BarChart>` displaying daily revenue bars with top rounded corners (`radius={[4, 4, 0, 0]}`), IST date labels, hover currency tooltips, and an active day count pill.
+- **Real-Time Current Daily Averages (`/dashboard`)**:
+  - **Top KPI (This Month Revenue)**: Displays an `Avg: ₹X/day` badge calculated dynamically from month-to-date revenue divided by elapsed calendar days in the current month.
+  - **Sales Channel Performance**: Each sales channel card (Outlet Sales, Zomato, Fatafat, Other Sales) features a dedicated `Daily Avg: ₹X /day` badge showing current average daily sales performance per channel.
+- **P&L Statement Per-Day Sales Bar Graph (`/reports`)**:
+  - **Backend IST Aggregation (`GET /api/reports/pnl`)**: Aggregates daily sales directly from `SalesEntry` using Indian Standard Time (`$dateToString` with timezone `+05:30`). For date ranges up to 62 days, builds a complete calendar timeline with 0-fill for days without sales, guaranteeing that the sum of the daily bars exactly equals the P&L statement's Total Revenue.
+  - **Visual Daily Sales Chart**: Features a responsive `<BarChart>` with readable date labels (e.g. `14 Sep`), formatted currency tooltips displaying channel breakdowns, total period revenue, and recorded day counts.
+- **Authentic Restaurant Dining Table Icon**:
+  - Replaced generic grid squares with an authentic dining table icon (`DiningTableIcon.tsx`) featuring a circular dining table, place setting, and paired dining chairs across the sidebar drawer, mobile bottom bar, and floor plan header.
+
+### 16. Expense Leak Detector & Anti-Double-Counting Engine (`/expense-leak-detector`)
+- **Autonomous Financial Anomaly & Leak Detection**:
+  - Statistically scans real historical business expenses (`Payment`), inventory procurement entries (`PurchaseEntry`), and daily sales entries (`SalesEntry` / `Order`) to pinpoint operational waste and unusual price spikes.
+  - Adheres strictly to **non-accusatory, constructive terminology** (*"Potential leak"*, *"Unusual expense"*, *"Requires investigation"*, *"Estimated impact"*, *"Possible cause"*).
+- **8 Deterministic Statistical Detectors**:
+  1. **Price Spike Detector**: Flags raw material unit prices climbing > 15% over historical median price (requiring $\ge$ 2 historical purchases).
+  2. **Expense Spike Detector**: Flags operating/overhead category spending in the period exceeding 25% above its monthly baseline.
+  3. **Usage Spike Detector**: Flags physical consumption (quantity per business day) exceeding 20% above historical daily usage rate.
+  4. **Sales-Adjusted Expense Anomaly Detector**: Flags expenses rising disproportionately against revenue while suppressing false alarms when expense growth is backed by proportional sales expansion.
+  5. **Small Expense Accumulation Detector**: Exposes frequent petty expenses (< ₹500 or < ₹1,000) that invisibly accumulate into significant leakages (> ₹3,000 across $\ge$ 4 transactions).
+  6. **Duplicate Expense Detector**: Detects identical amounts disbursed to the same payee or category within a 72-hour window.
+  7. **Supplier Price Variance Detector**: Identifies when different suppliers charge $\ge$ 10% price variance for the exact same raw material item.
+  8. **Purchase Frequency Anomaly Detector**: Identifies abnormal purchasing cadences (e.g. daily ordering when the normal cadence is weekly).
+- **Anti-Double-Counting Cluster Architecture**:
+  - Groups overlapping item-level and category-level anomalies under shared root causes (e.g., Chicken price spike ₹18,200 under Raw Materials category spike ₹22,000 grouped under `cluster_food_cost_and_raw_materials`).
+  - Total Potential Monthly Impact is deduplicated as:
+    $$\text{Cluster Impact} = \max(\text{Category Anomaly Impact}, \sum \text{Item Anomaly Impacts})$$
+- **Persistent User Review & 30-Day Dismissal**:
+  - Users can mark anomalies as normal (30-day mute stored in `ExpenseLeakReview` with audit log), preventing alert fatigue.
+  - Captures 👍 / 👎 learning feedback with structured reason tags to refine future alert prioritization.
+- **Investigation Modal & Recharts Visualizations**:
+  - Displays historical trend charts, multi-supplier comparison tables, raw transaction audit logs, and operational action checklists.
+
+### 17. Wastage Entry Module, 10 PM Prompt Banner & P&L Integration (`/wastage`)
+- **Frictionless Wastage Recording**:
+  - Dedicated interface capturing the 3 core required fields: **Name of the Item**, **Quantity (Qty)**, and **Approximate Value (₹)**.
+  - Automatically captures entry date (defaults to today in IST), measurement unit (`kg`, `g`, `pcs`, `plates`, `portions`, `litres`, etc.), optional reason tag (`Spoiled`, `Expired`, `Burnt`, `Dropped`), and the recording user.
+- **Persistent 10:00 PM End-of-Day Prompt Banner**:
+  - Automatically mounts at the top of every page in `AppLayout` after 10:00 PM IST (22:00 to 04:00 AM closing hours).
+  - Prominently prompts the closing manager/staff: *"End of Day Check: Daily Wastage Log Pending"*.
+  - **Strictly Persistent**: Has no dismiss/close button and **only disappears** once wastage is logged or zero wastage is officially signed.
+  - Direct 1-click modal triggers: `[ Record Wastage ]` fast-entry modal and `[ Sign Zero Wastage ]` verification modal.
+- **Zero Wastage Sign-off with Double Confirmation**:
+  - When no food or raw materials were discarded during the shift, staff can sign off on zero wastage.
+  - Requires explicit double-confirmation (checking audit checkbox and confirming staff sign-off).
+  - Creates a verified record (`approxValue: 0`, `isZeroWastage: true`) displaying an emerald `Zero Wastage Verified` badge in the ledger, satisfying the closing requirement without altering P&L metrics.
+- **P&L Statement Integration (`/reports` P&L Tab)**:
+  - Aggregates total recorded wastage value and quantity for any chosen date range.
+  - **Zero Financial Impact**: Per operational requirements, wastage is displayed strictly as an informational metric (`Recorded Wastage: ₹X`) and does not modify revenue, gross profit, or net profit calculations.
+  - Features a dedicated summary card and a detailed informational banner with a direct link to the wastage ledger.
+- **Operational Loss Analytics**:
+  - 4 KPI cards: Total Wastage Value, Total Quantity Discarded, Total Incidents, and Daily Average Loss.
+  - Filter bar with quick presets (`Today`, `7D`, `This Month`, `Last Month`, `Custom Range`) and real-time search.
+  - Local cache synchronization: Immediately invalidates P&L client-side cache upon any add/edit/delete so reports stay synchronized.
+
 ---
 
 ## 🚀 Quick Start (Local Setup)
@@ -389,6 +448,8 @@ peyala_v8/
 │   │   │   ├── Payment.js          # Expense tracking
 │   │   │   ├── Receipt.js          # Inflow tracking
 │   │   │   ├── Transfer.js         # Account-to-account fund transfers
+│   │   │   ├── ExpenseLeakReview.js # Anomaly dismissal state & feedback learning
+│   │   │   ├── Wastage.js          # Food & inventory wastage tracking
 │   │   │   └── User.js             # System users & auth roles
 │   │   ├── routes/         # Express REST API routes
 │   │   │   ├── orders.js           # Order lifecycle, KOTs, billing, settlement (Admin protected)
@@ -398,8 +459,10 @@ peyala_v8/
 │   │   │   ├── reports.js          # P&L, Daily summary, Detailed Sales Report
 │   │   │   ├── purchases.js        # Inventory purchase orders
 │   │   │   ├── attendance.js       # Attendance & leave caps
+│   │   │   ├── expenseLeak.js      # Expense leak detection, reviews & feedback
+│   │   │   ├── wastage.js          # Wastage CRUD, date filters & summary
 │   │   │   └── ...                 # Accounts, payments, receipts, suppliers, staff, backup
-│   │   ├── utils/          # Audit logging, date helpers (IST boundaries), seed data
+│   │   ├── utils/          # Audit logging, date helpers (IST boundaries), expenseLeakEngine, seed data
 │   │   └── server.js       # Express server initialization
 │   ├── package.json
 │   └── .env
@@ -413,6 +476,8 @@ peyala_v8/
     │   │   ├── sales/              # Daily sales ledger & platform settlements
     │   │   ├── purchases/          # Purchase orders & raw material receipts
     │   │   ├── dashboard/          # Operational executive dashboard
+    │   │   ├── expense-leak-detector/ # Expense Leak Detector dashboard & investigation modal
+    │   │   ├── wastage/            # Wastage entry, loss analytics & date filtering
     │   │   ├── staff/              # Staff profiles & payroll
     │   │   ├── attendance/         # Attendance calendar grid
     │   │   ├── balancesheet/       # Balance sheet (Assets, Liabilities, Equity)
@@ -424,6 +489,7 @@ peyala_v8/
     │   │   └── login/              # Login screen
     │   ├── components/
     │   │   ├── layout/AppLayout.tsx # Responsive shell, sidebar, mobile bottom navigation
+    │   │   ├── ui/DiningTableIcon.tsx # Restaurant dining table with chairs vector icon
     │   │   ├── ui/Modal.tsx        # Responsive modal dialogs
     │   │   ├── ui/ThermalPreviewModal.tsx # 80mm receipt preview & PDF exporter
     │   │   └── dashboard/StatCard.tsx
@@ -473,12 +539,29 @@ peyala_v8/
 | `GET` | `/api/menu/categories` | Authenticated | List all menu categories |
 | `POST` | `/api/menu/categories` | Authenticated | Create category |
 
-### Reporting & Analytics
+### Dashboard & Analytics
 | Method | Endpoint | Access | Description |
 |--------|----------|--------|-------------|
+| `GET` | `/api/dashboard/summary` | Authenticated | Live dashboard summary, MTD revenue, channel breakdown & daily averages, account balances, inventory values |
 | `GET` | `/api/reports/sales` | Authenticated | Detailed order-by-order sales log, KOT details, waived sums |
 | `GET` | `/api/reports/pnl` | Authenticated | Profit & Loss statement for date range |
 | `GET` | `/api/reports/daily` | Authenticated | Daily operational overview |
+
+### Expense Leak Detector
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `GET` | `/api/expense-leaks` | Authenticated | Run 8 statistical leak detectors over IST date range with anti-double-counting clustering |
+| `POST` | `/api/expense-leaks/:anomalyId/review` | Authenticated | Review or mark anomaly as normal (30-day dismissal mute) |
+| `POST` | `/api/expense-leaks/:anomalyId/feedback` | Authenticated | Submit machine learning feedback (thumbs up/down with reason tags) |
+
+### Wastage
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `GET` | `/api/wastage` | Authenticated | List wastage records with date filtering, search, and period loss totals |
+| `POST` | `/api/wastage` | Authenticated | Record new wastage entry with 3 core fields (itemName, quantity, approxValue) |
+| `PUT` | `/api/wastage/:id` | Authenticated | Update existing wastage entry |
+| `DELETE` | `/api/wastage/:id` | Authenticated | Remove wastage entry |
+| `GET` | `/api/wastage/summary` | Authenticated | Quick KPI metrics for Today and This Month |
 
 ---
 
@@ -501,6 +584,11 @@ node --check src/routes/tables.js
 node --check src/routes/menu.js
 node --check src/routes/sales.js
 node --check src/routes/reports.js
+node --check src/routes/expenseLeak.js
+node --check src/utils/expenseLeakEngine.js
+node --check src/models/ExpenseLeakReview.js
+node --check src/routes/wastage.js
+node --check src/models/Wastage.js
 ```
 
 ---

@@ -20,7 +20,6 @@ import {
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import {
-  LayoutGrid,
   Plus,
   Users,
   Utensils,
@@ -69,6 +68,7 @@ import {
   PrintMode,
   BillItem,
 } from '@/lib/thermal-print';
+import DiningTableIcon from '@/components/ui/DiningTableIcon';
 
 export interface CartItemConfig {
   menuItemId: string;
@@ -1425,7 +1425,7 @@ export default function TablesPage() {
             <div className="bg-white dark:bg-gray-900 p-3 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <LayoutGrid className="w-5 h-5 text-red-600" />
+                  <DiningTableIcon className="w-5 h-5 text-red-600" />
                   <h1 className="text-lg font-black text-gray-900 dark:text-white tracking-tight">
                     Table View
                   </h1>
@@ -1603,7 +1603,7 @@ export default function TablesPage() {
               </div>
             ) : tables.length === 0 ? (
               <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-12 text-center">
-                <LayoutGrid className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+                <DiningTableIcon className="w-10 h-10 mx-auto text-gray-300 mb-3" />
                 <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">No tables configured</h3>
                 <p className="text-xs text-gray-500 mt-1">Add tables to start seating guests and recording orders.</p>
                 {isAdmin && (

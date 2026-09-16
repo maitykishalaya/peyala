@@ -20,7 +20,7 @@ router.get('/summary', async (req, res) => {
     const yesterdayDate = new Date(todayRange.start.getTime() - 1000);
     const yesterdayRange = getIstDayRange(yesterdayDate);
 
-    const [currentYear, currentMonth] = todayRange.istDateStr.split('-').map(Number);
+    const [currentYear, currentMonth, currentDay] = todayRange.istDateStr.split('-').map(Number);
     const monthStartRange = getIstDayRange(`${currentYear}-${String(currentMonth).padStart(2, '0')}-01`);
     const monthStart = monthStartRange.start;
 
@@ -236,6 +236,18 @@ router.get('/summary', async (req, res) => {
     const totalMonthExpenses = monthExpenses[0]?.total || 0;
     const rawMaterialsThisMonth = expenseByCategory.find(e => e._id === 'Raw Materials')?.total || 0;
 
+    // Current month day progress & daily averages
+    const daysElapsed = Math.max(1, currentDay);
+    const totalDaysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const dailyAverage = {
+      revenue: Math.round((monthSales.total || 0) / daysElapsed),
+      outlet: Math.round((monthSales.outlet || 0) / daysElapsed),
+      zomato: Math.round((monthSales.zomato || 0) / daysElapsed),
+      fatafat: Math.round((monthSales.fatafat || 0) / daysElapsed),
+      other: Math.round((monthSales.other || 0) / daysElapsed),
+      expenses: Math.round((totalMonthExpenses || 0) / daysElapsed),
+    };
+
     // 5. Owner Note singleton
     const ownerNoteDoc = await OwnerNote.getSingleton();
     const ownerNoteText = ownerNoteDoc?.text || '';
@@ -268,6 +280,9 @@ router.get('/summary', async (req, res) => {
         expenses: totalMonthExpenses,
         grossProfit: monthSales.total - rawMaterialsThisMonth,
         netProfit: monthSales.total - totalMonthExpenses,
+        daysElapsed,
+        totalDaysInMonth,
+        dailyAverage,
       },
       accounts,
       inventoryValue,

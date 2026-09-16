@@ -5,6 +5,8 @@ interface StatCardProps {
   title: string;
   value: number | string;
   subtitle?: string;
+  badge?: string;
+  extra?: React.ReactNode;
   icon?: LucideIcon;
   iconColor?: string;
   trend?: number;
@@ -28,7 +30,17 @@ const iconColors = {
   orange: 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
 };
 
-export default function StatCard({ title, value, subtitle, icon: Icon, trend, isCurrency = true, accent = 'blue' }: StatCardProps) {
+export default function StatCard({
+  title,
+  value,
+  subtitle,
+  badge,
+  extra,
+  icon: Icon,
+  trend,
+  isCurrency = true,
+  accent = 'blue',
+}: StatCardProps) {
   const displayValue = isCurrency ? formatCurrency(Number(value)) : value;
   return (
     <div className={cn('card p-5 bg-gradient-to-br border', accents[accent])}>
@@ -36,7 +48,13 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, is
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{title}</p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1 truncate">{displayValue}</p>
+          {badge && (
+            <div className="inline-flex items-center gap-1 mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-md bg-white/80 dark:bg-gray-900/60 border border-black/5 dark:border-white/10 shadow-2xs text-gray-700 dark:text-gray-200">
+              <span>{badge}</span>
+            </div>
+          )}
           {subtitle && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{subtitle}</p>}
+          {extra && <div className="mt-1.5">{extra}</div>}
           {trend !== undefined && (
             <div className={cn('flex items-center gap-1 mt-2 text-xs font-medium', trend >= 0 ? 'text-green-600' : 'text-red-600')}>
               {trend >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}

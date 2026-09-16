@@ -121,6 +121,17 @@ export const paymentsApi = {
   delete: (id: string) => api.delete(`/payments/${id}`),
 };
 
+// Wastage
+export const wastageApi = {
+  list: (params?: any) => api.get('/wastage', { params }),
+  create: (data: any) => api.post('/wastage', data),
+  update: (id: string, data: any) => api.put(`/wastage/${id}`, data),
+  delete: (id: string) => api.delete(`/wastage/${id}`),
+  summary: (params?: any) => api.get('/wastage/summary', { params }),
+  todayStatus: () => api.get('/wastage/today-status'),
+  signZeroWastage: (data?: { notes?: string }) => api.post('/wastage/zero-wastage', data || {}),
+};
+
 // Staff
 export const staffApi = {
   list: () => api.get('/staff'),
@@ -192,4 +203,13 @@ export const backupApi = {
 export const ownerNoteApi = {
   get: () => api.get('/owner-note'),
   update: (data: any) => api.put('/owner-note', data),
+};
+
+// Expense Leak Detector
+export const expenseLeakApi = {
+  getAnalysis: (params?: any) => api.get('/expense-leaks', { params }),
+  reviewAnomaly: (anomalyId: string, data: { status: string; dismissDays?: number }) =>
+    api.post(`/expense-leaks/${anomalyId}/review`, data),
+  submitFeedback: (anomalyId: string, data: { isUseful: boolean; feedbackReason?: string; feedbackNotes?: string }) =>
+    api.post(`/expense-leaks/${anomalyId}/feedback`, data),
 };

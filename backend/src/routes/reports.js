@@ -6,6 +6,7 @@ const PurchaseEntry = require('../models/PurchaseEntry');
 const InventoryItem = require('../models/InventoryItem');
 const Order = require('../models/Order');
 const Table = require('../models/Table');
+const Wastage = require('../models/Wastage');
 const { auth } = require('../middleware/auth');
 const { getIstDayRange } = require('../utils/date');
 
@@ -15,26 +16,124 @@ router.use(auth);
 router.get('/pnl', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const start = new Date(startDate);
-    const end = new Date(endDate + 'T23:59:59');
+    const nowRange = getIstDayRange(new Date());
+    const [y, m] = nowRange.istDateStr.split('-').map(Number);
+    const defaultStart = getIstDayRange(`${y}-${String(m).padStart(2, '0')}-01`).start;
+    const defaultEnd = nowRange.end;
 
-    const salesAgg = await SalesEntry.aggregate([
-      { $match: { date: { $gte: start, $lte: end } } },
-      { $group: {
-        _id: null,
-        outlet: { $sum: '$outletSales' },
-        zomato: { $sum: '$zomato.netSettlement' },
-        fatafat: { $sum: '$fatafat.netSettlement' },
-        other: { $sum: '$otherSales' },
-        total: { $sum: '$totalRevenue' }
-      }}
+    let start = defaultStart;
+    if (startDate && String(startDate).trim()) {
+      try {
+        start = getIstDayRange(String(startDate).trim()).start;
+      } catch {
+        start = new Date(startDate);
+      }
+    }
+
+    let end = defaultEnd;
+    if (endDate && String(endDate).trim()) {
+      try {
+        end = getIstDayRange(String(endDate).trim()).end;
+      } catch {
+        end = new Date(String(endDate).trim() + 'T23:59:59.999');
+      }
+    }
+
+    const [salesAgg, expensesByCat, dailySalesAgg, wastageAgg] = await Promise.all([
+      SalesEntry.aggregate([
+        { $match: { date: { $gte: start, $lte: end } } },
+        { $group: {
+          _id: null,
+          outlet: { $sum: '$outletSales' },
+          zomato: { $sum: '$zomato.netSettlement' },
+          fatafat: { $sum: '$fatafat.netSettlement' },
+          other: { $sum: '$otherSales' },
+          total: { $sum: '$totalRevenue' }
+        }}
+      ]),
+      Payment.aggregate([
+        { $match: { date: { $gte: start, $lte: end } } },
+        { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $sort: { total: -1 } }
+      ]),
+      SalesEntry.aggregate([
+        { $match: { date: { $gte: start, $lte: end } } },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: '+05:30' } },
+          outlet: { $sum: '$outletSales' },
+          zomato: { $sum: '$zomato.netSettlement' },
+          fatafat: { $sum: '$fatafat.netSettlement' },
+          other: { $sum: '$otherSales' },
+          total: { $sum: '$totalRevenue' }
+        }},
+        { $sort: { _id: 1 } }
+      ]),
+      Wastage.aggregate([
+        { $match: { date: { $gte: start, $lte: end } } },
+        { $group: {
+          _id: null,
+          total: { $sum: '$approxValue' },
+          totalQty: { $sum: '$quantity' },
+          count: { $sum: 1 }
+        }}
+      ])
     ]);
 
-    const expensesByCat = await Payment.aggregate([
-      { $match: { date: { $gte: start, $lte: end } } },
-      { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
-      { $sort: { total: -1 } }
-    ]);
+    const wastageResult = wastageAgg[0] || { total: 0, totalQty: 0, count: 0 };
+    const wastage = {
+      total: wastageResult.total || 0,
+      totalQty: wastageResult.totalQty || 0,
+      count: wastageResult.count || 0
+    };
+
+    // Build complete daily sales timeline for the selected period
+    const dailyMap = new Map();
+    dailySalesAgg.forEach(d => {
+      if (d._id) dailyMap.set(d._id, d);
+    });
+
+    let dailySales = [];
+    if (startDate && endDate && /^\d{4}-\d{2}-\d{2}$/.test(String(startDate).trim()) && /^\d{4}-\d{2}-\d{2}$/.test(String(endDate).trim())) {
+      const [sy, sm, sd] = String(startDate).trim().split('-').map(Number);
+      const [ey, em, ed] = String(endDate).trim().split('-').map(Number);
+      const startUtc = Date.UTC(sy, sm - 1, sd);
+      const endUtc = Date.UTC(ey, em - 1, ed);
+      const diffDays = Math.round((endUtc - startUtc) / 86400000) + 1;
+
+      if (diffDays > 0 && diffDays <= 62) {
+        for (let i = 0; i < diffDays; i++) {
+          const dObj = new Date(startUtc + i * 86400000);
+          const dateStr = dObj.toISOString().split('T')[0];
+          const entry = dailyMap.get(dateStr);
+          dailySales.push({
+            date: dateStr,
+            total: entry?.total || 0,
+            outlet: entry?.outlet || 0,
+            zomato: entry?.zomato || 0,
+            fatafat: entry?.fatafat || 0,
+            other: entry?.other || 0
+          });
+        }
+      } else {
+        dailySales = dailySalesAgg.map(d => ({
+          date: d._id,
+          total: d.total || 0,
+          outlet: d.outlet || 0,
+          zomato: d.zomato || 0,
+          fatafat: d.fatafat || 0,
+          other: d.other || 0
+        }));
+      }
+    } else {
+      dailySales = dailySalesAgg.map(d => ({
+        date: d._id,
+        total: d.total || 0,
+        outlet: d.outlet || 0,
+        zomato: d.zomato || 0,
+        fatafat: d.fatafat || 0,
+        other: d.other || 0
+      }));
+    }
 
     // Raw Materials cost comes from Payments now (every purchase already
     // creates a matching Payment record under 'Raw Materials'), so we
@@ -57,6 +156,8 @@ router.get('/pnl', async (req, res) => {
         total: sales.total
       },
       expenses: { rawMaterials, byCategory: expensesByCat, total: totalExpenses },
+      wastage,
+      dailySales,
       grossProfit,
       netProfit,
       grossMargin: sales.total > 0 ? ((grossProfit / sales.total) * 100).toFixed(1) : 0,

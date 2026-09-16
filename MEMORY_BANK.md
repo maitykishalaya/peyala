@@ -17,6 +17,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 5. **Inventory & Costing** (raw material procurement, supplier ledgers, weighted average unit cost [WAC] calculation).
 6. **Financial Operations** (multi-account ledger, outgoing payments, double-entry style balance sheet, and P&L statements).
 7. **Staff & Payroll** (employee directory, monthly attendance calendar with leave cap enforcement, advances, bonuses, and salary disbursal).
+8. **Expense Leak Detection & Operational Waste Auditing** (autonomous statistical detection of price spikes, expense spikes, usage surges, sales-adjusted anomalies, duplicate payments, and supplier price variance with anti-double-counting clustering and 30-day review persistence).
+9. **Wastage Tracking & Operational Loss Auditing** (logging spoiled, expired, or discarded food and ingredients via 3 core fields: item name, quantity, and approximate value, with real-time period aggregation on the P&L statement).
 
 ---
 
@@ -198,8 +200,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - **Full Operational POS Authority**: Can open dining orders, dispatch KOT rounds, change item preparation states, soft-cancel items, apply discounts, finalize bills, collect payment settlements, clear table reservations, and manage menu items and add-ons.
   - Structural dining table setup (`POST/DELETE /api/tables`) and user administration remain strictly restricted to Administrators.
 - **Staff**:
-  - **Read-Only POS View**: Can monitor live table occupancy and active orders.
-  - **Reprint Permissions**: Can trigger **"Print Bill"** and **"Print KOT"** to hand receipts to guests. All mutating operations return HTTP 403 Forbidden.
+  - **Full Operational POS Authority (`staffOrAdmin`)**: Granted operational access for taking orders, dispatching multi-round KOT tickets, marking food served, generating customer bills, triggering remote prints, applying discounts, and collecting payment settlements to free tables.
+  - Structural setup (tables layout creation/deletion, menu configuration, user management) and administrative edits/deletions of settled bills remain restricted to Manager/Admin.
 
 ### 3.9 Attendance & Leave Cap Enforcement & High-Contrast UI
 - **Statuses**: `present` (P), `absent` (A), `leave` (L), `halfday` (H). Legacy `holiday` is automatically normalized to `halfday` (`H`).
@@ -355,6 +357,52 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - If neither entry time is logged, the attendance status is automatically set to **`absent`** (`A`).
   - Persisted in the `Attendance` collection for `{ staff, date }`, synchronizing both the bottom shift table and the top monthly attendance calendar grid.
 
+### 3.17 Visual Bar Graphs, Daily Averages & P&L Per-Day Sales Breakdown
+- **Dashboard 30-Day Revenue Trend Bar Graph (`/dashboard`)**:
+  - Replaced AreaChart with a clean, high-contrast `<BarChart>` displaying daily revenue bars with top rounded corners (`radius={[4, 4, 0, 0]}`), IST date labels, hover currency tooltips, and an active day count pill.
+- **Dashboard Real-Time Daily Averages**:
+  - **Top KPI (This Month Revenue)**: Displays an `Avg: ₹X/day` badge calculated dynamically from month-to-date revenue divided by elapsed calendar days in the current month.
+  - **Sales Channel Performance Section**: Each sales channel card (Outlet Sales, Zomato, Fatafat, Other Sales) features a dedicated `Daily Avg: ₹X /day` badge showing current average daily sales performance per channel.
+- **P&L Statement Per-Day Sales Bar Graph (`/reports`)**:
+  - **Backend IST Aggregation (`GET /api/reports/pnl`)**: Aggregates daily sales directly from `SalesEntry` using Indian Standard Time (`$dateToString` with timezone `+05:30`). For date ranges up to 62 days, builds a complete calendar timeline with 0-fill for days without sales, guaranteeing that the sum of the daily bars exactly equals the P&L statement's Total Revenue.
+  - **Visual Daily Sales Chart**: Features a responsive `<BarChart>` with readable date labels (e.g. `14 Sep`), formatted currency tooltips displaying channel breakdowns, total period revenue, and recorded day counts.
+  - Cache bumped to `peyala_reports_pnl_cache_v2`.
+- **Authentic Restaurant Dining Table Icon**:
+  - Replaced generic grid icon with an authentic dining table icon (`DiningTableIcon.tsx`) featuring a circular dining table, place setting, and paired dining chairs across the sidebar drawer, mobile bottom bar, and floor plan header.
+
+### 3.18 Expense Leak Detector & Anti-Double-Counting Cluster Architecture (`/expense-leak-detector`)
+- **Operational Intent**:
+  - Provide an autonomous financial leak auditing engine scanning real historical business expenses (`Payment`), raw material procurement (`PurchaseEntry`), and daily sales (`SalesEntry` / `Order`) to flag unusual spending, price hikes, inventory over-consumption, and duplicate vouchers without accusatory language.
+- **8 Deterministic Statistical Detectors (`backend/src/utils/expenseLeakEngine.js`)**:
+  1. **Price Spike**: Item unit price exceeds > 15% above its historical median (requires $\ge$ 2 prior purchases).
+  2. **Expense Spike**: Category spending exceeds > 25% above its baseline monthly spend.
+  3. **Usage Spike**: Physical item consumption (quantity per day) exceeds > 20% above its historical daily rate.
+  4. **Sales-Adjusted Anomaly**: Compares expense growth against sales growth; suppresses alerts when expense expansion is driven by proportional sales growth (e.g. +40% raw material with +45% sales is not flagged).
+  5. **Small Expense Accumulation**: Detects frequent petty expenses (< ₹500 or < ₹1,000) that aggregate to > ₹3,000 across $\ge$ 4 transactions.
+  6. **Duplicate Expenses**: Identifies identical amounts paid to the same payee or category within a 72-hour window.
+  7. **Supplier Price Variance**: Flags when different vendors charge $\ge$ 10% price variance for the exact same raw material item.
+  8. **Purchase Frequency Anomaly**: Flags unusual buying intervals (e.g., ordering daily instead of regular 6-day intervals).
+- **Anti-Double-Counting Root-Cause Clustering**:
+  - Overlapping item-level anomalies (e.g., Chicken price spike ₹18,200) and category anomalies (e.g., Raw Materials food cost anomaly ₹22,000) are clustered under `cluster_food_cost_and_raw_materials`.
+  - Deduplicated Cluster Impact = $\max(\text{Category Anomaly Impact}, \sum \text{Item Anomaly Impacts})$.
+  - Top KPI cards display the deduplicated Potential Monthly Impact to prevent inflating projected losses.
+- **Review Dismissal & Machine Feedback Learning (`backend/src/models/ExpenseLeakReview.js`)**:
+  - Users can mark anomalies as normal, muting them for 30 days (`dismissedUntil = Date.now() + 30 * 86400000`) with audit logging.
+  - Users can submit 👍 / 👎 feedback with reason tags (`seasonal_price_change`, `menu_expansion_or_rush`, `bulk_purchase_discount`, `incorrect_data_entry`, `other`) to tune future detection sensitivity.
+- **UI & Visualization (`frontend/src/app/expense-leak-detector/page.tsx`)**:
+  - Features Top 3 Action Priorities banner, multi-dimensional filter bar, expandable anomaly cards with deduplication badges, Recharts historical trend comparisons, multi-supplier comparison tables, and raw transaction audit trails.
+
+### 3.19 Wastage Entry Module & P&L Statement Integration (`/wastage`)
+- **Frictionless 3-Field Wastage Capture**:
+  - Requires **`itemName`** (Name of the item), **`quantity`** (Qty > 0), and **`approxValue`** (Approximate value in ₹).
+  - Defaults date to today (IST compatible), supports unit of measure (`kg`, `g`, `pcs`, `plates`, `portions`, `litres`, `box`), optional reason tags (`Spoiled`, `Expired`, `Burnt`, `Dropped`), and tracks the user who logged the entry.
+- **P&L Statement Integration Without Profit Distortion (`/reports`)**:
+  - `GET /api/reports/pnl` aggregates all `Wastage` entries in the query period `{ date: { $gte: start, $lte: end } }` to produce `wastage: { total, totalQty, count }`.
+  - **Zero Impact on Financial Bottom-Line**: Per business requirement, recorded wastage is displayed as an informational operational loss metric; it does NOT alter or deduct from Revenue, Gross Profit, Total Expenses, or Net Profit calculations.
+  - The P&L view displays a 5th **Recorded Wastage** KPI card (`Info` badge) and an informational banner with a 1-click jump button to the wastage log.
+- **Client Cache Synchronization**:
+  - Mutating wastage (create, edit, delete) purges `peyala_reports_pnl_cache_v2` and `peyala_wastage_cache_v1` so reports refresh immediately.
+
 ---
 
 ## 4) Database Models & Schemas
@@ -373,6 +421,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | **`Staff`** | `backend/src/models/Staff.js` | `name`, `phone`, `position`, `monthlySalary`, `dailySalary`, `defaultDutyHours`, `totalSalaryPaid`, `totalAdvancePaid`, `status`. |
 | **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `payableAmount`, `note`, `markedBy`. |
 | **`Payment`** | `backend/src/models/Payment.js` | `date`, `amount`, `payee`, `category`, `subcategory`, `paidFrom`, `paymentMode`. |
+| **`ExpenseLeakReview`** | `backend/src/models/ExpenseLeakReview.js` | `anomalyId` (unique hash), `detector`, `entityType`, `entityKey`, `status` (`new`, `reviewed`, `dismissed`), `dismissedUntil` (30d date), `feedback` (`isUseful`, `reason`, `notes`), `reviewedBy`. |
+| **`Wastage`** | `backend/src/models/Wastage.js` | `itemName`, `quantity`, `unit`, `approxValue`, `date`, `reason`, `createdBy`. |
 
 ---
 
@@ -397,6 +447,20 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - Structural mutations (`POST/DELETE /api/tables`, `/api/users`, `PUT/DELETE /api/orders/:id/settled`) MUST remain wrapped with `adminOnly`.
 - In frontend views, wrap POS ordering, KOT dispatch, and billing buttons in `canManageOrders` (where `canManageOrders = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'staff'`).
 
+### 5.5 POS Navigation & Drawer Icons
+- The dining tables section uses `DiningTableIcon` (`frontend/src/components/ui/DiningTableIcon.tsx`) instead of generic abstract grid icons (`LayoutGrid`), depicting an authentic restaurant dining table flanked with chairs matching standard 24x24 Lucide vector styling.
+
+### 5.6 Dashboard Daily Averages & MTD Metrics
+- The dashboard (`/dashboard`) displays current daily average sales for the active month both at the top in the "This Month Revenue" StatCard (`badge: Avg: ₹X/day`) and broken down per channel in the bottom "This Month — Sales Channel Performance" section (Outlet, Zomato, Fatafat, Other).
+- The daily average is computed server-side in `backend/src/routes/dashboard.js` based on IST calendar days elapsed (`daysElapsed = Math.max(1, currentDay)`) with total days in month (`totalDaysInMonth`), with seamless client-side fallbacks in `frontend/src/app/dashboard/page.tsx`.
+
+### 5.7 Wastage Entry, 10 PM Persistent Prompt & P&L Statement Conventions
+- **3 Core Fields Required**: `itemName` (String), `quantity` (Number > 0), `approxValue` (Number >= 0). Optional fields: `unit` (defaults to 'units'), `reason`, `notes`.
+- **P&L Integrity Rule**: Total wastage for the selected period is reported strictly as an informational metric (`wastage: { total, totalQty, count }`) on `GET /api/reports/pnl` and displayed on the P&L page (`/reports`). Per strict user instructions, it does NOT deduct from Gross Profit or Net Profit.
+- **10:00 PM Persistent Prompt Banner**: Mounted in `AppLayout.tsx` (`<WastagePromptBanner />`). When current time $\ge 22:00$ (or overnight $< 04:00$), checks `GET /api/wastage/today-status`. If no entry exists for the current IST day, renders a non-dismissible amber/rose alert across every page until recorded.
+- **Zero-Wastage Sign-Off Flow**: Provides a double-confirmation modal (`POST /api/wastage/zero-wastage`) creating an audited zero-value entry (`approxValue: 0`, `isZeroWastage: true`) satisfying the end-of-day checklist without distorting financial figures.
+- **Cross-Component Event Notification**: Mutating wastage emits `window.dispatchEvent(new CustomEvent('peyala_wastage_updated'))` and invalidates `peyala_reports_pnl_cache_v2` for immediate real-time sync across pages without full reloads.
+
 ---
 
 ## 6) Verification & Quality Checklist
@@ -411,11 +475,18 @@ Whenever changes are made, run this validation suite before concluding:
 
 2. **Backend Syntax Verification**:
    ```bash
-   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js
+   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js && node --check src/routes/expenseLeak.js && node --check src/utils/expenseLeakEngine.js && node --check src/models/ExpenseLeakReview.js && node --check src/routes/wastage.js && node --check src/models/Wastage.js
    ```
    *Must exit with code 0.*
 
-3. **Documentation Sync**:
+3. **Automated Unit Tests**:
+   ```bash
+   node scratch/test_expense_leak_engine.js
+   node scratch/test_wastage_and_pnl.js
+   ```
+   *All tests must pass.*
+
+4. **Documentation Sync**:
    - Update `README.md` if any user-facing features, routes, or workflows changed.
    - Update `MEMORY_BANK.md` with architectural, schema, or convention decisions.
 

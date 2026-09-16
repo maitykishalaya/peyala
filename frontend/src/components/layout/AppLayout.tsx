@@ -6,16 +6,18 @@ import { useAuth } from '@/lib/auth';
 import { cn, getInitials } from '@/lib/utils';
 import Walkthrough from '@/components/ui/Walkthrough';
 import ThermalPreviewModal from '@/components/ui/ThermalPreviewModal';
+import WastagePromptBanner from '@/components/ui/WastagePromptBanner';
 import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
   Menu, X, LogOut, ChevronRight, Moon, Sun, Scale, CalendarCheck,
-  LayoutGrid, UtensilsCrossed, ChefHat
+  UtensilsCrossed, ChefHat, ShieldAlert, Trash2
 } from 'lucide-react';
+import DiningTableIcon from '@/components/ui/DiningTableIcon';
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/tables', label: 'Tables', icon: LayoutGrid },
+  { href: '/tables', label: 'Tables', icon: DiningTableIcon },
   { href: '/kds', label: 'Kitchen KDS', icon: ChefHat },
   { href: '/menu', label: 'Menu', icon: UtensilsCrossed },
   { href: '/accounts', label: 'Accounts', icon: Wallet },
@@ -24,6 +26,8 @@ const NAV = [
   { href: '/suppliers', label: 'Suppliers', icon: Users },
   { href: '/sales', label: 'Sales', icon: TrendingUp },
   { href: '/payments', label: 'Payments', icon: ArrowUpRight },
+  { href: '/wastage', label: 'Wastage', icon: Trash2 },
+  { href: '/expense-leak-detector', label: 'Leak Detector', icon: ShieldAlert },
   { href: '/staff', label: 'Staff', icon: UserCheck },
   { href: '/attendance', label: 'Attendance', icon: CalendarCheck },
   { href: '/balancesheet', label: 'Balance Sheet', icon: Scale },
@@ -230,6 +234,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden">
+        {/* End of Day Wastage Prompt (Active after 10 PM until logged) */}
+        <WastagePromptBanner />
+
         {/* Topbar */}
         <header className="sticky top-0 z-20 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-3 sm:gap-4 px-3 sm:px-4 flex-shrink-0">
           {/* Mobile brand icon */}

@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import StatCard from '@/components/dashboard/StatCard';
 import { dashboardApi, ownerNoteApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw } from 'lucide-react';
+import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw, ShieldAlert, ArrowRight } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, PieChart, Pie, Cell, Legend, BarChart, Bar
@@ -12,7 +13,7 @@ import {
 
 const COLORS = ['#e26411', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-const CACHE_KEY = 'peyala_dashboard_cache_v2';
+const CACHE_KEY = 'peyala_dashboard_cache_v3';
 
 function readCache() {
   try {
@@ -109,6 +110,16 @@ export default function DashboardPage() {
   const yesterday = data?.yesterday || {};
   const accounts = data?.accounts || [];
   const charts = data?.charts || {};
+
+  const daysElapsed = month.daysElapsed || Math.max(1, new Date().getDate());
+  const dailyAverage = month.dailyAverage || {
+    revenue: Math.round((month.revenue || 0) / daysElapsed),
+    outlet: Math.round((month.outlet || 0) / daysElapsed),
+    zomato: Math.round((month.zomato || 0) / daysElapsed),
+    fatafat: Math.round((month.fatafat || 0) / daysElapsed),
+    other: Math.round((month.other || 0) / daysElapsed),
+    expenses: Math.round((month.expenses || 0) / daysElapsed),
+  };
 
   // Fill sales trend gaps
   const salesTrendData = charts.salesTrend?.map((d: any) => ({
@@ -236,7 +247,14 @@ export default function DashboardPage() {
 
         {/* KPI Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard title="This Month Revenue" value={month.revenue || 0} icon={TrendingUp} accent="blue" subtitle={`Outlet + Zomato + Fatafat`} />
+          <StatCard
+            title="This Month Revenue"
+            value={month.revenue || 0}
+            icon={TrendingUp}
+            accent="blue"
+            badge={`Avg: ${formatCurrency(dailyAverage.revenue || 0)}/day`}
+            subtitle={`Outlet + Zomato + Fatafat`}
+          />
           <StatCard title="Month Expenses" value={month.expenses || 0} icon={ShoppingCart} accent="red" subtitle="All categories" />
           <StatCard title="Gross Profit" value={month.grossProfit || 0} icon={TrendingUp} accent="green" subtitle={`${month.revenue > 0 ? ((month.grossProfit / month.revenue) * 100).toFixed(1) : 0}% margin`} />
           <StatCard title="Net Profit" value={month.netProfit || 0} icon={TrendingDown} accent={month.netProfit >= 0 ? 'green' : 'red'} subtitle="After all expenses" />
@@ -293,6 +311,18 @@ export default function DashboardPage() {
                 <span className="text-sm text-gray-500">This Month Fatafat</span>
                 <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">{formatCurrency(month.fatafat || 0)}</span>
               </div>
+              <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800">
+                <span className="text-sm text-gray-500 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+                  Expense Leaks
+                </span>
+                <Link
+                  href="/expense-leak-detector"
+                  className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
+                >
+                  Run Detector <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -301,22 +331,23 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Sales Trend */}
           <div className="lg:col-span-2 card p-5">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">30-Day Revenue Trend</h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-gray-900 dark:text-white">30-Day Revenue Trend</h3>
+              {salesTrendData.length > 0 && (
+                <span className="text-xs text-gray-400">
+                  {salesTrendData.length} {salesTrendData.length === 1 ? 'day recorded' : 'days recorded'}
+                </span>
+              )}
+            </div>
             {salesTrendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={salesTrendData}>
-                  <defs>
-                    <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#e26411" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#e26411" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={salesTrendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
                   <Tooltip formatter={(v: any) => formatCurrency(v)} />
-                  <Area type="monotone" dataKey="Revenue" stroke="#e26411" strokeWidth={2} fill="url(#rev)" />
-                </AreaChart>
+                  <Bar dataKey="Revenue" fill="#e26411" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             ) : <p className="text-sm text-gray-400 text-center py-16">No sales data yet</p>}
           </div>
@@ -340,20 +371,72 @@ export default function DashboardPage() {
 
         {/* Channel Performance */}
         <div className="card p-5">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">This Month — Sales Channel Performance</h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-4">
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">This Month — Sales Channel Performance</h3>
+              <p className="text-xs text-gray-400">Channel revenue and current daily average breakdown</p>
+            </div>
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800/60 px-2.5 py-1 rounded-md border border-gray-200/50 dark:border-gray-700/50 self-start sm:self-auto">
+              Day {daysElapsed}{month.totalDaysInMonth ? ` of ${month.totalDaysInMonth}` : ''}
+            </span>
+          </div>
+
+          <div className={cn(
+            'grid gap-3 sm:gap-4',
+            (month.other || 0) > 0 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'
+          )}>
             {[
-              { label: 'Outlet Sales', value: month.outlet || 0, pct: month.revenue > 0 ? ((month.outlet / month.revenue) * 100).toFixed(0) : 0, color: '#e26411' },
-              { label: 'Zomato Net', value: month.zomato || 0, pct: month.revenue > 0 ? ((month.zomato / month.revenue) * 100).toFixed(0) : 0, color: '#ef4444' },
-              { label: 'Fatafat Net', value: month.fatafat || 0, pct: month.revenue > 0 ? ((month.fatafat / month.revenue) * 100).toFixed(0) : 0, color: '#f97316' },
-            ].map(({ label, value, pct, color }) => (
-              <div key={label} className="text-center">
-                <p className="text-xs text-gray-500 mb-1">{label}</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(value)}</p>
-                <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 mt-2">
-                  <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+              {
+                label: 'Outlet Sales',
+                value: month.outlet || 0,
+                avg: dailyAverage.outlet || 0,
+                pct: month.revenue > 0 ? ((month.outlet / month.revenue) * 100).toFixed(0) : 0,
+                color: '#e26411',
+              },
+              {
+                label: 'Zomato Net',
+                value: month.zomato || 0,
+                avg: dailyAverage.zomato || 0,
+                pct: month.revenue > 0 ? ((month.zomato / month.revenue) * 100).toFixed(0) : 0,
+                color: '#ef4444',
+              },
+              {
+                label: 'Fatafat Net',
+                value: month.fatafat || 0,
+                avg: dailyAverage.fatafat || 0,
+                pct: month.revenue > 0 ? ((month.fatafat / month.revenue) * 100).toFixed(0) : 0,
+                color: '#f97316',
+              },
+              ...((month.other || 0) > 0 ? [{
+                label: 'Other Sales',
+                value: month.other || 0,
+                avg: dailyAverage.other || 0,
+                pct: month.revenue > 0 ? ((month.other / month.revenue) * 100).toFixed(0) : 0,
+                color: '#8b5cf6',
+              }] : []),
+            ].map(({ label, value, avg, pct, color }) => (
+              <div
+                key={label}
+                className="text-center p-3.5 rounded-xl bg-gray-50/60 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800 flex flex-col justify-between"
+              >
+                <div>
+                  <p className="text-xs text-gray-500 mb-1 font-medium">{label}</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(value)}</p>
+
+                  {/* Daily Average Sales Badge */}
+                  <div className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-700/80 px-2.5 py-1 rounded-full mt-2 shadow-2xs">
+                    <span className="text-gray-400 font-normal">Daily Avg:</span>
+                    <span className="font-bold text-brand-600 dark:text-brand-400">{formatCurrency(avg)}</span>
+                    <span className="text-gray-400 text-[10px] font-normal">/day</span>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">{pct}% of total</p>
+
+                <div className="mt-3.5">
+                  <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5">
+                    <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{pct}% of total</p>
+                </div>
               </div>
             ))}
           </div>
