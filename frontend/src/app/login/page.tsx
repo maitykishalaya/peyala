@@ -821,8 +821,8 @@ export default function LoginPage() {
       {/* Mobile Top Navigation Switcher */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-gray-900/90 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center text-lg shadow-md">
-            🍵
+          <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-gray-900 border border-gray-800 shadow-md">
+            <img src="/icon.png" alt="Peyala Logo" className="w-full h-full object-contain p-0.5" />
           </div>
           <div>
             <span className="font-black text-lg text-white tracking-tight">Peyala</span>
@@ -863,8 +863,8 @@ export default function LoginPage() {
         {/* Top Pitch Header Bar (Pinned) */}
         <div className="p-4 sm:p-5 lg:px-8 lg:py-4 border-b border-gray-800/80 shrink-0 bg-gray-950/90 backdrop-blur-md flex items-center justify-between gap-4 z-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-500 flex items-center justify-center text-xl shadow-lg shadow-brand-500/20">
-              🍵
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center bg-gray-900 border border-gray-800 shadow-lg shadow-brand-500/20">
+              <img src="/icon.png" alt="Peyala Logo" className="w-full h-full object-contain p-1" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -1066,8 +1066,8 @@ export default function LoginPage() {
         <div className="w-full max-w-sm mx-auto space-y-6">
           {/* Brand Header */}
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-tr from-brand-600 to-brand-500 rounded-2xl mb-4 shadow-xl shadow-brand-500/25 ring-4 ring-brand-500/10">
-              <span className="text-3xl">🍵</span>
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-950 rounded-2xl mb-4 shadow-xl shadow-brand-500/20 ring-4 ring-brand-500/20 border border-gray-800 overflow-hidden p-2">
+              <img src="/icon.png" alt="Peyala Logo" className="w-full h-full object-contain" />
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Peyala Business</h2>
             <p className="text-xs sm:text-sm text-gray-400 mt-1 font-medium">Enterprise Restaurant Admin & POS Portal</p>
