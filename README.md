@@ -30,7 +30,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Staff & Attendance** | `/staff`, `/attendance` | Employee directory, monthly attendance calendar with leave cap enforcement, 2-shift duty time tracking (entry/exit), pro-rata salary deductions, advances, bonuses, and salary disbursals. |
 | **Balance Sheet** | `/balancesheet` | Dynamic statement of Assets (bank/cash accounts), Liabilities (GST liability, supplier dues, loans), and Net Equity. |
 | **Settings & Security** | `/settings` | Role-based user administration, audit logging, payment categories, database backup/restore, and dark/light mode. |
-| **Investor Pitch Deck & Login** | `/login` | High-margin 12-slide scrollable investor pitch deck paired with right-hand business authentication portal and 1-tap demo credentials. |
+| **Features Showcase & Login** | `/login` | 12-slide interactive scrollable feature showcase paired with right-hand business authentication portal and 1-tap demo credentials. |
 
 ---
 
@@ -367,12 +367,12 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Monthly Rollup**:
   - Employee cards and payroll exports display cumulative penalty fines for the month with high-contrast badge indicators.
 
-### 19. Investor Pitch Deck Landing Page & Side-by-Side Login Architecture (`/login`)
+### 19. Features Showcase Landing Page & Side-by-Side Login Architecture (`/login`)
 - **Side-by-Side Split Column Design**:
   - **Right Column (`lg:w-[440px] xl:w-[480px]`)**: Clean enterprise authentication portal with 1-tap demo credentials (`👑 Admin`, `💼 Manager`, `🍽️ Staff`), password reveal toggle, and production status indicator.
-  - **Left Column (`flex-1`)**: Vertically scrollable snap-scroll pitch deck (`snap-y snap-mandatory scroll-smooth`) presenting all 12 modules of Peyala v8 to prospective investors.
-- **12 Pitch Slides with Interactive Mockup Widgets**:
-  1. *Executive Summary*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
+  - **Left Column (`flex-1`)**: Vertically scrollable snap-scroll slides (`snap-y snap-mandatory scroll-smooth`) presenting all 12 modules of Peyala v8.
+- **12 Interactive Feature Slides with Live Mockup Widgets**:
+  1. *Platform Overview*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
   2. *Floor Operations*: 5-Stage Live Dining Room Lifecycle & Table Management (Petpooja-style table moves, instant status cues).
   3. *High-Speed Ordering*: High-Velocity POS Order Engine & Zero-Scroll Mobile Cart (3-column terminal, 3.8s order dispatch).
   4. *Kitchen Automation*: Kitchen Display System (KDS) & Prep Next Batching Engine (Cross-table dish aggregation, urgency color codes, kitchen chimes).
@@ -384,11 +384,11 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   10. *Workforce & Payroll*: 2-Shift Duty Tracking, Pro-Rata Deductions & Penalty Fines (Daily shortage calculations and reason logs).
   11. *Hardware Integration*: Dual-Mode 80mm ESC/POS Thermal Printing Architecture (Canvas/PDF preview mode & silent hardware dispatch).
   12. *Enterprise Security*: Role-Based Access Control, Tamper-Proof Audit & 1-Click Backup (Admin/Manager/Staff tiers and instant JSON dump).
-- **Investor Deck Navigation Controls**:
+- **Feature Showcase Navigation Controls**:
   - Slide counter (`01 / 12`), `[ Prev ]`, `[ Play/Pause ]`, `[ Next ]` buttons.
   - Keyboard arrow key navigation (`↑`/`↓`/`←`/`→`).
   - Sticky top category pills with bi-directional `IntersectionObserver` sync and auto-centering.
-  - Bottom slide dot indicator bar with responsive mobile view switcher (`Investor Deck` vs `Sign In`).
+  - Bottom slide dot indicator bar with responsive mobile view switcher (`Features` vs `Sign In`).
 
 ---
 

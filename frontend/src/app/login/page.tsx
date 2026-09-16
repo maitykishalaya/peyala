@@ -63,10 +63,10 @@ interface Slide {
 const PITCH_SLIDES: Slide[] = [
   {
     id: 'overview',
-    category: '01 · EXECUTIVE SUMMARY',
-    badge: 'The Peyala Vision',
+    category: '01 · PLATFORM OVERVIEW',
+    badge: 'Platform Overview',
     title: 'The All-In-One Autonomous Restaurant Operating System',
-    subtitle: 'Consolidating 5 fragmented tools into a single high-margin platform for modern dining establishments.',
+    subtitle: 'Consolidating 5 fragmented tools into a single unified platform for modern dining establishments.',
     problem: 'Restaurants bleed 12–18% of operating profit across disconnected POS terminals, paper KOTs, unrecorded food wastage, and undetected supplier price creep.',
     solution: 'Peyala v8 replaces fragmented point solutions with an end-to-end ecosystem combining live dine-in POS, kitchen display routing, double-entry financial accounting, and an autonomous expense leak detector.',
     metrics: [
@@ -695,10 +695,10 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Pitch Deck State
+  // Features Showcase State
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [activeTab, setActiveTab] = useState<'pitch' | 'login'>('pitch');
+  const [activeTab, setActiveTab] = useState<'features' | 'login'>('features');
   const slideContainerRef = useRef<HTMLDivElement>(null);
   const slideRefs = useRef<(HTMLDivElement | null)[]>([]);
   const pillRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -833,12 +833,12 @@ export default function LoginPage() {
         <div className="flex bg-gray-800 p-1 rounded-lg text-xs font-bold">
           <button
             type="button"
-            onClick={() => setActiveTab('pitch')}
+            onClick={() => setActiveTab('features')}
             className={`px-3 py-1.5 rounded-md transition-all ${
-              activeTab === 'pitch' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
+              activeTab === 'features' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
             }`}
           >
-            Investor Deck
+            Features
           </button>
           <button
             type="button"
@@ -853,14 +853,14 @@ export default function LoginPage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* LEFT COLUMN: SCROLLABLE INVESTOR PITCH DECK & FEATURE SHOWCASE SLIDES     */}
+      {/* LEFT COLUMN: SCROLLABLE FEATURES SHOWCASE SLIDES                          */}
       {/* ========================================================================= */}
       <div
         className={`flex-1 flex flex-col h-full overflow-hidden ${
-          activeTab === 'pitch' ? 'flex' : 'hidden lg:flex'
+          activeTab === 'features' ? 'flex' : 'hidden lg:flex'
         }`}
       >
-        {/* Top Pitch Header Bar (Pinned) */}
+        {/* Top Header Bar (Pinned) */}
         <div className="p-4 sm:p-5 lg:px-8 lg:py-4 border-b border-gray-800/80 shrink-0 bg-gray-950/90 backdrop-blur-md flex items-center justify-between gap-4 z-10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center bg-yellow-400 border border-yellow-500/60 shadow-lg shadow-yellow-500/20 p-1">
@@ -870,7 +870,7 @@ export default function LoginPage() {
               <div className="flex items-center gap-2">
                 <h2 className="font-black text-xl text-white tracking-tight">Peyala Business OS</h2>
                 <span className="bg-brand-500/20 text-brand-400 text-[10px] font-black px-2 py-0.5 rounded-full border border-brand-500/30 uppercase">
-                  Investor Pitch Deck
+                  Features
                 </span>
               </div>
               <p className="text-xs text-gray-400 hidden sm:block">Next-Gen Autonomous Restaurant Operations & ERP</p>
@@ -966,7 +966,7 @@ export default function LoginPage() {
                   </span>
                 </div>
 
-                {/* Big Investor Headline */}
+                {/* Feature Title */}
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight mb-2">
                   {slide.title}
                 </h1>
@@ -994,7 +994,7 @@ export default function LoginPage() {
                   {renderMockup(slide.mockupType)}
                 </div>
 
-                {/* Key Investment Metrics Cards */}
+                {/* Key Performance Metrics Cards */}
                 <div className="grid grid-cols-3 gap-3 mb-6">
                   {slide.metrics.map((m, mIdx) => (
                     <div key={mIdx} className="p-3 rounded-xl bg-gray-950/70 border border-gray-800 text-center">
@@ -1008,7 +1008,7 @@ export default function LoginPage() {
                 {/* Strategic Feature Highlights */}
                 <div className="space-y-2">
                   <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block">
-                    Competitive Moats & Architecture
+                    Key Highlights & Capabilities
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     {slide.highlights.map((h, hIdx) => (
@@ -1042,7 +1042,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline text-[11px] text-gray-400">
               Scroll or use <kbd className="px-1 py-0.5 bg-gray-800 rounded text-[10px] text-gray-300">↑</kbd>{' '}
-              <kbd className="px-1 py-0.5 bg-gray-800 rounded text-[10px] text-gray-300">↓</kbd> to explore
+              <kbd className="px-1 py-0.5 bg-gray-800 rounded text-[10px] text-gray-300">↓</kbd> to explore features
             </span>
             <button
               type="button"

@@ -428,12 +428,12 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Staff can either click **`[ 📝 Record Wastage ]`** to open the 3-field entry form or click **`[ 🛡️ Sign Zero Wastage ]`**.
   - Signing Zero Wastage requires a secondary confirmation modal to prevent accidental bypassing. Once confirmed, a zero-value verified entry (`itemName: 'Zero Wastage Recorded'`, `approxValue: 0`, `reason: 'Verified Zero Wastage'`) is logged to MongoDB, immediately dismissing the banner for the rest of the day.
 
-### 3.22 Investor Pitch Deck Landing Page & Side-by-Side Login Architecture (`/login`)
+### 3.22 Features Showcase Landing Page & Side-by-Side Login Architecture (`/login`)
 - **Side-by-Side Dual Column Responsive Layout**:
   - **Right Column (`lg:w-[440px] xl:w-[480px]`)**: Dedicated, secure business login portal featuring 1-tap demo logins (`👑 Admin`, `💼 Manager`, `🍽️ Staff`), email/password inputs with toggle visibility, live authentication error handling, and production status indicators.
-  - **Left Column (`flex-1`)**: High-margin investor pitch deck showcasing all 12 platform features as vertically scrollable snap slides (`snap-y snap-mandatory scroll-smooth`).
-- **12 Comprehensive Investor Pitch Slides**:
-  1. *Executive Summary*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
+  - **Left Column (`flex-1`)**: Interactive feature showcase presenting all 12 platform modules as vertically scrollable snap slides (`snap-y snap-mandatory scroll-smooth`).
+- **12 Comprehensive Feature Slides**:
+  1. *Platform Overview*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
   2. *Floor Operations*: 5-Stage Live Dining Room Lifecycle & Table Management (Petpooja-style table moves and instant card actions).
   3. *High-Speed Ordering*: High-Velocity POS Order Engine & Zero-Scroll Mobile Cart (3-column terminal, 3.8s average order time).
   4. *Kitchen Automation*: Kitchen Display System (KDS) & Prep Next Batching Engine (Cross-table dish aggregation, urgency color codes, and kitchen chimes).
@@ -445,12 +445,12 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   10. *Workforce & Payroll*: 2-Shift Duty Tracking, Pro-Rata Deductions & Penalty Fines (Daily shortage calculations and reason logs).
   11. *Hardware Integration*: Dual-Mode 80mm ESC/POS Thermal Printing Architecture (Canvas/PDF preview mode & silent hardware dispatch).
   12. *Enterprise Security*: Role-Based Access Control, Tamper-Proof Audit & 1-Click Backup (Admin/Manager/Staff tiers and instant JSON dump).
-- **Interactive Pitch Navigation & Controls**:
+- **Interactive Feature Navigation & Controls**:
   - Slide counter (`01 / 12`), `[ Prev ]`, `[ Play/Pause ]`, `[ Next ]` controls.
   - Keyboard arrow key navigation (`↑`/`↓`/`←`/`→`).
   - Top category pills scroller with bi-directional `IntersectionObserver` sync and auto-centering.
   - Interactive live feature mockup widgets for every slide.
-  - Bottom slide indicator dots bar with mobile switch tabs (`Investor Deck` vs `Sign In`).
+  - Bottom slide indicator dots bar with mobile switch tabs (`Features` vs `Sign In`).
 
 ---
 
