@@ -286,7 +286,7 @@ router.get('/time-logs', async (req, res) => {
 // Manager or Admin only
 router.post('/time-log', adminOrManager, async (req, res) => {
   try {
-    const { staffId, date, dutyHours, dailySalary, shift1, shift2, note } = req.body;
+    const { staffId, date, dutyHours, dailySalary, shift1, shift2, note, penaltyReason, penaltyAmount } = req.body;
 
     if (!staffId || !date) {
       return res.status(400).json({ message: 'Staff member and date are required' });
@@ -302,6 +302,9 @@ router.post('/time-log', adminOrManager, async (req, res) => {
       return res.status(400).json({ message: 'Gross daily salary is mandatory and must be greater than 0' });
     }
 
+    const numPenaltyAmount = Math.max(0, parseFloat(penaltyAmount) || 0);
+    const cleanPenaltyReason = penaltyReason ? String(penaltyReason).trim() : '';
+
     const attendanceDate = normalizeDate(date);
     const today = normalizeDate(new Date());
     if (attendanceDate > today) {
@@ -316,7 +319,7 @@ router.post('/time-log', adminOrManager, async (req, res) => {
     const absentHours = Math.max(0, +(numDutyHours - totalPresentHours).toFixed(2));
     const hourlyRate = +(numDailySalary / numDutyHours).toFixed(2);
     const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
-    const payableAmount = Math.max(0, +(numDailySalary - deductionAmount).toFixed(2));
+    const payableAmount = Math.max(0, +(numDailySalary - deductionAmount - numPenaltyAmount).toFixed(2));
 
     // Auto-mark attendance: if entry time is logged -> present, otherwise -> absent
     const hasEntry = Boolean(
@@ -347,6 +350,8 @@ router.post('/time-log', adminOrManager, async (req, res) => {
         dailySalary: numDailySalary,
         hourlyRate,
         deductionAmount,
+        penaltyReason: cleanPenaltyReason,
+        penaltyAmount: numPenaltyAmount,
         payableAmount,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -358,17 +363,21 @@ router.post('/time-log', adminOrManager, async (req, res) => {
       defaultDutyHours: numDutyHours,
     });
 
+    const penaltyDesc = numPenaltyAmount > 0 ? `, penalty: -₹${numPenaltyAmount}${cleanPenaltyReason ? ` (${cleanPenaltyReason})` : ''}` : '';
+
     await log({
       user: req.user,
       action: 'UPDATE',
       module: 'Attendance',
-      description: `${req.user.name} logged duty time for ${record.staff?.name || staffId} on ${formatDateKey(attendanceDate)}: ${totalPresentHours}h present (${absentHours}h shortage, -₹${deductionAmount})`,
+      description: `${req.user.name} logged duty time for ${record.staff?.name || staffId} on ${formatDateKey(attendanceDate)}: ${totalPresentHours}h present (${absentHours}h shortage, -₹${deductionAmount}${penaltyDesc})`,
       metadata: {
         dutyHours: numDutyHours,
         totalPresentHours,
         absentHours,
         dailySalary: numDailySalary,
         deductionAmount,
+        penaltyAmount: numPenaltyAmount,
+        penaltyReason: cleanPenaltyReason,
         payableAmount,
         autoStatus,
       },

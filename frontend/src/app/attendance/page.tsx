@@ -189,6 +189,8 @@ export default function AttendancePage() {
     shift1: { entry: '', exit: '' },
     shift2: { entry: '', exit: '' },
     hasSecondShift: false,
+    penaltyReason: '',
+    penaltyAmount: '',
     note: '',
   });
 
@@ -249,6 +251,8 @@ export default function AttendancePage() {
         exit: existingRecord?.shift2?.exit || '',
       },
       hasSecondShift: hasShift2,
+      penaltyReason: existingRecord?.penaltyReason || '',
+      penaltyAmount: existingRecord?.penaltyAmount ? String(existingRecord.penaltyAmount) : '',
       note: existingRecord?.note || '',
     });
     setTimeModalOpen(true);
@@ -296,6 +300,8 @@ export default function AttendancePage() {
         exit: existingRecord?.shift2?.exit || '',
       },
       hasSecondShift: hasShift2,
+      penaltyReason: existingRecord?.penaltyReason || '',
+      penaltyAmount: existingRecord?.penaltyAmount ? String(existingRecord.penaltyAmount) : '',
       note: existingRecord?.note || '',
     }));
   };
@@ -313,7 +319,8 @@ export default function AttendancePage() {
     const dailySalary = parseFloat(timeForm.dailySalary) || 0;
     const hourlyRate = dutyHours > 0 ? +(dailySalary / dutyHours).toFixed(2) : 0;
     const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
-    const payableAmount = Math.max(0, +(dailySalary - deductionAmount).toFixed(2));
+    const penaltyAmount = Math.max(0, parseFloat(timeForm.penaltyAmount) || 0);
+    const payableAmount = Math.max(0, +(dailySalary - deductionAmount - penaltyAmount).toFixed(2));
     const hasEntry = Boolean(
       (timeForm.shift1.entry && timeForm.shift1.entry.trim() !== '') ||
       (timeForm.hasSecondShift && timeForm.shift2.entry && timeForm.shift2.entry.trim() !== '')
@@ -330,6 +337,7 @@ export default function AttendancePage() {
       dailySalary,
       hourlyRate,
       deductionAmount,
+      penaltyAmount,
       payableAmount,
       hasEntry,
       autoStatus,
@@ -365,6 +373,8 @@ export default function AttendancePage() {
         dailySalary: numDailySalary,
         shift1: timeForm.shift1,
         shift2: timeForm.hasSecondShift ? timeForm.shift2 : { entry: '', exit: '' },
+        penaltyReason: timeForm.penaltyReason.trim(),
+        penaltyAmount: Math.max(0, parseFloat(timeForm.penaltyAmount) || 0),
         note: timeForm.note,
       });
 
@@ -1145,10 +1155,22 @@ export default function AttendancePage() {
 
                         {/* Deduction */}
                         <td className="py-3 px-3 text-right">
-                          {hasRecord && record?.deductionAmount > 0 ? (
-                            <span className="font-black text-rose-600 dark:text-rose-400">
-                              -{formatCurrency(record.deductionAmount)}
-                            </span>
+                          {hasRecord && ((record?.deductionAmount > 0) || (record?.penaltyAmount > 0)) ? (
+                            <div className="flex flex-col items-end">
+                              {record?.deductionAmount > 0 && (
+                                <span className="font-black text-rose-600 dark:text-rose-400">
+                                  -{formatCurrency(record.deductionAmount)}
+                                </span>
+                              )}
+                              {record?.penaltyAmount > 0 && (
+                                <span
+                                  className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 px-1.5 py-0.5 rounded mt-0.5"
+                                  title={record.penaltyReason ? `Penalty: ${record.penaltyReason}` : 'Penalty applied'}
+                                >
+                                  Penalty: -{formatCurrency(record.penaltyAmount)}
+                                </span>
+                              )}
+                            </div>
                           ) : hasRecord ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-bold">₹0</span>
                           ) : (
@@ -1235,7 +1257,7 @@ export default function AttendancePage() {
               <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
                 <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Deductions</span>
                 <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
-                  -{formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.deductionAmount || 0), 0))}
+                  -{formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.deductionAmount || 0) + (l.record?.penaltyAmount || 0), 0))}
                 </p>
               </div>
 
@@ -1522,6 +1544,56 @@ export default function AttendancePage() {
             )}
           </div>
 
+          {/* Penalty Section */}
+          <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-900 dark:text-rose-300">
+                  Penalty
+                </span>
+              </div>
+              {timeCalc.penaltyAmount > 0 && (
+                <span className="text-xs font-black text-rose-600 dark:text-rose-400">
+                  -₹{timeCalc.penaltyAmount}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Penalty Reason
+                </label>
+                <input
+                  type="text"
+                  value={timeForm.penaltyReason}
+                  onChange={(e) => setTimeForm((prev) => ({ ...prev, penaltyReason: e.target.value }))}
+                  placeholder="e.g. Late arrival, uniform violation, breakage"
+                  className="input font-medium text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Penalty Amount (₹)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={timeForm.penaltyAmount}
+                    onChange={(e) => setTimeForm((prev) => ({ ...prev, penaltyAmount: e.target.value }))}
+                    placeholder="0"
+                    className="input font-black text-base pl-7"
+                  />
+                  <span className="absolute left-3 top-2.5 text-xs text-gray-400 font-bold">₹</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Remarks */}
           <div>
             <label className="label font-bold text-gray-900 dark:text-gray-200">Duty Remarks / Note</label>
@@ -1570,11 +1642,21 @@ export default function AttendancePage() {
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700 text-sm font-black">
-              <div>
-                <span className="text-gray-500 text-xs font-medium block">Suggested Deduction:</span>
-                <span className={cn('text-base', timeCalc.deductionAmount > 0 ? 'text-rose-600' : 'text-gray-700 dark:text-gray-300')}>
-                  {timeCalc.deductionAmount > 0 ? `-${formatCurrency(timeCalc.deductionAmount)}` : '₹0'}
-                </span>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 text-xs font-medium">Shortage Deduction:</span>
+                  <span className={cn('text-xs font-bold', timeCalc.deductionAmount > 0 ? 'text-rose-600' : 'text-gray-700 dark:text-gray-300')}>
+                    {timeCalc.deductionAmount > 0 ? `-${formatCurrency(timeCalc.deductionAmount)}` : '₹0'}
+                  </span>
+                </div>
+                {timeCalc.penaltyAmount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500 text-xs font-medium">Penalty Fine:</span>
+                    <span className="text-xs font-black text-rose-600">
+                      -{formatCurrency(timeCalc.penaltyAmount)}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <span className="text-gray-500 text-xs font-medium block">Net Day Payable:</span>

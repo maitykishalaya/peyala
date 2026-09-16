@@ -22,6 +22,8 @@ const attendanceSchema = new mongoose.Schema({
   dailySalary: { type: Number },
   hourlyRate: { type: Number, default: 0 },
   deductionAmount: { type: Number, default: 0 },
+  penaltyReason: { type: String, trim: true },
+  penaltyAmount: { type: Number, default: 0 },
   payableAmount: { type: Number, default: 0 },
 }, { timestamps: true });
 

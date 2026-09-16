@@ -30,6 +30,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Staff & Attendance** | `/staff`, `/attendance` | Employee directory, monthly attendance calendar with leave cap enforcement, 2-shift duty time tracking (entry/exit), pro-rata salary deductions, advances, bonuses, and salary disbursals. |
 | **Balance Sheet** | `/balancesheet` | Dynamic statement of Assets (bank/cash accounts), Liabilities (GST liability, supplier dues, loans), and Net Equity. |
 | **Settings & Security** | `/settings` | Role-based user administration, audit logging, payment categories, database backup/restore, and dark/light mode. |
+| **Investor Pitch Deck & Login** | `/login` | High-margin 12-slide scrollable investor pitch deck paired with right-hand business authentication portal and 1-tap demo credentials. |
 
 ---
 
@@ -287,8 +288,15 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - If any entry time is recorded, the staff member's attendance is automatically marked as **Present (`P`)**.
   - If no entry times are recorded, it is automatically marked as **Absent (`A`)**.
   - Persisted in the `Attendance` collection, instantly updating both the bottom shift table and the top monthly attendance grid.
+- **Penalty Section (Reason & Amount Fine)**:
+  - Inside the "Add Duty Hours" modal, a dedicated **Penalty** section allows managers/administrators to levy disciplinary or breakage fines for the day:
+    - **Penalty Reason**: Text input for incident context (e.g. *Late arrival*, *Uniform violation*, *Broken crockery/glassware*, *Customer complaint*).
+    - **Penalty Amount (₹)**: Monetary fine in rupees.
+  - Dynamically updates the Live Calculation Breakdown and reduces **Net Day Payable**:
+    $$\text{Net Payable} = \max(0, \text{Daily Salary} - \text{Shortage Deduction} - \text{Penalty Amount})$$
+  - Appears in the table's Deduction column with an amber/rose fine badge and hover tooltip showing the penalty reason.
 - **Daily Aggregate KPI Bar**:
-  - Live aggregate footer displaying total staff on duty, total present hours, total shortage hours, total daily gross wages, total deductions, and net day pay.
+  - Live aggregate footer displaying total staff on duty, total present hours, total shortage hours, total daily gross wages, total deductions (shortage + penalties), and net day pay.
 
 ### 15. Analytics, Daily Averages & Visual Bar Graph Trends (`/dashboard` & `/reports`)
 - **Dashboard 30-Day Revenue Bar Graph (`/dashboard`)**:
@@ -346,6 +354,41 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - 4 KPI cards: Total Wastage Value, Total Quantity Discarded, Total Incidents, and Daily Average Loss.
   - Filter bar with quick presets (`Today`, `7D`, `This Month`, `Last Month`, `Custom Range`) and real-time search.
   - Local cache synchronization: Immediately invalidates P&L client-side cache upon any add/edit/delete so reports stay synchronized.
+
+### 18. Attendance Split-Duty Penalty Tracking & Fine Deductions (`/attendance`)
+- **Penalty Integration within Duty Hours Modal**:
+  - Administrators and managers can log disciplinary penalties directly inside the Duty Hours entry modal (`shift1` and `shift2`):
+    - **Penalty Reason**: Text justification (e.g. *Crockery Breakage*, *Unannounced Absence*, *Uniform Violation*).
+    - **Penalty Amount (₹)**: Deducted from the employee's daily net pay.
+- **Pro-Rata Shortage Deduction & Net Pay Formula**:
+  - Shortage hours calculated automatically: `absentHours = Math.max(0, targetDutyHours - totalPresentHours)`.
+  - Hourly rate computed as `dailySalary / targetDutyHours`.
+  - Daily net pay calculated as: `payableAmount = Math.max(0, dailySalary - shortageDeduction - penaltyAmount)`.
+- **Monthly Rollup**:
+  - Employee cards and payroll exports display cumulative penalty fines for the month with high-contrast badge indicators.
+
+### 19. Investor Pitch Deck Landing Page & Side-by-Side Login Architecture (`/login`)
+- **Side-by-Side Split Column Design**:
+  - **Right Column (`lg:w-[440px] xl:w-[480px]`)**: Clean enterprise authentication portal with 1-tap demo credentials (`👑 Admin`, `💼 Manager`, `🍽️ Staff`), password reveal toggle, and production status indicator.
+  - **Left Column (`flex-1`)**: Vertically scrollable snap-scroll pitch deck (`snap-y snap-mandatory scroll-smooth`) presenting all 12 modules of Peyala v8 to prospective investors.
+- **12 Pitch Slides with Interactive Mockup Widgets**:
+  1. *Executive Summary*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
+  2. *Floor Operations*: 5-Stage Live Dining Room Lifecycle & Table Management (Petpooja-style table moves, instant status cues).
+  3. *High-Speed Ordering*: High-Velocity POS Order Engine & Zero-Scroll Mobile Cart (3-column terminal, 3.8s order dispatch).
+  4. *Kitchen Automation*: Kitchen Display System (KDS) & Prep Next Batching Engine (Cross-table dish aggregation, urgency color codes, kitchen chimes).
+  5. *Algorithmic Auditing*: Autonomous Expense Leak Detector (8 statistical detectors, price spike alerts, sales-adjusted spending anomalies).
+  6. *Loss Prevention*: Disciplined Wastage Control with 10:00 PM Closing Check (Frictionless 3-field capture and non-bypassable EOD prompt).
+  7. *Financial Integrity*: Real-Time P&L Statements with IST Per-Day Sales (0-day reporting latency, per-day sales bar chart, audit trails).
+  8. *Supply Chain*: Weighted Average Unit Costing (WAC) & Procurement Intelligence (Dynamic recipe costing, vendor dues ledger).
+  9. *Treasury & Liquidity*: Multi-Account Vaults & Internal Fund Transfers (Cash counter, bank account, UPI pool, and petty cash tracking).
+  10. *Workforce & Payroll*: 2-Shift Duty Tracking, Pro-Rata Deductions & Penalty Fines (Daily shortage calculations and reason logs).
+  11. *Hardware Integration*: Dual-Mode 80mm ESC/POS Thermal Printing Architecture (Canvas/PDF preview mode & silent hardware dispatch).
+  12. *Enterprise Security*: Role-Based Access Control, Tamper-Proof Audit & 1-Click Backup (Admin/Manager/Staff tiers and instant JSON dump).
+- **Investor Deck Navigation Controls**:
+  - Slide counter (`01 / 12`), `[ Prev ]`, `[ Play/Pause ]`, `[ Next ]` buttons.
+  - Keyboard arrow key navigation (`↑`/`↓`/`←`/`→`).
+  - Sticky top category pills with bi-directional `IntersectionObserver` sync and auto-centering.
+  - Bottom slide dot indicator bar with responsive mobile view switcher (`Investor Deck` vs `Sign In`).
 
 ---
 

@@ -345,13 +345,18 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Mandatory Duty Hours & Gross Daily Salary Inputs**:
   - Target duty hours (e.g. 10 hrs) and Gross daily salary (e.g. ₹300) are strictly mandatory fields (`> 0`).
   - Auto-prefilled from staff profile defaults (`staff.dailySalary || Math.round(monthlySalary / 30)` and `staff.defaultDutyHours`) and customizable on the fly.
-- **Pro-Rata Shortage & Salary Deduction Engine**:
+- **Pro-Rata Shortage, Penalty & Salary Deduction Engine**:
   - `totalPresentHours = (shift1Minutes + shift2Minutes) / 60`
   - `absentHours = Math.max(0, dutyHours - totalPresentHours)`
   - `hourlyRate = dailySalary / dutyHours`
   - `deductionAmount = absentHours * hourlyRate`
-  - `payableAmount = Math.max(0, dailySalary - deductionAmount)`
-  - Displays instant live visual calculation as shift times are typed: Total Present, Duty Shortage, Suggested Deduction (-₹...), and Net Day Payable.
+  - `penaltyAmount = Math.max(0, parseFloat(penaltyAmount) || 0)`
+  - `payableAmount = Math.max(0, dailySalary - deductionAmount - penaltyAmount)`
+  - Displays instant live visual calculation as shift times and penalties are typed: Total Present, Duty Shortage, Suggested Deduction (-₹...), Penalty Fine (-₹...), and Net Day Payable.
+- **Penalty Section (Reason & Amount)**:
+  - Added dedicated Penalty card inside the "Add Duty Hours" modal with `penaltyReason` (contextual text) and `penaltyAmount` (monetary fine in ₹).
+  - Saved on `Attendance` (`penaltyReason: String`, `penaltyAmount: Number, default: 0`).
+  - Table view displays penalty badge under Deduction with hover reason tooltip, and KPI footer aggregates total shortage deductions + penalties.
 - **Automatic Main Attendance Status Synchronization**:
   - If any entry time is logged (`shift1.entry` or `shift2.entry`), the staff's attendance status is automatically set to **`present`** (`P`).
   - If neither entry time is logged, the attendance status is automatically set to **`absent`** (`A`).
@@ -403,6 +408,50 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Client Cache Synchronization**:
   - Mutating wastage (create, edit, delete) purges `peyala_reports_pnl_cache_v2` and `peyala_wastage_cache_v1` so reports refresh immediately.
 
+### 3.20 Attendance Split-Duty Penalty Tracking & Fine Deductions (`/attendance`)
+- **Penalty Integration within Duty Hours Modal**:
+  - When recording or updating staff duty hours (`shift1` and `shift2`), administrators and managers can log a **Penalty Fine** section with two dedicated fields:
+    1. **`penaltyReason`**: Text describing the disciplinary reason (e.g., *Crockery Breakage*, *Unannounced Absence*, *Uniform Violation*).
+    2. **`penaltyAmount`**: Disciplinary fine in ₹.
+- **Automated Pro-Rata Daily Net Payable Calculation**:
+  - `absentHours = Math.max(0, targetDutyHours - totalPresentHours)`
+  - `hourlyRate = staff.dailySalary / targetDutyHours`
+  - `deductionAmount = Math.round(absentHours * hourlyRate)`
+  - `payableAmount = Math.max(0, staff.dailySalary - deductionAmount - penaltyAmount)`
+- **Full Month Payroll Rollup**:
+  - The monthly attendance summary aggregates total penalty fines across all days, displayed in a dedicated high-contrast badge on the employee payroll card.
+
+### 3.21 10:00 PM Mandatory Daily Wastage Closing Check Enforcement
+- **Universal Header Banner (`frontend/src/components/Header.tsx`)**:
+  - At or after **10:00 PM IST (22:00:00)**, if no wastage entry exists for the current IST calendar day, a prominent amber notification banner appears across all authenticated dashboard and management pages.
+- **Double-Confirmation Zero Wastage Verification**:
+  - Staff can either click **`[ 📝 Record Wastage ]`** to open the 3-field entry form or click **`[ 🛡️ Sign Zero Wastage ]`**.
+  - Signing Zero Wastage requires a secondary confirmation modal to prevent accidental bypassing. Once confirmed, a zero-value verified entry (`itemName: 'Zero Wastage Recorded'`, `approxValue: 0`, `reason: 'Verified Zero Wastage'`) is logged to MongoDB, immediately dismissing the banner for the rest of the day.
+
+### 3.22 Investor Pitch Deck Landing Page & Side-by-Side Login Architecture (`/login`)
+- **Side-by-Side Dual Column Responsive Layout**:
+  - **Right Column (`lg:w-[440px] xl:w-[480px]`)**: Dedicated, secure business login portal featuring 1-tap demo logins (`👑 Admin`, `💼 Manager`, `🍽️ Staff`), email/password inputs with toggle visibility, live authentication error handling, and production status indicators.
+  - **Left Column (`flex-1`)**: High-margin investor pitch deck showcasing all 12 platform features as vertically scrollable snap slides (`snap-y snap-mandatory scroll-smooth`).
+- **12 Comprehensive Investor Pitch Slides**:
+  1. *Executive Summary*: All-In-One Autonomous Restaurant Operating System (Consolidating 5 tools, ₹0 SaaS rent, 100% data sovereignty).
+  2. *Floor Operations*: 5-Stage Live Dining Room Lifecycle & Table Management (Petpooja-style table moves and instant card actions).
+  3. *High-Speed Ordering*: High-Velocity POS Order Engine & Zero-Scroll Mobile Cart (3-column terminal, 3.8s average order time).
+  4. *Kitchen Automation*: Kitchen Display System (KDS) & Prep Next Batching Engine (Cross-table dish aggregation, urgency color codes, and kitchen chimes).
+  5. *Algorithmic Auditing*: Autonomous Expense Leak Detector (8 statistical detectors, price spike alerts, sales-adjusted spending anomalies).
+  6. *Loss Prevention*: Disciplined Wastage Control with 10:00 PM Closing Check (Frictionless 3-field capture and non-bypassable EOD prompt).
+  7. *Financial Integrity*: Real-Time P&L Statements with IST Per-Day Sales (0-day reporting latency, per-day sales bar chart, audit trails).
+  8. *Supply Chain*: Weighted Average Unit Costing (WAC) & Procurement Intelligence (Dynamic recipe costing, vendor dues ledger).
+  9. *Treasury & Liquidity*: Multi-Account Vaults & Internal Fund Transfers (Cash counter, bank account, UPI pool, and petty cash tracking).
+  10. *Workforce & Payroll*: 2-Shift Duty Tracking, Pro-Rata Deductions & Penalty Fines (Daily shortage calculations and reason logs).
+  11. *Hardware Integration*: Dual-Mode 80mm ESC/POS Thermal Printing Architecture (Canvas/PDF preview mode & silent hardware dispatch).
+  12. *Enterprise Security*: Role-Based Access Control, Tamper-Proof Audit & 1-Click Backup (Admin/Manager/Staff tiers and instant JSON dump).
+- **Interactive Pitch Navigation & Controls**:
+  - Slide counter (`01 / 12`), `[ Prev ]`, `[ Play/Pause ]`, `[ Next ]` controls.
+  - Keyboard arrow key navigation (`↑`/`↓`/`←`/`→`).
+  - Top category pills scroller with bi-directional `IntersectionObserver` sync and auto-centering.
+  - Interactive live feature mockup widgets for every slide.
+  - Bottom slide indicator dots bar with mobile switch tabs (`Investor Deck` vs `Sign In`).
+
 ---
 
 ## 4) Database Models & Schemas
@@ -419,7 +468,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | **`Account`** | `backend/src/models/Account.js` | `name`, `type` (`cash`, `bank`, `digital`), `currentBalance`, `color`, `isActive`. |
 | **`Supplier`** | `backend/src/models/Supplier.js` | `name`, `phone`, `address`, `category`, `totalPurchased`, `totalPaid`, `outstanding`. |
 | **`Staff`** | `backend/src/models/Staff.js` | `name`, `phone`, `position`, `monthlySalary`, `dailySalary`, `defaultDutyHours`, `totalSalaryPaid`, `totalAdvancePaid`, `status`. |
-| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `payableAmount`, `note`, `markedBy`. |
+| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `penaltyReason`, `penaltyAmount`, `payableAmount`, `note`, `markedBy`. |
 | **`Payment`** | `backend/src/models/Payment.js` | `date`, `amount`, `payee`, `category`, `subcategory`, `paidFrom`, `paymentMode`. |
 | **`ExpenseLeakReview`** | `backend/src/models/ExpenseLeakReview.js` | `anomalyId` (unique hash), `detector`, `entityType`, `entityKey`, `status` (`new`, `reviewed`, `dismissed`), `dismissedUntil` (30d date), `feedback` (`isUseful`, `reason`, `notes`), `reviewedBy`. |
 | **`Wastage`** | `backend/src/models/Wastage.js` | `itemName`, `quantity`, `unit`, `approxValue`, `date`, `reason`, `createdBy`. |
