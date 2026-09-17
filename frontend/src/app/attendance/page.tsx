@@ -8,7 +8,8 @@ import { cn, formatDate, getInitials, formatCurrency } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import {
   CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info, RefreshCw,
-  Clock, Plus, Pencil, CheckCircle2, AlertTriangle, ArrowRight, UserCheck, ShieldAlert, Check, Trash2
+  Clock, Plus, Pencil, CheckCircle2, AlertTriangle, ArrowRight, UserCheck, ShieldAlert, Check, Trash2,
+  Download, Printer, FileText, Filter, Calendar, BarChart3
 } from 'lucide-react';
 
 const MONTHS = [
@@ -107,6 +108,16 @@ function calculateShiftMinutes(entry?: string, exit?: string) {
   }
 }
 
+function escapeHtml(text?: string | number | null): string {
+  if (text === null || text === undefined) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 const getStaffCacheKey = (role = 'default') => `peyala_attendance_staff_cache_v2_${role}`;
 const getAttendanceCacheKey = (y: number, m: number, role = 'default') => `peyala_attendance_${y}_${m}_v2_${role}`;
 
@@ -126,6 +137,405 @@ function writeCache(key: string, data: any) {
   } catch {
     // ignore
   }
+}
+
+function generateSummaryPdfHtml(params: {
+  mode: 'day' | 'month';
+  dateStr: string;
+  monthName: string;
+  year: number;
+  dayData: any[];
+  monthData: any[];
+  isViewer: boolean;
+}): string {
+  const { mode, dateStr, monthName, year, dayData, monthData, isViewer } = params;
+  const isDay = mode === 'day';
+  const reportTitle = isDay
+    ? 'DAILY ATTENDANCE & DUTY SUMMARY REPORT'
+    : 'MONTHLY ATTENDANCE & DUTY SUMMARY REPORT';
+  const periodStr = isDay ? dateStr : `${monthName} ${year}`;
+  const printTimestamp = `${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} at ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+
+  const kpisHtml = isDay ? `
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Staff</div>
+        <div class="kpi-value">${dayData.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Present Today</div>
+        <div class="kpi-value" style="color: #047857;">${dayData.filter((d) => d.status === 'present').length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Absent / Leave</div>
+        <div class="kpi-value" style="color: #b91c1c;">${dayData.filter((d) => ['absent', 'leave'].includes(d.status || '')).length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Shortage Hours</div>
+        <div class="kpi-value" style="color: #b91c1c;">${formatHoursMinutes(dayData.reduce((s, d) => s + (d.deficitHours || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Penalties</div>
+        <div class="kpi-value" style="color: #c2410c;">${isViewer ? '••••••' : formatCurrency(dayData.reduce((s, d) => s + (d.penaltyAmount || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Deductions</div>
+        <div class="kpi-value" style="color: #b91c1c;">${isViewer ? '••••••' : '-' + formatCurrency(dayData.reduce((s, d) => s + (d.totalDeductions || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Net Day Payable</div>
+        <div class="kpi-value" style="color: #047857;">${isViewer ? '••••••' : formatCurrency(dayData.reduce((s, d) => s + (d.payableAmount || 0), 0))}</div>
+      </div>
+    </div>
+  ` : `
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Staff</div>
+        <div class="kpi-value">${monthData.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Present Days</div>
+        <div class="kpi-value" style="color: #047857;">${monthData.reduce((s, m) => s + (m.presentCount || 0), 0)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Absent Days</div>
+        <div class="kpi-value" style="color: #b91c1c;">${monthData.reduce((s, m) => s + (m.absentCount || 0), 0)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Deficit Hours</div>
+        <div class="kpi-value" style="color: #b91c1c;">${formatHoursMinutes(monthData.reduce((s, m) => s + (m.totalDeficitHours || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Penalties</div>
+        <div class="kpi-value" style="color: #c2410c;">${isViewer ? '••••••' : formatCurrency(monthData.reduce((s, m) => s + (m.totalPenalties || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Deductions</div>
+        <div class="kpi-value" style="color: #b91c1c;">${isViewer ? '••••••' : '-' + formatCurrency(monthData.reduce((s, m) => s + (m.totalDeductions || 0), 0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Net Month Payable</div>
+        <div class="kpi-value" style="color: #047857;">${isViewer ? '••••••' : formatCurrency(monthData.reduce((s, m) => s + (m.totalPayable || 0), 0))}</div>
+      </div>
+    </div>
+  `;
+
+  let rowsHtml = '';
+  if (isDay) {
+    rowsHtml = dayData.map((d, idx) => {
+      const statusMeta = d.status ? STATUS_CONFIG[d.status as StatusKey] : null;
+      const statusLabel = statusMeta ? statusMeta.text : (d.hasRecord ? 'Recorded' : 'Unmarked');
+      const statusClass = d.status === 'present' ? 'badge-green' : d.status === 'absent' ? 'badge-red' : d.status === 'leave' ? 'badge-amber' : 'badge-gray';
+
+      const targetStr = d.isLoggable ? `${d.targetDutyHours}h` : '—';
+      const presentStr = d.isLoggable ? formatHoursMinutes(d.totalPresentHours) : '—';
+      const deficitStr = !d.isLoggable
+        ? '—'
+        : d.deficitHours > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatHoursMinutes(d.deficitHours)}</span>`
+        : `<span style="color: #059669; font-weight: bold;">Full Duty</span>`;
+
+      const noteStr = d.note ? escapeHtml(d.note) : '<span style="color: #9ca3af;">—</span>';
+      const penaltyStr = d.penaltyAmount > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">${isViewer ? '••••••' : formatCurrency(d.penaltyAmount)}</span>${d.penaltyReason ? `<div style="font-size: 9px; color: #6b7280;">${escapeHtml(d.penaltyReason)}</div>` : ''}`
+        : '<span style="color: #9ca3af;">₹0</span>';
+
+      const deductionStr = isViewer
+        ? '••••••'
+        : d.totalDeductions > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatCurrency(d.totalDeductions)}</span>`
+        : '<span style="color: #059669; font-weight: bold;">₹0</span>';
+
+      const payableStr = isViewer
+        ? '••••••'
+        : `<span style="color: #047857; font-weight: bold;">${formatCurrency(d.payableAmount)}</span>`;
+
+      return `
+        <tr>
+          <td style="text-align: center; color: #6b7280; font-size: 10px;">${idx + 1}</td>
+          <td>
+            <div style="font-weight: bold; font-size: 11px;">${escapeHtml(d.member.name)}</div>
+            <div style="font-size: 9.5px; color: #6b7280;">${escapeHtml(d.member.position || 'Staff')}${!d.isLoggable ? ' • <span style="color: #d97706;">Attendance Only</span>' : ''}</div>
+          </td>
+          <td style="text-align: center;"><span class="badge ${statusClass}">${escapeHtml(statusLabel)}</span></td>
+          <td style="text-align: center; font-weight: 500;">${targetStr}</td>
+          <td style="text-align: center; font-weight: 600;">${presentStr}</td>
+          <td style="text-align: center;">${deficitStr}</td>
+          <td style="font-size: 10px; max-width: 180px;">${noteStr}</td>
+          <td style="text-align: right;">${penaltyStr}</td>
+          <td style="text-align: right;">${deductionStr}</td>
+          <td style="text-align: right;">${payableStr}</td>
+        </tr>
+      `;
+    }).join('');
+  } else {
+    rowsHtml = monthData.map((m, idx) => {
+      const pCount = m.presentCount || 0;
+      const aCount = m.absentCount || 0;
+      const hCount = m.halfDayCount || 0;
+      const lCount = m.leaveCount || 0;
+
+      const targetStr = m.isLoggable ? `${m.totalTargetHours}h` : '—';
+      const presentStr = m.isLoggable ? formatHoursMinutes(m.totalPresentHours) : '—';
+      const deficitStr = !m.isLoggable
+        ? '—'
+        : m.totalDeficitHours > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatHoursMinutes(m.totalDeficitHours)}</span>`
+        : `<span style="color: #059669; font-weight: bold;">Full Duty</span>`;
+
+      const notesListStr = m.notesList && m.notesList.length > 0
+        ? m.notesList.map((n: any) => `<div><b>${escapeHtml(n.date)}:</b> ${escapeHtml(n.note)}</div>`).join('')
+        : '<span style="color: #9ca3af;">—</span>';
+
+      const penaltiesListStr = m.penaltiesList && m.penaltiesList.length > 0
+        ? `<div><span style="color: #dc2626; font-weight: bold;">${isViewer ? '••••••' : formatCurrency(m.totalPenalties)}</span></div>` +
+          m.penaltiesList.map((p: any) => `<div style="font-size: 9px; color: #6b7280;">${escapeHtml(p.date)}: ${isViewer ? '••••••' : formatCurrency(p.amount)} (${escapeHtml(p.reason)})</div>`).join('')
+        : '<span style="color: #9ca3af;">₹0</span>';
+
+      const deductionStr = isViewer
+        ? '••••••'
+        : m.totalDeductions > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatCurrency(m.totalDeductions)}</span>`
+        : '<span style="color: #059669; font-weight: bold;">₹0</span>';
+
+      const payableStr = isViewer
+        ? '••••••'
+        : `<span style="color: #047857; font-weight: bold;">${formatCurrency(m.totalPayable)}</span>`;
+
+      return `
+        <tr>
+          <td style="text-align: center; color: #6b7280; font-size: 10px;">${idx + 1}</td>
+          <td>
+            <div style="font-weight: bold; font-size: 11px;">${escapeHtml(m.member.name)}</div>
+            <div style="font-size: 9.5px; color: #6b7280;">${escapeHtml(m.member.position || 'Staff')}${!m.isLoggable ? ' • <span style="color: #d97706;">Attendance Only</span>' : ''}</div>
+          </td>
+          <td style="text-align: center;">
+            <div style="display: inline-flex; gap: 4px; font-size: 10px; font-weight: bold;">
+              <span style="color: #047857; background: #ecfdf5; padding: 1px 4px; border-radius: 3px;">P:${pCount}</span>
+              <span style="color: #b91c1c; background: #fef2f2; padding: 1px 4px; border-radius: 3px;">A:${aCount}</span>
+              <span style="color: #1d4ed8; background: #eff6ff; padding: 1px 4px; border-radius: 3px;">H:${hCount}</span>
+              <span style="color: #b45309; background: #fffbeb; padding: 1px 4px; border-radius: 3px;">L:${lCount}</span>
+            </div>
+          </td>
+          <td style="text-align: center; font-weight: 500;">${targetStr}</td>
+          <td style="text-align: center; font-weight: 600;">${presentStr}</td>
+          <td style="text-align: center;">${deficitStr}</td>
+          <td style="font-size: 9.5px; max-width: 220px; line-height: 1.3;">${notesListStr}</td>
+          <td style="text-align: right; max-width: 140px;">${penaltiesListStr}</td>
+          <td style="text-align: right;">${deductionStr}</td>
+          <td style="text-align: right;">${payableStr}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${escapeHtml(reportTitle)}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          @page {
+            size: A4 landscape;
+            margin: 8mm;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+          }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #111827;
+            background: #fff;
+            padding: 4px;
+            font-size: 11px;
+            line-height: 1.35;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #111827;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+          }
+          .brand-title {
+            font-size: 18px;
+            font-weight: 900;
+            letter-spacing: 0.5px;
+            color: #111827;
+          }
+          .brand-sub {
+            font-size: 10px;
+            color: #4b5563;
+            margin-top: 2px;
+          }
+          .report-meta {
+            text-align: right;
+          }
+          .report-badge {
+            display: inline-block;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .report-title {
+            font-size: 14px;
+            font-weight: 800;
+            margin-top: 3px;
+            color: #1f2937;
+          }
+          .report-period {
+            font-size: 10.5px;
+            color: #4b5563;
+            font-weight: 600;
+          }
+          .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+          }
+          .kpi-card {
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            padding: 6px 8px;
+            border-radius: 6px;
+            text-align: center;
+          }
+          .kpi-label {
+            font-size: 8.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #6b7280;
+            letter-spacing: 0.3px;
+          }
+          .kpi-value {
+            font-size: 13px;
+            font-weight: 800;
+            margin-top: 2px;
+            color: #111827;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10.5px;
+          }
+          th {
+            background: #f3f4f6;
+            border-top: 1px solid #d1d5db;
+            border-bottom: 2px solid #9ca3af;
+            padding: 6px 6px;
+            text-align: left;
+            font-size: 9.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #374151;
+          }
+          td {
+            padding: 6px 6px;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: middle;
+          }
+          tr:nth-child(even) td {
+            background-color: #fafafa;
+          }
+          .badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 9999px;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .badge-green { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+          .badge-red { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+          .badge-amber { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+          .badge-gray { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+          .footer {
+            margin-top: 18px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            font-size: 9.5px;
+            color: #6b7280;
+          }
+          .signatures {
+            display: flex;
+            gap: 40px;
+            margin-top: 24px;
+          }
+          .sign-line {
+            border-top: 1px dashed #6b7280;
+            width: 140px;
+            padding-top: 4px;
+            text-align: center;
+            font-size: 9px;
+            font-weight: 600;
+            color: #4b5563;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="brand-title">PEYALA CAFE &amp; RESTAURANT</div>
+            <div class="brand-sub">L-1, Saratpally, Midnapore &bull; Ph: 7749802811 &bull; GSTIN: 19DGOPM1101F1ZL &bull; FSSAI: 22822149000119</div>
+          </div>
+          <div class="report-meta">
+            <span class="report-badge">${isDay ? 'Daily Report' : 'Monthly Report'}</span>
+            <div class="report-title">${escapeHtml(reportTitle)}</div>
+            <div class="report-period">Period / Date: <b>${escapeHtml(periodStr)}</b></div>
+          </div>
+        </div>
+
+        ${kpisHtml}
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 24px; text-align: center;">#</th>
+              <th style="width: 130px;">Staff Member</th>
+              <th style="width: ${isDay ? '80px' : '110px'}; text-align: center;">${isDay ? 'Status' : 'Attendance (P/A/H/L)'}</th>
+              <th style="width: 65px; text-align: center;">Target</th>
+              <th style="width: 70px; text-align: center;">Worked</th>
+              <th style="width: 80px; text-align: center;">Deficit Hours</th>
+              <th>Notes from Attendance</th>
+              <th style="width: 110px; text-align: right;">Penalty &amp; Reason</th>
+              <th style="width: 90px; text-align: right;">Total Deductions</th>
+              <th style="width: 90px; text-align: right;">Net Payable</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        <div class="signatures">
+          <div class="sign-line">Prepared By (Shift In-Charge)</div>
+          <div class="sign-line">Verified By (Manager)</div>
+          <div class="sign-line">Authorized Signatory / Owner</div>
+        </div>
+
+        <div class="footer">
+          <div>Report generated automatically via Peyala POS &amp; Attendance System</div>
+          <div>Printed on: ${escapeHtml(printTimestamp)}</div>
+        </div>
+      </body>
+    </html>
+  `;
 }
 
 export default function AttendancePage() {
@@ -149,6 +559,9 @@ export default function AttendancePage() {
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const todayColRef = useRef<HTMLTableCellElement>(null);
+  const summarySectionRef = useRef<HTMLDivElement>(null);
+  const [summaryMode, setSummaryMode] = useState<'day' | 'month'>('day');
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const scrollToToday = () => {
     if (todayColRef.current) {
@@ -163,6 +576,12 @@ export default function AttendancePage() {
   const scrollToSummary = () => {
     if (tableContainerRef.current) {
       tableContainerRef.current.scrollTo({ left: tableContainerRef.current.scrollWidth, behavior: 'smooth' });
+    }
+  };
+
+  const scrollToReport = () => {
+    if (summarySectionRef.current) {
+      summarySectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
@@ -482,24 +901,202 @@ export default function AttendancePage() {
     return map;
   }, [attendance]);
 
-  const notesSummary = useMemo(() => {
-    const entries: Array<{ date: string; staff: string; status: string; note: string }> = [];
-
-    activeStaff.forEach((member) => {
-      const summary = summaries[member._id];
-      const list = Array.isArray(summary?.notes) ? summary.notes : [];
-      list.forEach((item: any) => {
-        entries.push({
-          date: item.date,
-          staff: member.name,
-          status: item.status,
-          note: item.note,
-        });
+  const daySummaryData = useMemo(() => {
+    return activeStaff.map((member) => {
+      // 1. Check timeLog from timeLogs for selectedLogDate
+      const timeLog = timeLogs.find((l) => {
+        const sId = l.staff?._id ? l.staff._id.toString() : l.staff.toString();
+        return sId === member._id.toString();
       });
-    });
 
-    return entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [activeStaff, summaries]);
+      // 2. Check calendar attendance records for selectedLogDate
+      const dayRecord = attendance.find((a) => {
+        const aStaffId = a.staff?._id ? a.staff._id.toString() : a.staff.toString();
+        if (aStaffId !== member._id.toString()) return false;
+        const d = new Date(a.date);
+        return formatDateOnly(d) === selectedLogDate;
+      });
+
+      const rec = timeLog?.record || dayRecord || null;
+      const hasRecord = !!rec;
+      const isLoggable = member.logDutyHours !== false;
+      const status: StatusKey = rec?.status ? normalizeStatusValue(rec.status) : 'absent';
+
+      const targetDutyHours = rec?.dutyHours ?? (isLoggable ? (member.defaultDutyHours || 10) : 0);
+      const totalPresentHours = rec?.totalPresentHours ?? (hasRecord && status === 'present' ? targetDutyHours : 0);
+      const deficitHours = isLoggable
+        ? (rec?.absentHours !== undefined
+            ? rec.absentHours
+            : (hasRecord && status !== 'present' ? targetDutyHours : Math.max(0, targetDutyHours - totalPresentHours)))
+        : 0;
+
+      const dailySalary = rec?.dailySalary ?? member.dailySalary ?? (member.monthlySalary ? Math.round(member.monthlySalary / 30) : 0);
+      const hourlyRate = rec?.hourlyRate ?? (targetDutyHours > 0 ? +(dailySalary / targetDutyHours).toFixed(2) : 0);
+      const deductionAmount = rec?.deductionAmount ?? 0;
+      const penaltyAmount = rec?.penaltyAmount ?? 0;
+      const penaltyReason = rec?.penaltyReason ? String(rec.penaltyReason).trim() : '';
+      const totalDeductions = deductionAmount + penaltyAmount;
+      const payableAmount = rec?.payableAmount !== undefined
+        ? rec.payableAmount
+        : (hasRecord && status === 'present' ? Math.max(0, +(dailySalary - totalDeductions).toFixed(2)) : 0);
+
+      const note = rec?.note ? String(rec.note).trim() : '';
+
+      return {
+        member,
+        hasRecord,
+        status: hasRecord ? status : null,
+        isLoggable,
+        targetDutyHours,
+        totalPresentHours,
+        deficitHours,
+        dailySalary,
+        hourlyRate,
+        deductionAmount,
+        penaltyAmount,
+        penaltyReason,
+        totalDeductions,
+        payableAmount,
+        note,
+      };
+    });
+  }, [activeStaff, timeLogs, attendance, selectedLogDate]);
+
+  const monthSummaryData = useMemo(() => {
+    return activeStaff.map((member) => {
+      const memberRecords = attendance.filter((a) => {
+        const aStaffId = a.staff?._id ? a.staff._id.toString() : a.staff.toString();
+        return aStaffId === member._id.toString();
+      });
+
+      const isLoggable = member.logDutyHours !== false;
+      const presentCount = memberRecords.filter((r) => r.status === 'present').length;
+      const absentCount = memberRecords.filter((r) => r.status === 'absent').length;
+      const halfDayCount = memberRecords.filter((r) => ['halfday', 'holiday'].includes(r.status)).length;
+      const leaveCount = memberRecords.filter((r) => r.status === 'leave').length;
+
+      const totalTargetHours = memberRecords.reduce((sum, r) => sum + (r.dutyHours || member.defaultDutyHours || 10), 0);
+      const totalPresentHours = +(memberRecords.reduce((sum, r) => sum + (r.totalPresentHours || 0), 0)).toFixed(2);
+      const totalDeficitHours = isLoggable
+        ? +(memberRecords.reduce((sum, r) => sum + (r.absentHours || 0), 0)).toFixed(2)
+        : 0;
+
+      const totalShortageDeductions = +(memberRecords.reduce((sum, r) => sum + (r.deductionAmount || 0), 0)).toFixed(2);
+      const totalPenalties = +(memberRecords.reduce((sum, r) => sum + (r.penaltyAmount || 0), 0)).toFixed(2);
+      const totalDeductions = +(totalShortageDeductions + totalPenalties).toFixed(2);
+
+      const totalPayable = +(memberRecords.reduce((sum, r) => sum + (r.payableAmount || 0), 0)).toFixed(2);
+      const monthlySalary = member.monthlySalary || (member.dailySalary ? member.dailySalary * 30 : 0);
+
+      // Collect notes recorded during the month for this staff member
+      const notesList = memberRecords
+        .filter((r) => r.note && String(r.note).trim() !== '')
+        .map((r) => {
+          const d = new Date(r.date);
+          const dayNum = d.getDate();
+          return {
+            date: `${MONTHS[month - 1].slice(0, 3)} ${dayNum}`,
+            note: String(r.note).trim(),
+            status: r.status,
+          };
+        });
+
+      // Collect penalties recorded during the month
+      const penaltiesList = memberRecords
+        .filter((r) => (r.penaltyAmount || 0) > 0)
+        .map((r) => {
+          const d = new Date(r.date);
+          const dayNum = d.getDate();
+          return {
+            date: `${MONTHS[month - 1].slice(0, 3)} ${dayNum}`,
+            amount: r.penaltyAmount,
+            reason: r.penaltyReason ? String(r.penaltyReason).trim() : 'Penalty',
+          };
+        });
+
+      return {
+        member,
+        isLoggable,
+        presentCount,
+        absentCount,
+        halfDayCount,
+        leaveCount,
+        totalTargetHours,
+        totalPresentHours,
+        totalDeficitHours,
+        totalShortageDeductions,
+        totalPenalties,
+        totalDeductions,
+        totalPayable,
+        monthlySalary,
+        notesList,
+        penaltiesList,
+      };
+    });
+  }, [activeStaff, attendance, month]);
+
+  const downloadPdfReport = () => {
+    if (isViewer) {
+      toast.error('Viewers are not permitted to download attendance summaries');
+      return;
+    }
+    setPdfGenerating(true);
+    try {
+      const formattedDateStr = formatDate(new Date(selectedLogDate + 'T00:00:00'));
+
+      const printHtml = generateSummaryPdfHtml({
+        mode: summaryMode,
+        dateStr: formattedDateStr,
+        monthName: MONTHS[month - 1],
+        year,
+        dayData: daySummaryData,
+        monthData: monthSummaryData,
+        isViewer,
+      });
+
+      let iframe = document.getElementById('attendance-summary-print-frame') as HTMLIFrameElement;
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'attendance-summary-print-frame';
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.style.opacity = '0';
+        iframe.style.pointerEvents = 'none';
+        document.body.appendChild(iframe);
+      }
+
+      const doc = iframe.contentWindow?.document;
+      if (!doc) {
+        toast.error('Could not access print window');
+        setPdfGenerating(false);
+        return;
+      }
+
+      doc.open();
+      doc.write(printHtml);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (err) {
+          console.error('Print failed:', err);
+          toast.error('Failed to open PDF print dialog');
+        } finally {
+          setPdfGenerating(false);
+        }
+      }, 250);
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+      toast.error('Error generating PDF report');
+      setPdfGenerating(false);
+    }
+  };
 
   const loadData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -753,6 +1350,13 @@ export default function AttendancePage() {
                 >
                   Summary 📊
                 </button>
+                <button
+                  type="button"
+                  onClick={scrollToReport}
+                  className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 rounded text-[11px] font-bold shadow-2xs hover:bg-indigo-100"
+                >
+                  Report 📑
+                </button>
               </div>
             </div>
 
@@ -952,50 +1556,7 @@ export default function AttendancePage() {
               </div>
             </div>
 
-            {/* Notes Summary Card */}
-            <div className="card border-2 border-gray-300 dark:border-gray-700 p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between border-b-2 border-gray-200 dark:border-gray-800 pb-2.5">
-                <div className="text-xs uppercase tracking-wider text-gray-800 dark:text-gray-200 font-black flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-brand-600" />
-                  <span>Notes & Remarks</span>
-                </div>
-                <span className="text-xs font-bold text-gray-500 bg-gray-200 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-                  {notesSummary.length}
-                </span>
-              </div>
 
-              {notesSummary.length === 0 ? (
-                <p className="py-2 text-xs font-medium text-gray-500 dark:text-gray-400 text-center">
-                  No notes entered for this month yet.
-                </p>
-              ) : (
-                <ul className="space-y-2.5 text-xs">
-                  {notesSummary.slice(0, 6).map((note, index) => {
-                    const statusKey = normalizeStatusValue(note.status);
-                    const meta = STATUS_CONFIG[statusKey];
-                    return (
-                      <li
-                        key={`${note.date}-${note.staff}-${index}`}
-                        className="rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-2.5 shadow-2xs"
-                      >
-                        <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                          <span className="text-gray-700 dark:text-gray-300 font-bold">{note.date}</span>
-                          <span className="text-brand-700 dark:text-brand-400 font-bold">{note.staff}</span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5">
-                          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-black uppercase shadow-2xs', meta.pill)}>
-                            {meta.text}
-                          </span>
-                        </div>
-                        <p className="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 p-2 rounded border border-gray-200 dark:border-gray-700">
-                          {note.note}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
 
             {/* Bulk Actions Card */}
             <div className="rounded-xl bg-blue-50/80 dark:bg-blue-950/40 p-4 border-2 border-blue-200 dark:border-blue-900/60 shadow-xs">
@@ -1357,6 +1918,370 @@ export default function AttendancePage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── Section: Comprehensive Attendance & Duty Summary (Day / Month Toggle & PDF Export) ── */}
+        <div
+          ref={summarySectionRef}
+          className="card p-4 sm:p-6 border-2 border-indigo-200 dark:border-indigo-900 bg-white dark:bg-gray-900 shadow-md space-y-5"
+        >
+          {/* Header & Controls */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b-2 border-gray-200 dark:border-gray-800 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-xs">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-black text-lg text-gray-900 dark:text-white">
+                    Attendance &amp; Duty Summary
+                  </h2>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                    {summaryMode === 'day' ? formatDate(new Date(selectedLogDate + 'T00:00:00')) : `${MONTHS[month - 1]} ${year}`}
+                  </span>
+                </div>
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+                  Duty hours deficit, attendance notes, penalties &amp; total deductions per staff
+                </p>
+              </div>
+            </div>
+
+            {/* Toggle Tabs & PDF Action */}
+            <div className="flex items-center flex-wrap gap-2.5">
+              {/* Day / Month Toggle */}
+              <div className="inline-flex rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 p-0.5 text-xs font-bold shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setSummaryMode('day')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all',
+                    summaryMode === 'day'
+                      ? 'bg-white dark:bg-gray-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  )}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Day View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummaryMode('month')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all',
+                    summaryMode === 'month'
+                      ? 'bg-white dark:bg-gray-900 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  )}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  <span>Month View</span>
+                </button>
+              </div>
+
+              {/* Download PDF Button (hidden for viewers) */}
+              {!isViewer && (
+                <button
+                  type="button"
+                  onClick={downloadPdfReport}
+                  disabled={pdfGenerating}
+                  className="btn-primary py-1.5 px-3 text-xs font-bold inline-flex items-center gap-1.5 shadow-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                  title="Download styled PDF summary report"
+                >
+                  <Printer className={cn("w-3.5 h-3.5", pdfGenerating && "animate-spin")} />
+                  <span>{pdfGenerating ? 'Preparing PDF...' : 'Download PDF'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Aggregate KPI Summary Row */}
+          {summaryMode === 'day' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
+                <span className="text-[10px] font-black uppercase text-gray-400">Total Staff</span>
+                <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">{daySummaryData.length}</p>
+              </div>
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Present</span>
+                <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  {daySummaryData.filter((d) => d.status === 'present').length}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Absent / Leave</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {daySummaryData.filter((d) => ['absent', 'leave'].includes(d.status || '')).length}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Duty Shortage</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {formatHoursMinutes(daySummaryData.reduce((s, d) => s + d.deficitHours, 0))}
+                </p>
+              </div>
+              <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">Penalties</span>
+                <p className="text-base font-black text-amber-700 dark:text-amber-300 mt-0.5">
+                  {isViewer ? '••••••' : formatCurrency(daySummaryData.reduce((s, d) => s + d.penaltyAmount, 0))}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Deductions</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {isViewer ? '••••••' : `-${formatCurrency(daySummaryData.reduce((s, d) => s + d.totalDeductions, 0))}`}
+                </p>
+              </div>
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Net Day Payable</span>
+                <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  {isViewer ? '••••••' : formatCurrency(daySummaryData.reduce((s, d) => s + d.payableAmount, 0))}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
+                <span className="text-[10px] font-black uppercase text-gray-400">Total Staff</span>
+                <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">{monthSummaryData.length}</p>
+              </div>
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Total Present Days</span>
+                <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  {monthSummaryData.reduce((s, m) => s + m.presentCount, 0)}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Absent Days</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {monthSummaryData.reduce((s, m) => s + m.absentCount, 0)}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Month Deficit Hours</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {formatHoursMinutes(monthSummaryData.reduce((s, m) => s + m.totalDeficitHours, 0))}
+                </p>
+              </div>
+              <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400">Month Penalties</span>
+                <p className="text-base font-black text-amber-700 dark:text-amber-300 mt-0.5">
+                  {isViewer ? '••••••' : formatCurrency(monthSummaryData.reduce((s, m) => s + m.totalPenalties, 0))}
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Deductions</span>
+                <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
+                  {isViewer ? '••••••' : `-${formatCurrency(monthSummaryData.reduce((s, m) => s + m.totalDeductions, 0))}`}
+                </p>
+              </div>
+              <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Net Month Payable</span>
+                <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  {isViewer ? '••••••' : formatCurrency(monthSummaryData.reduce((s, m) => s + m.totalPayable, 0))}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Detailed Summary Table */}
+          <div className="overflow-x-auto rounded-xl border-2 border-gray-200 dark:border-gray-800">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-100 dark:bg-gray-800/90 text-gray-700 dark:text-gray-300 uppercase tracking-wider text-[11px] font-black border-b-2 border-gray-300 dark:border-gray-700">
+                  <th className="py-3 px-3">Staff Member</th>
+                  <th className="py-3 px-3 text-center">{summaryMode === 'day' ? 'Status' : 'Attendance (P/A/H/L)'}</th>
+                  <th className="py-3 px-3 text-center">Target</th>
+                  <th className="py-3 px-3 text-center">Worked</th>
+                  <th className="py-3 px-3 text-center">Deficit Hours</th>
+                  <th className="py-3 px-3">Notes from Attendance</th>
+                  <th className="py-3 px-3 text-right">Penalty &amp; Reason</th>
+                  <th className="py-3 px-3 text-right">Total Deductions</th>
+                  <th className="py-3 px-3 text-right">Net Payable</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                {summaryMode === 'day' ? (
+                  daySummaryData.map((row) => (
+                    <tr key={row.member._id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                      <td className="py-3 px-3">
+                        <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                          <span>{row.member.position || 'Staff'}</span>
+                          {!row.isLoggable && (
+                            <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
+                              Attendance Only
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {row.status ? (
+                          <span className={cn('px-2 py-0.5 rounded text-[11px] font-black uppercase shadow-2xs', STATUS_CONFIG[row.status]?.pill || 'bg-gray-100')}>
+                            {STATUS_CONFIG[row.status]?.text || row.status}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[11px] italic">Unmarked</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-gray-700 dark:text-gray-300">
+                        {row.isLoggable ? `${row.targetDutyHours}h` : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-indigo-700 dark:text-indigo-300">
+                        {row.isLoggable ? formatHoursMinutes(row.totalPresentHours) : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {!row.isLoggable ? (
+                          <span className="text-gray-400 font-medium">—</span>
+                        ) : row.deficitHours > 0 ? (
+                          <span className="font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded text-[11px]">
+                            -{formatHoursMinutes(row.deficitHours)}
+                          </span>
+                        ) : (
+                          <span className="font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded text-[11px] inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Full Duty
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 max-w-xs">
+                        {row.note ? (
+                          <span className="inline-block p-1.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-[11px] font-medium border border-gray-200 dark:border-gray-700">
+                            {row.note}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[11px]">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        {row.penaltyAmount > 0 ? (
+                          <div>
+                            <span className="font-bold text-rose-600 dark:text-rose-400">
+                              {isViewer ? '••••••' : formatCurrency(row.penaltyAmount)}
+                            </span>
+                            {row.penaltyReason && (
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[120px] ml-auto">
+                                {row.penaltyReason}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">₹0</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        {isViewer ? (
+                          <span className="text-gray-400">••••••</span>
+                        ) : row.totalDeductions > 0 ? (
+                          <span className="font-bold text-rose-600 dark:text-rose-400">
+                            -{formatCurrency(row.totalDeductions)}
+                          </span>
+                        ) : (
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400">₹0</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
+                        {isViewer ? '••••••' : formatCurrency(row.payableAmount)}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  monthSummaryData.map((row) => (
+                    <tr key={row.member._id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                      <td className="py-3 px-3">
+                        <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                          <span>{row.member.position || 'Staff'}</span>
+                          {!row.isLoggable && (
+                            <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
+                              Attendance Only
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <div className="inline-flex items-center gap-1 font-bold text-[11px]">
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                            P:{row.presentCount}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
+                            A:{row.absentCount}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                            H:{row.halfDayCount}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                            L:{row.leaveCount}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-gray-700 dark:text-gray-300">
+                        {row.isLoggable ? `${row.totalTargetHours}h` : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-indigo-700 dark:text-indigo-300">
+                        {row.isLoggable ? formatHoursMinutes(row.totalPresentHours) : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {!row.isLoggable ? (
+                          <span className="text-gray-400 font-medium">—</span>
+                        ) : row.totalDeficitHours > 0 ? (
+                          <span className="font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded text-[11px]">
+                            -{formatHoursMinutes(row.totalDeficitHours)}
+                          </span>
+                        ) : (
+                          <span className="font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded text-[11px] inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Full Duty
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 max-w-xs">
+                        {row.notesList && row.notesList.length > 0 ? (
+                          <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                            {row.notesList.map((n, idx) => (
+                              <div key={idx} className="text-[11px] bg-gray-50 dark:bg-gray-800/80 p-1.5 rounded border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200">
+                                <span className="font-bold text-gray-500 dark:text-gray-400 mr-1">{n.date}:</span>
+                                <span>{n.note}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-[11px]">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        {row.totalPenalties > 0 ? (
+                          <div>
+                            <span className="font-bold text-rose-600 dark:text-rose-400">
+                              {isViewer ? '••••••' : formatCurrency(row.totalPenalties)}
+                            </span>
+                            {row.penaltiesList && row.penaltiesList.length > 0 && (
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[130px] ml-auto">
+                                {row.penaltiesList.map((p) => `${p.date}: ${p.reason}`).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">₹0</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        {isViewer ? (
+                          <span className="text-gray-400">••••••</span>
+                        ) : row.totalDeductions > 0 ? (
+                          <span className="font-bold text-rose-600 dark:text-rose-400">
+                            -{formatCurrency(row.totalDeductions)}
+                          </span>
+                        ) : (
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400">₹0</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
+                        {isViewer ? '••••••' : formatCurrency(row.totalPayable)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
