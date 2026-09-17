@@ -16,10 +16,10 @@ const staffSchema = new mongoose.Schema({
   address: { type: String },
   joiningDate: { type: Date },
 
-  // Monthly salary agreed amount
   monthlySalary: { type: Number, default: 0 },
   dailySalary: { type: Number, default: 0 },
   defaultDutyHours: { type: Number, default: 10 },
+  logDutyHours: { type: Boolean, default: true },
 
   // Running totals updated on every salary/advance payment
   totalSalaryPaid: { type: Number, default: 0 },   // full salary payments only

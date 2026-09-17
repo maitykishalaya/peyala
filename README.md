@@ -272,6 +272,15 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Manager & Admin Only Shift Management (`/attendance`)**:
   - Located at the bottom of the Attendance page, providing a dedicated daily duty tracker for staff entry and exit times.
   - Non-authorized roles receive a read-only badge, while Managers and Administrators can log or edit shift times.
+- **Staff Duty Hours Logging Permission Control (`logDutyHours: Boolean`)**:
+  - Administrators and Managers can selectively enable or disable duty hours logging for each staff member in the Staff management section (`/staff`).
+  - **When Log Duty is Checked (`logDutyHours: true`)**: The employee is active for shift time logging, target duty hours, pro-rata shortage deductions, and penalty fines.
+  - **When Log Duty is Unchecked (`logDutyHours: false`)**:
+    - The staff member's duty hours **cannot be logged** in the daily shift table or the time log modal.
+    - Excluded from the bottom daily shift tracker table and the time modal staff selector to keep the interface focused on hourly staff.
+    - Protected by backend API validation: `POST /api/attendance/time-log` rejects any attempt to log shift hours with a 400 bad request.
+    - **Fully Accessible on Main Attendance Table**: The staff member remains 100% accessible on the top monthly calendar grid (`/attendance`), where managers can mark Present (`P`), Absent (`A`), Leave (`L`), and Half Day (`H`) with remarks.
+    - Displayed with an **"Attendance Only"** badge on their staff card (`/staff`) and on their monthly calendar row (`/attendance`).
 - **Dynamic Multi-Row Duty Timings (Entry & Exit Rows with `+ Add Row`)**:
   - Replaced rigid "Shift 1 / Enable Shift 2" toggle with dynamic rows of **Entry Time** and **Exit Time**.
   - Tapping **`+ Add Row`** dynamically adds additional entry and exit sessions (supporting split shifts, lunch breaks, tea breaks, or multiple duties across the day).

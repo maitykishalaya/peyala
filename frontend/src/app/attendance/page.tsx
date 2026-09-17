@@ -172,6 +172,10 @@ export default function AttendancePage() {
   };
 
   const activeStaff = useMemo(() => staff.filter((member) => member.status === 'active'), [staff]);
+  const loggableStaff = useMemo(
+    () => activeStaff.filter((member) => member.logDutyHours !== false),
+    [activeStaff]
+  );
   const canEdit = useMemo(() => ['admin', 'manager'].includes(user?.role || ''), [user]);
 
   // ── Duty & Shift Time Tracking State ─────────────────────────────
@@ -234,9 +238,13 @@ export default function AttendancePage() {
   }, [selectedLogDate]);
 
   const openTimeModal = (member?: any, existingRecord?: any) => {
-    const targetMember = member || activeStaff[0];
+    if (member && member.logDutyHours === false) {
+      toast.error(`Duty hours tracking is disabled for ${member.name}. Please mark attendance in the table above.`);
+      return;
+    }
+    const targetMember = member || loggableStaff[0];
     if (!targetMember) {
-      toast.error('No active staff found');
+      toast.error('No staff member with duty hours logging enabled was found');
       return;
     }
     setTimeModalStaff(targetMember);
@@ -292,7 +300,7 @@ export default function AttendancePage() {
   };
 
   const handleStaffChangeInModal = (staffId: string) => {
-    const foundStaff = activeStaff.find((s) => s._id === staffId);
+    const foundStaff = loggableStaff.find((s) => s._id === staffId);
     if (!foundStaff) return;
     setTimeModalStaff(foundStaff);
 
@@ -827,6 +835,11 @@ export default function AttendancePage() {
                             <div className="text-[10px] sm:text-xs font-semibold text-gray-500 dark:text-gray-400 truncate hidden sm:block">
                               {member.position}
                             </div>
+                            {member.logDutyHours === false && (
+                              <span className="inline-block text-[9px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800/60 mt-0.5">
+                                Attendance Only
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1015,7 +1028,12 @@ export default function AttendancePage() {
                 Daily Shift Timings & Pro-Rata Salary Deduction
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl leading-relaxed">
-                Log 1 or 2 shift entry and exit times. Target duty hours is mandatory. The system calculates duty shortage and suggests daily salary deductions based on hours worked.
+                Log shift entry and exit times with dynamic sessions. Target duty hours is mandatory. The system calculates duty shortage and suggests daily salary deductions based on hours worked.
+                {activeStaff.length > loggableStaff.length && (
+                  <span className="block text-amber-600 dark:text-amber-400 font-semibold mt-1">
+                    Note: {activeStaff.length - loggableStaff.length} staff member{activeStaff.length - loggableStaff.length > 1 ? 's are' : ' is'} set to standard attendance only and excluded from shift logging.
+                  </span>
+                )}
               </p>
             </div>
 
@@ -1060,7 +1078,9 @@ export default function AttendancePage() {
                 <button
                   type="button"
                   onClick={() => openTimeModal()}
-                  className="btn-primary text-xs font-bold py-2 px-3.5 flex items-center gap-1.5 shadow-xs"
+                  disabled={loggableStaff.length === 0}
+                  className="btn-primary text-xs font-bold py-2 px-3.5 flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={loggableStaff.length === 0 ? 'No staff eligible for duty hours logging' : 'Log Staff Duty'}
                 >
                   <Plus className="w-4 h-4" />
                   <span>Log Staff Duty</span>
@@ -1430,7 +1450,7 @@ export default function AttendancePage() {
                 className="input font-semibold"
                 required
               >
-                {activeStaff.map((s) => (
+                {loggableStaff.map((s) => (
                   <option key={s._id} value={s._id}>
                     {s.name} ({s.position})
                   </option>

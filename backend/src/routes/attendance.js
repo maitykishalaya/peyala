@@ -263,7 +263,7 @@ const calculateShiftMinutes = (entry, exit) => {
 router.get('/time-logs', async (req, res) => {
   try {
     const targetDate = req.query.date ? normalizeDate(req.query.date) : normalizeDate(new Date());
-    const staffList = await Staff.find({ status: 'active' }).sort('name');
+    const staffList = await Staff.find({ status: 'active', logDutyHours: { $ne: false } }).sort('name');
     const attendanceRecords = await Attendance.find({ date: targetDate });
 
     const attMap = {};
@@ -301,6 +301,16 @@ router.post('/time-log', adminOrManager, async (req, res) => {
 
     if (!staffId || !date) {
       return res.status(400).json({ message: 'Staff member and date are required' });
+    }
+
+    const staffMember = await Staff.findById(staffId);
+    if (!staffMember) {
+      return res.status(404).json({ message: 'Staff member not found' });
+    }
+    if (staffMember.logDutyHours === false) {
+      return res.status(400).json({
+        message: `Duty hours tracking is disabled for ${staffMember.name}. Please mark attendance directly on the monthly calendar.`,
+      });
     }
 
     const numDutyHours = parseFloat(dutyHours);
@@ -376,7 +386,7 @@ router.post('/time-log', adminOrManager, async (req, res) => {
         payableAmount,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
-    ).populate('staff', 'name position monthlySalary dailySalary defaultDutyHours');
+    ).populate('staff', 'name position monthlySalary dailySalary defaultDutyHours logDutyHours');
 
     // Update staff's saved dailySalary & defaultDutyHours for seamless auto-fill next time
     await Staff.findByIdAndUpdate(staffId, {

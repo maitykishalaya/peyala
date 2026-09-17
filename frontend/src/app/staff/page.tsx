@@ -61,7 +61,8 @@ export default function StaffPage() {
   // Form for create/edit
   const blank = () => ({
     name: '', position: '', phone: '', address: '',
-    joiningDate: '', monthlySalary: 0, status: 'active', notes: ''
+    joiningDate: '', monthlySalary: 0, dailySalary: 0, defaultDutyHours: 10,
+    logDutyHours: true, status: 'active', notes: ''
   });
   const [form, setForm] = useState<any>(blank());
 
@@ -109,7 +110,11 @@ export default function StaffPage() {
     setForm({
       name: s.name, position: s.position, phone: s.phone || '',
       address: s.address || '', joiningDate: s.joiningDate?.split('T')[0] || '',
-      monthlySalary: s.monthlySalary, status: s.status, notes: s.notes || ''
+      monthlySalary: s.monthlySalary,
+      dailySalary: s.dailySalary || (s.monthlySalary ? Math.round(s.monthlySalary / 30) : 0),
+      defaultDutyHours: s.defaultDutyHours || 10,
+      logDutyHours: s.logDutyHours !== false,
+      status: s.status, notes: s.notes || ''
     });
     setModal('edit');
   };
@@ -164,11 +169,19 @@ export default function StaffPage() {
 
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        monthlySalary: +form.monthlySalary || 0,
+        dailySalary: +form.dailySalary || (+form.monthlySalary > 0 ? Math.round(+form.monthlySalary / 30) : 0),
+        defaultDutyHours: +form.defaultDutyHours || 10,
+        logDutyHours: Boolean(form.logDutyHours),
+      };
+
       if (modal === 'edit') {
-        await staffApi.update(selected._id, form);
+        await staffApi.update(selected._id, payload);
         toast.success(`Staff member "${form.name}" updated successfully`);
       } else {
-        await staffApi.create(form);
+        await staffApi.create(payload);
         toast.success(`Staff member "${form.name}" added successfully`);
       }
       setModal(null);
@@ -273,7 +286,18 @@ export default function StaffPage() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold text-gray-900 dark:text-white truncate">{member.name}</h3>
                   <p className="text-sm text-gray-500">{member.position}</p>
-                  <span className={statusColor(member.status)}>{member.status.replace('_', ' ')}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    <span className={statusColor(member.status)}>{member.status.replace('_', ' ')}</span>
+                    {member.logDutyHours === false ? (
+                      <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded">
+                        Attendance Only
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 rounded">
+                        Duty Hours Loggable
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <button onClick={() => openEdit(member)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded">
                   <Pencil className="w-3.5 h-3.5" />
@@ -368,6 +392,73 @@ export default function StaffPage() {
             </div>
           </div>
           <div><label className="label">Address</label><textarea className="input" rows={2} value={form.address} onChange={e => setForm({...form, address: e.target.value})} /></div>
+
+          {/* Track & Log Duty Hours Setting */}
+          <div className="p-3.5 bg-gray-50 dark:bg-gray-800/70 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={form.logDutyHours}
+                onChange={(e) => setForm({ ...form, logDutyHours: e.target.checked })}
+                className="w-4 h-4 mt-0.5 rounded text-brand-600 focus:ring-brand-500 cursor-pointer"
+              />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-gray-900 dark:text-white">
+                    Track & Log Duty Hours
+                  </span>
+                  <span
+                    className={cn(
+                      'text-[10px] font-black uppercase px-2 py-0.5 rounded',
+                      form.logDutyHours
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                    )}
+                  >
+                    {form.logDutyHours ? 'Duty Log Enabled' : 'Attendance Only'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {form.logDutyHours
+                    ? 'Shift entry & exit times can be logged with pro-rata deduction & penalty calculations.'
+                    : 'Duty hours cannot be logged. Only the main attendance table (Present, Absent, Leave, Half Duty) will be accessible for this staff member.'}
+                </p>
+              </div>
+            </label>
+
+            {form.logDutyHours && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Default Duty Target (Hours)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1"
+                    className="input h-9 text-sm font-bold"
+                    value={form.defaultDutyHours}
+                    onChange={(e) => setForm({ ...form, defaultDutyHours: +e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                    Gross Daily Salary (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder={form.monthlySalary > 0 ? String(Math.round(form.monthlySalary / 30)) : '0'}
+                    className="input h-9 text-sm font-bold"
+                    value={form.dailySalary || ''}
+                    onChange={(e) => setForm({ ...form, dailySalary: +e.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-3 pt-2">
             <button
               onClick={save}
