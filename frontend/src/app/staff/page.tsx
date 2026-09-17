@@ -18,6 +18,7 @@ import { staffApi, accountsApi } from '@/lib/api';
 import { formatCurrency, formatDate, today, getInitials, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Phone, IndianRupee, ChevronDown, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_staff_cache_v1';
@@ -48,6 +49,7 @@ const PAYMENT_TYPES = [
 ];
 
 export default function StaffPage() {
+  const { canWrite } = useAuth();
   const [staff, setStaff] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [modal, setModal] = useState<'create' | 'edit' | 'pay' | 'history' | null>(null);
@@ -264,12 +266,18 @@ export default function StaffPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button
-              onClick={() => { setForm(blank()); setModal('create'); }}
-              className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
-            >
-              <Plus className="w-4 h-4" /> Add Staff
-            </button>
+            {canWrite ? (
+              <button
+                onClick={() => { setForm(blank()); setModal('create'); }}
+                className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
+              >
+                <Plus className="w-4 h-4" /> Add Staff
+              </button>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only staff roster
+              </div>
+            )}
           </div>
         </div>
 
@@ -299,9 +307,11 @@ export default function StaffPage() {
                     )}
                   </div>
                 </div>
-                <button onClick={() => openEdit(member)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded">
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                {canWrite && (
+                  <button onClick={() => openEdit(member)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               {member.phone && (
@@ -313,20 +323,20 @@ export default function StaffPage() {
               {/* Salary breakdown */}
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-100 dark:border-gray-800 mb-3">
                 <div>
-                  <p className="text-xs text-gray-400">Monthly Salary</p>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(member.monthlySalary)}</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Monthly Salary</p>
+                  <p className="font-semibold text-gray-900 dark:text-white text-sm">{formatCurrency(member.monthlySalary)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Salary Paid</p>
-                  <p className="text-sm font-semibold text-green-600">{formatCurrency(member.totalSalaryPaid || 0)}</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Total Advance</p>
+                  <p className="font-semibold text-amber-600 text-sm">{formatCurrency(member.totalAdvancePaid || 0)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Advance Paid</p>
-                  <p className="text-sm font-semibold text-yellow-600">{formatCurrency(member.totalAdvancePaid || 0)}</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Salary Paid</p>
+                  <p className="font-semibold text-emerald-600 text-sm">{formatCurrency(member.totalSalaryPaid || 0)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400">Bonus Paid</p>
-                  <p className="text-sm font-semibold text-purple-600">{formatCurrency(member.totalBonusPaid || 0)}</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Bonus Paid</p>
+                  <p className="font-semibold text-blue-600 text-sm">{formatCurrency(member.totalBonusPaid || 0)}</p>
                 </div>
               </div>
 
@@ -350,20 +360,24 @@ export default function StaffPage() {
                 <button onClick={() => openHistory(member)} className="btn-secondary flex-1 text-xs py-1.5">
                   History
                 </button>
-                <button onClick={() => openPay(member)} className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
-                  <IndianRupee className="w-3 h-3" /> Pay
-                </button>
-                <button
-                  onClick={async () => {
-                    if (typeof window !== 'undefined' && window.confirm(`Reset salary totals for ${member.name}? This will set salary paid, advance paid, and bonus paid back to 0.`)) {
-                      await staffApi.resetSalary(member._id);
-                      load();
-                    }
-                  }}
-                  className="btn-outline text-xs py-1.5"
-                >
-                  Reset
-                </button>
+                {canWrite && (
+                  <>
+                    <button onClick={() => openPay(member)} className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
+                      <IndianRupee className="w-3 h-3" /> Pay
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (typeof window !== 'undefined' && window.confirm(`Reset salary totals for ${member.name}? This will set salary paid, advance paid, and bonus paid back to 0.`)) {
+                          await staffApi.resetSalary(member._id);
+                          load();
+                        }
+                      }}
+                      className="btn-outline text-xs py-1.5"
+                    >
+                      Reset
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}

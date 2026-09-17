@@ -13,6 +13,7 @@ const ROLES = [
   { value: 'admin', label: 'Admin', desc: 'Full access — can manage users, see all data, delete entries' },
   { value: 'manager', label: 'Manager', desc: 'Can view and add entries, cannot manage users' },
   { value: 'staff', label: 'Staff', desc: 'Limited access — can add sales and purchases only' },
+  { value: 'viewer', label: 'Viewer (Demo)', desc: 'Read-only access — can view all business data and pages, but cannot create, modify, or delete anything' },
 ];
 
 export default function UserManagementPage() {
@@ -97,7 +98,7 @@ export default function UserManagementPage() {
     }
   };
 
-  const roleColor = (role: string) => ({ admin: 'badge-red', manager: 'badge-blue', staff: 'badge-green' }[role] || 'badge-blue');
+  const roleColor = (role: string) => ({ admin: 'badge-red', manager: 'badge-blue', staff: 'badge-green', viewer: 'badge-yellow' }[role] || 'badge-blue');
 
   return (
     <AppLayout>

@@ -1079,7 +1079,7 @@ export default function LoginPage() {
               <span>Quick Demo Autofill:</span>
               <span className="text-[10px] text-brand-400">1-Tap Fill</span>
             </div>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
               <button
                 type="button"
                 onClick={() => fillCredentials('admin@peyala.com')}
@@ -1100,6 +1100,14 @@ export default function LoginPage() {
                 className="py-1.5 px-2 rounded-lg bg-gray-800/90 hover:bg-brand-500/20 hover:border-brand-500/40 border border-gray-700/80 text-[11px] font-bold text-gray-200 transition-colors text-center cursor-pointer"
               >
                 🍽️ Staff
+              </button>
+              <button
+                type="button"
+                onClick={() => fillCredentials('viewer@peyala.com')}
+                className="py-1.5 px-2 rounded-lg bg-amber-950/40 hover:bg-amber-500/20 hover:border-amber-500/50 border border-amber-800/80 text-[11px] font-bold text-amber-200 transition-colors text-center cursor-pointer"
+                title="Read-only demo role"
+              >
+                👀 Viewer
               </button>
             </div>
           </div>

@@ -27,7 +27,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 ### Backend
 - **Framework**: Node.js & Express.js (`backend/src/server.js`).
 - **Database**: MongoDB via Mongoose (`backend/src/config/db.js`).
-- **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration), `managerOrAdmin` (for table metadata and menu add-on configurations), and `staffOrAdmin` (granting staff, manager, and admin users operational access for taking orders, KOT rounds, billing, printing, discounts, and payment settlements) in `backend/src/middleware/auth.js`.
+- **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration), `managerOrAdmin` (for table metadata and menu add-on configurations), `staffOrAdmin` (granting staff, manager, and admin users operational access for taking orders, KOT rounds, billing, printing, discounts, and payment settlements), and `viewer` (read-only demo role strictly blocking all mutations system-wide with `403 Forbidden`) in `backend/src/middleware/auth.js`.
 - **Timezone Standardization**: All daily consolidation and reporting logic operates strictly under Indian Standard Time (`Asia/Kolkata`, UTC+05:30) via `backend/src/utils/date.js` (`getIstDayRange()`).
 
 ### Frontend
@@ -521,6 +521,19 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Zero-Wastage Sign-Off Flow**: Provides a double-confirmation modal (`POST /api/wastage/zero-wastage`) creating an audited zero-value entry (`approxValue: 0`, `isZeroWastage: true`) satisfying the end-of-day checklist without distorting financial figures.
 - **Cross-Component Event Notification**: Mutating wastage emits `window.dispatchEvent(new CustomEvent('peyala_wastage_updated'))` and invalidates `peyala_reports_pnl_cache_v2` for immediate real-time sync across pages without full reloads.
 
+### 5.8 "Viewer" Read-Only Demo Role Architecture & Security Model
+- **Core Motivation**: Prospective investors and partners need frictionless demo access to explore real-time kitchen operations, dining tables, analytics, and accounting without any hazard of accidental or intentional changes to active restaurant data.
+- **Middleware-Level Zero-Write Guarantee**:
+  - The `auth` middleware (`backend/src/middleware/auth.js`) automatically intercepts all incoming `POST`, `PUT`, `PATCH`, and `DELETE` requests for any user with `role === 'viewer'`.
+  - Blocks requests immediately with `403 Forbidden` (`Viewer role is read-only. You cannot create, edit, or delete data in demo mode.`).
+  - Whitelist: Only harmless session cleanup (`/api/auth/logout`, `/api/auth/complete-walkthrough`) is allowed through.
+  - Exclusions: `adminOnly`, `managerOrAdmin`, and `staffOrAdmin` explicitly reject `viewer`.
+- **Default Account**: `viewer@peyala.com` / `peyala123` (Name: `Demo Viewer`, role: `viewer`), ensured in `seed.js` and verified on DB connect in `backend/src/routes/auth.js`.
+- **Client-Side UX & Controls**:
+  - Top amber banner rendered in `AppLayout.tsx` alerting that demo mode is active and read-only.
+  - `WastagePromptBanner.tsx` suppressed for viewers (`user.role === 'viewer'`), eliminating closing checklist popups during demos.
+  - Top navigation bar & table/item action buttons across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers` conditionally hide or disable mutation controls using `canWrite` from `useAuth()`.
+
 ---
 
 ## 6) Verification & Quality Checklist
@@ -535,7 +548,7 @@ Whenever changes are made, run this validation suite before concluding:
 
 2. **Backend Syntax Verification**:
    ```bash
-   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js && node --check src/routes/expenseLeak.js && node --check src/utils/expenseLeakEngine.js && node --check src/models/ExpenseLeakReview.js && node --check src/routes/wastage.js && node --check src/models/Wastage.js
+   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js && node --check src/routes/expenseLeak.js && node --check src/utils/expenseLeakEngine.js && node --check src/models/ExpenseLeakReview.js && node --check src/routes/wastage.js && node --check src/models/Wastage.js
    ```
    *Must exit with code 0.*
 
@@ -543,6 +556,7 @@ Whenever changes are made, run this validation suite before concluding:
    ```bash
    node scratch/test_expense_leak_engine.js
    node scratch/test_wastage_and_pnl.js
+   node scratch/test_viewer_role.js
    ```
    *All tests must pass.*
 

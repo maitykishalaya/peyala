@@ -1,13 +1,45 @@
 const router = require('express').Router();
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const { auth, adminOnly } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+
+// Ensure demo viewer account exists in database
+async function ensureViewerAccount() {
+  try {
+    const existing = await User.findOne({ email: 'viewer@peyala.com' });
+    if (!existing) {
+      await User.create({
+        name: 'Demo Viewer',
+        email: 'viewer@peyala.com',
+        password: 'peyala123',
+        role: 'viewer',
+        isActive: true,
+        isFirstLogin: false,
+        hasSeenWalkthrough: true,
+      });
+      console.log('✅ Demo viewer account initialized: viewer@peyala.com');
+    }
+  } catch (err) {
+    // Ignore duplicate key or startup errors
+  }
+}
+
+mongoose.connection.on('connected', () => {
+  ensureViewerAccount();
+});
+if (mongoose.connection.readyState === 1) {
+  ensureViewerAccount();
+}
 
 // Login
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (email === 'viewer@peyala.com') {
+      await ensureViewerAccount();
+    }
     const user = await User.findOne({ email });
     if (!user || !(await user.matchPassword(password))) {
       return res.status(401).json({ message: 'Invalid credentials' });

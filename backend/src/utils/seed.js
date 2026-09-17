@@ -23,6 +23,10 @@ async function seed() {
   await User.create({ name: 'Kishalaya Maity', email: 'admin@peyala.com', password: 'peyala123', role: 'admin' });
   console.log('✅ Admin user created: admin@peyala.com / peyala123');
 
+  // Demo Viewer user
+  await User.create({ name: 'Demo Viewer', email: 'viewer@peyala.com', password: 'peyala123', role: 'viewer', isFirstLogin: false, hasSeenWalkthrough: true });
+  console.log('✅ Demo viewer created: viewer@peyala.com / peyala123');
+
   // Accounts
   const accounts = await Account.insertMany([
     { name: 'Cash Counter', type: 'cash', openingBalance: 15000, currentBalance: 15000, color: '#10b981' },

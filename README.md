@@ -404,6 +404,25 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Sticky top category pills with bi-directional `IntersectionObserver` sync and auto-centering.
   - Bottom slide dot indicator bar with responsive mobile view switcher (`Features` vs `Sign In`).
 
+### 20. "Viewer" Read-Only Demo User Role & Zero-Write Protection
+- **Purpose & Intent**:
+  - A dedicated user role built specifically for giving prospective investors, partners, and viewers an end-to-end walkthrough of the live application without risking any data mutation or disruption to running business operations.
+- **Backend Zero-Write Enforcement (`backend/src/middleware/auth.js`)**:
+  - The core `auth` middleware intercepts all state-mutating HTTP methods (`POST`, `PUT`, `PATCH`, `DELETE`) for users with `role: 'viewer'`.
+  - Automatically returns `403 Forbidden`: `Viewer role is read-only. You cannot create, edit, or delete data in demo mode.`, making accidental or manual API data modification impossible.
+  - Clean exceptions for safe session actions (`/api/auth/logout`, `/api/auth/complete-walkthrough`).
+  - Strict exclusion from privileged middleware checks (`adminOnly`, `managerOrAdmin`, `staffOrAdmin`).
+- **Auto-Provisioned Default Demo Account**:
+  - Credentials: `viewer@peyala.com` / `peyala123` (Name: *Demo Viewer*).
+  - Seeded in `backend/src/utils/seed.js` and auto-ensured on startup/login in `backend/src/routes/auth.js`.
+- **1-Tap Quick Demo Access on Login Portal (`/login`)**:
+  - Features an `👀 Viewer` autofill button alongside `👑 Admin`, `💼 Manager`, and `🍽️ Staff` for instant single-tap credential population.
+- **Comprehensive UI Read-Only Adaptation**:
+  - **Global Header Banner (`AppLayout.tsx`)**: Prominent amber banner notifying users: `👀 Viewer Demo Mode: You have read-only access. Creating, editing, or deleting business data is disabled.`
+  - **Sidebar Role Badge**: Displays `Viewer (Demo)` under user avatar.
+  - **Closing Wastage Prompt Bypass**: Automatically suppresses the 10:00 PM Wastage Prompt Banner for viewers so walkthroughs are never interrupted by closing routine checklists.
+  - **Control Guarding Across Modules**: Mutation buttons (Add Item, Settle Table, Pay Staff, Add Purchase, Add Sales Entry, Record Expense, Record Wastage, Transfer Funds) are safely hidden or disabled across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers`.
+
 ---
 
 ## 🚀 Quick Start (Local Setup)

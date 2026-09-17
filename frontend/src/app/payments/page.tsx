@@ -19,6 +19,7 @@ import { paymentsApi, accountsApi, suppliersApi, categoriesApi } from '@/lib/api
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
 
 const PAYMENTS_CACHE_KEY = 'peyala_payments_cache_v1';
@@ -44,6 +45,7 @@ function writeCache(key: string, data: any) {
 const CACHE_TTL_MS = 0.5 * 60 * 1000; // 30s — reuse cache as-is within this window, no network call at all
 
 export default function PaymentsPage() {
+  const { canWrite } = useAuth();
   // ── Data state ──────────────────────────────────────────────────
   const [payments, setPayments] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -260,10 +262,16 @@ export default function PaymentsPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
-              className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
-              <Plus className="w-4 h-4" /> New Payment
-            </button>
+            {canWrite ? (
+              <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
+                className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
+                <Plus className="w-4 h-4" /> New Payment
+              </button>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only expenses ledger
+              </div>
+            )}
           </div>
         </div>
 
@@ -320,7 +328,7 @@ export default function PaymentsPage() {
                   <td className="table-td text-xs text-gray-400">{p.createdBy?.name || '—'}</td>
                   <td className="table-td font-semibold text-red-500">{formatCurrency(p.amount)}</td>
                   <td className="table-td" onClick={e => e.stopPropagation()}>
-                    {!p.isPending && (
+                    {!p.isPending && canWrite && (
                       <div className="flex gap-1">
                         <button onClick={() => openEdit(p)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded"><Pencil className="w-3.5 h-3.5" /></button>
                         <button onClick={() => del(p._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>

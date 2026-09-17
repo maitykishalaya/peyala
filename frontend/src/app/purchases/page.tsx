@@ -27,6 +27,7 @@ import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, UNITS, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle, RefreshCw } from 'lucide-react';
 
 const REFDATA_CACHE_KEY = 'peyala_purchases_refdata_cache_v1';
@@ -146,6 +147,7 @@ function ItemSearchCell({
 }
 
 export default function PurchasesPage() {
+  const { canWrite } = useAuth();
   // ── List state ──────────────────────────────────────────────────
   const [purchases, setPurchases] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -541,9 +543,15 @@ export default function PurchasesPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
-              <Plus className="w-4 h-4" /> New Purchase
-            </button>
+            {canWrite ? (
+              <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
+                <Plus className="w-4 h-4" /> New Purchase
+              </button>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only purchases
+              </div>
+            )}
           </div>
         </div>
 
@@ -603,25 +611,27 @@ export default function PurchasesPage() {
                   </td>
                   <td className="table-td text-xs text-gray-400">{p.createdBy?.name || '—'}</td>
                   <td className="table-td" onClick={e => e.stopPropagation()}>
-                    <div className="flex gap-1">
-                      {!p.isPaid && (
+                    {canWrite && (
+                      <div className="flex gap-1">
+                        {!p.isPaid && (
+                          <button
+                            onClick={() => { setClearDueModal(p); setClearDueForm({ paidFrom: accounts[0]?._id || '', paymentMode: 'cash', date: today() }); }}
+                            className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium hover:bg-green-200"
+                          >
+                            Clear Due
+                          </button>
+                        )}
                         <button
-                          onClick={() => { setClearDueModal(p); setClearDueForm({ paidFrom: accounts[0]?._id || '', paymentMode: 'cash', date: today() }); }}
-                          className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium hover:bg-green-200"
+                          onClick={(e) => { e.stopPropagation(); openEditPurchase(p); }}
+                          className="p-1.5 text-gray-400 hover:text-brand-500 rounded"
                         >
-                          Clear Due
+                          <Pencil className="w-4 h-4" />
                         </button>
-                      )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openEditPurchase(p); }}
-                        className="p-1.5 text-gray-400 hover:text-brand-500 rounded"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); del(p._id); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                        <button onClick={(e) => { e.stopPropagation(); del(p._id); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

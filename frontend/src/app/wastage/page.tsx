@@ -7,6 +7,7 @@ import { wastageApi } from '@/lib/api';
 import { menuApi } from '@/lib/pos-api';
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import {
   Trash2,
   Plus,
@@ -39,6 +40,7 @@ const COMMON_REASONS = [
 ];
 
 export default function WastagePage() {
+  const { canWrite } = useAuth();
   const [entries, setEntries] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -315,25 +317,33 @@ export default function WastagePage() {
               <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
               <span className="hidden sm:inline">Refresh</span>
             </button>
-            <button
-              onClick={() => {
-                setZeroConfirmed(false);
-                setZeroNotes('');
-                setZeroModalOpen(true);
-              }}
-              className="btn-secondary text-sm flex items-center gap-1.5 py-2 px-3 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-              title="Sign zero food wastage for today"
-            >
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span className="hidden sm:inline">Sign Zero Wastage</span>
-            </button>
-            <button
-              onClick={handleOpenCreate}
-              className="btn-primary text-sm flex items-center gap-1.5 py-2 px-4 shadow-lg shadow-brand-500/20"
-            >
-              <Plus className="w-4 h-4" />
-              Record Wastage
-            </button>
+            {canWrite ? (
+              <>
+                <button
+                  onClick={() => {
+                    setZeroConfirmed(false);
+                    setZeroNotes('');
+                    setZeroModalOpen(true);
+                  }}
+                  className="btn-secondary text-sm flex items-center gap-1.5 py-2 px-3 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                  title="Sign zero food wastage for today"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span className="hidden sm:inline">Sign Zero Wastage</span>
+                </button>
+                <button
+                  onClick={handleOpenCreate}
+                  className="btn-primary text-sm flex items-center gap-1.5 py-2 px-4 shadow-lg shadow-brand-500/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  Record Wastage
+                </button>
+              </>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only wastage log
+              </div>
+            )}
           </div>
         </div>
 
@@ -547,24 +557,26 @@ export default function WastagePage() {
                           {entry.createdBy?.name || 'Staff'}
                         </td>
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {!entry.isZeroWastage && (
+                          {canWrite && (
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!entry.isZeroWastage && (
+                                <button
+                                  onClick={() => handleOpenEdit(entry)}
+                                  className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                  title="Edit entry"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleOpenEdit(entry)}
-                                className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                title="Edit entry"
+                                onClick={() => setDeleteConfirmId(entry._id)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                                title="Delete entry"
                               >
-                                <Pencil className="w-4 h-4" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
-                            )}
-                            <button
-                              onClick={() => setDeleteConfirmId(entry._id)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                              title="Delete entry"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -615,22 +627,24 @@ export default function WastagePage() {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        {!entry.isZeroWastage && (
+                      {canWrite && (
+                        <div className="flex items-center gap-2">
+                          {!entry.isZeroWastage && (
+                            <button
+                              onClick={() => handleOpenEdit(entry)}
+                              className="p-1.5 text-gray-500 hover:text-brand-600"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleOpenEdit(entry)}
-                            className="p-1.5 text-gray-500 hover:text-brand-600"
+                            onClick={() => setDeleteConfirmId(entry._id)}
+                            className="p-1.5 text-gray-500 hover:text-rose-600"
                           >
-                            <Pencil className="w-4 h-4" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
-                        <button
-                          onClick={() => setDeleteConfirmId(entry._id)}
-                          className="p-1.5 text-gray-500 hover:text-rose-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

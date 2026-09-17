@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal';
 import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
 import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_inventory_cache_v1';
@@ -28,6 +29,7 @@ function writeCache(data: { items: any[]; categories: any[]; suppliers: any[] })
 }
 
 export default function InventoryPage() {
+  const { canWrite } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -242,8 +244,16 @@ export default function InventoryPage() {
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
             <button onClick={openLogs} className="btn-secondary flex items-center gap-2"><History className="w-4 h-4" /> Check Logs</button>
-            <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
-            <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setSaveError(''); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
+            {canWrite ? (
+              <>
+                <button onClick={() => { setEditingCategory(null); setCatForm({ name: '', icon: '📦', color: '#10b981' }); setModal('cat'); }} className="btn-secondary flex items-center gap-2"><Plus className="w-4 h-4" /> Category</button>
+                <button onClick={() => { setSelected(null); setItemForm({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' }); setSaveError(''); setModal('item'); }} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Item</button>
+              </>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only stock ledger
+              </div>
+            )}
           </div>
         </div>
 
@@ -326,10 +336,12 @@ export default function InventoryPage() {
                           <td className="table-td font-medium text-brand-600">{formatCurrency(item.stockValue)}</td>
                           <td className="table-td text-gray-400 text-xs">{item.preferredSupplier?.name || '-'}</td>
                           <td className="table-td">
-                            <div className="flex gap-1">
-                              <button onClick={() => openEdit(item)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded"><Pencil className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => del(item._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
-                            </div>
+                            {canWrite && (
+                              <div className="flex gap-1">
+                                <button onClick={() => openEdit(item)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => del(item._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}

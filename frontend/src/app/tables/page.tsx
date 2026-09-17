@@ -1193,6 +1193,10 @@ export default function TablesPage() {
 
   const handleCollectPayment = async () => {
     if (!activeOrder) return;
+    if (!canManageOrders) {
+      toast.error('Payment settlement is disabled in viewer demo mode.');
+      return;
+    }
 
     if (paymentMethod === 'part') {
       if (totalPartAllocated <= 0) {
@@ -3358,6 +3362,7 @@ export default function TablesPage() {
                       type="button"
                       onClick={handleCollectPayment}
                       disabled={
+                        !canManageOrders ||
                         actionLoading ||
                         (paymentMethod === 'part' && totalPartAllocated <= 0) ||
                         (paymentMethod !== 'part' && (
@@ -3366,13 +3371,18 @@ export default function TablesPage() {
                         ))
                       }
                       className={cn(
-                        'w-full py-2.5 px-4 rounded-xl font-black text-sm text-white shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer',
-                        actionLoading
-                          ? 'bg-gray-400 cursor-not-allowed'
-                          : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99]'
+                        'w-full py-2.5 px-4 rounded-xl font-black text-sm text-white shadow-md flex items-center justify-center gap-2 transition-all',
+                        !canManageOrders || actionLoading
+                          ? 'bg-gray-400 cursor-not-allowed opacity-80'
+                          : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] cursor-pointer'
                       )}
                     >
-                      {actionLoading ? (
+                      {!canManageOrders ? (
+                        <>
+                          <CheckCircle className="w-4 h-4 opacity-50" />
+                          <span>Settlement Disabled (Demo Mode)</span>
+                        </>
+                      ) : actionLoading ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                           <span>Settling Table &amp; Printing Receipt...</span>

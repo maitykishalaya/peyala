@@ -213,14 +213,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className={cn('flex items-center gap-3', !sidebarOpen && 'justify-center')}>
             <div
               className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-              title={!sidebarOpen ? `${user.name} (${user.role})` : undefined}
+              title={!sidebarOpen ? `${user.name} (${user.role === 'viewer' ? 'Viewer (Demo)' : user.role})` : undefined}
             >
               {getInitials(user.name)}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{user.name}</p>
-                <p className="text-[10px] text-gray-400 capitalize">{user.role}</p>
+                <p className="text-[10px] text-gray-400 capitalize">{user.role === 'viewer' ? 'Viewer (Demo)' : user.role}</p>
               </div>
             )}
             {sidebarOpen && (
@@ -271,6 +271,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <LogOut className="w-4 h-4" />
           </button>
         </header>
+
+        {/* Viewer Demo Mode Read-Only Banner */}
+        {user?.role === 'viewer' && (
+          <div className="bg-amber-500 text-white px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium flex items-center justify-between shadow-xs z-10 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-base leading-none">👀</span>
+              <span>
+                <strong>Viewer Demo Mode:</strong> You have read-only access. Creating, editing, or deleting business data is disabled.
+              </span>
+            </div>
+            <span className="hidden sm:inline-block bg-amber-700/60 px-2 py-0.5 rounded text-[11px] uppercase tracking-wider font-black">
+              Read-Only Demo
+            </span>
+          </div>
+        )}
 
         {/* Content */}
         <main

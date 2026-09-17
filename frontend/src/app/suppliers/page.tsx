@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal';
 import { suppliersApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, Phone, MapPin, Pencil, Trash2, RefreshCw } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_suppliers_cache_v1';
@@ -28,6 +29,7 @@ function writeCache(suppliers: any[]) {
 }
 
 export default function SuppliersPage() {
+  const { canWrite } = useAuth();
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [detail, setDetail] = useState<any>(null);
@@ -133,7 +135,13 @@ export default function SuppliersPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Add Supplier</button>
+            {canWrite ? (
+              <button onClick={() => { setForm({ name: '', phone: '', address: '', category: '', notes: '', openingBalance: 0 }); setModal('create'); }} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Add Supplier</button>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only supplier ledger
+              </div>
+            )}
           </div>
         </div>
 
@@ -145,10 +153,12 @@ export default function SuppliersPage() {
                   <h3 className="font-semibold text-gray-900 dark:text-white">{sup.name}</h3>
                   {sup.category && <p className="text-xs text-gray-400 mt-0.5">{sup.category}</p>}
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={e => { e.stopPropagation(); openEdit(sup); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={e => { e.stopPropagation(); remove(sup); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                </div>
+                {canWrite && (
+                  <div className="flex gap-2">
+                    <button onClick={e => { e.stopPropagation(); openEdit(sup); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={e => { e.stopPropagation(); remove(sup); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
               </div>
               {sup.phone && <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-1"><Phone className="w-3.5 h-3.5" /> {sup.phone}</p>}
               {sup.address && <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-3"><MapPin className="w-3.5 h-3.5" /> {sup.address}</p>}

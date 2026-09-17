@@ -5,12 +5,14 @@ import Modal from '@/components/ui/Modal';
 import { menuApi, addonsApi, MenuCategory, MenuItem, Addon, MenuItemVariant } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, Search, FolderPlus,
   UtensilsCrossed, Check, X, AlertCircle, Sparkles, Layers
 } from 'lucide-react';
 
 export default function MenuPage() {
+  const { canWrite, isViewer } = useAuth();
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
@@ -381,37 +383,45 @@ export default function MenuPage() {
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-            <button
-              onClick={() => {
-                setAddonForm({ name: '', price: 0, isVeg: true, isActive: true, sortOrder: addons.length });
-                setEditingAddon(null);
-                setAddonError('');
-                setAddonModal(true);
-              }}
-              className="btn-secondary flex items-center justify-center gap-1.5 w-full sm:w-auto text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/40 hover:bg-amber-50 dark:hover:bg-amber-950/20"
-            >
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              Manage Add-ons ({addons.length})
-            </button>
-            <button
-              onClick={() => {
-                setCategoryForm({ name: '', description: '', sortOrder: categories.length, isActive: true, defaultAddons: [] });
-                setEditingCategory(null);
-                setCategoryError('');
-                setCategoryModal(true);
-              }}
-              className="btn-secondary flex items-center justify-center gap-1.5 w-full sm:w-auto"
-            >
-              <FolderPlus className="w-4 h-4" />
-              Manage Categories
-            </button>
-            <button
-              onClick={openCreateItem}
-              className="btn-primary flex items-center justify-center gap-1.5 w-full sm:w-auto"
-            >
-              <Plus className="w-4 h-4" />
-              Add Menu Item
-            </button>
+            {canWrite ? (
+              <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+                <button
+                  onClick={() => {
+                    setAddonForm({ name: '', price: 0, isVeg: true, isActive: true, sortOrder: addons.length });
+                    setEditingAddon(null);
+                    setAddonError('');
+                    setAddonModal(true);
+                  }}
+                  className="btn-secondary flex items-center justify-center gap-1.5 w-full sm:w-auto text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/40 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  Manage Add-ons ({addons.length})
+                </button>
+                <button
+                  onClick={() => {
+                    setCategoryForm({ name: '', description: '', sortOrder: categories.length, isActive: true, defaultAddons: [] });
+                    setEditingCategory(null);
+                    setCategoryError('');
+                    setCategoryModal(true);
+                  }}
+                  className="btn-secondary flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  Manage Categories
+                </button>
+                <button
+                  onClick={openCreateItem}
+                  className="btn-primary flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Menu Item
+                </button>
+              </div>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only menu catalogue
+              </div>
+            )}
           </div>
         </div>
 
@@ -598,41 +608,43 @@ export default function MenuPage() {
                       </div>
 
                       {/* Action buttons */}
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {/* Toggle Availability */}
-                        <button
-                          onClick={() => toggleAvailability(item)}
-                          className={cn(
-                            'p-1.5 rounded transition-colors',
-                            item.isAvailable
-                              ? 'text-gray-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-                              : 'text-amber-600 bg-amber-50 dark:bg-amber-950/30'
-                          )}
-                          title={item.isAvailable ? 'Mark unavailable (86)' : 'Mark available'}
-                        >
-                          {item.isAvailable ? (
-                            <Eye className="w-3.5 h-3.5" />
-                          ) : (
-                            <EyeOff className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                        {/* Edit */}
-                        <button
-                          onClick={() => openEditItem(item)}
-                          className="p-1.5 text-gray-400 hover:text-brand-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-                          title="Edit Item"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        {/* Delete */}
-                        <button
-                          onClick={() => deleteItem(item)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
-                          title="Delete Item"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {canWrite && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* Toggle Availability */}
+                          <button
+                            onClick={() => toggleAvailability(item)}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              item.isAvailable
+                                ? 'text-gray-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                                : 'text-amber-600 bg-amber-50 dark:bg-amber-950/30'
+                            )}
+                            title={item.isAvailable ? 'Mark unavailable (86)' : 'Mark available'}
+                          >
+                            {item.isAvailable ? (
+                              <Eye className="w-3.5 h-3.5" />
+                            ) : (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          {/* Edit */}
+                          <button
+                            onClick={() => openEditItem(item)}
+                            className="p-1.5 text-gray-400 hover:text-brand-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                            title="Edit Item"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          {/* Delete */}
+                          <button
+                            onClick={() => deleteItem(item)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
+                            title="Delete Item"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Item Name */}

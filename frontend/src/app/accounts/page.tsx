@@ -16,6 +16,7 @@ import { accountsApi, transfersApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2, RefreshCw } from 'lucide-react';
 
 const ACCOUNTS_CACHE_KEY = 'peyala_accounts_cache_v1';
@@ -63,6 +64,7 @@ const TYPE_DEFAULTS: Record<string, { allowed: string[]; default: string }> = {
 };
 
 export default function AccountsPage() {
+  const { canWrite } = useAuth();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -304,12 +306,20 @@ export default function AccountsPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button onClick={() => setModal('transfer')} className="btn-secondary flex items-center gap-2">
-              <ArrowRightLeft className="w-4 h-4" /> Transfer
-            </button>
-            <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Add Account
-            </button>
+            {canWrite ? (
+              <>
+                <button onClick={() => setModal('transfer')} className="btn-secondary flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4" /> Transfer
+                </button>
+                <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Add Account
+                </button>
+              </>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only accounts
+              </div>
+            )}
           </div>
         </div>
 
@@ -330,14 +340,16 @@ export default function AccountsPage() {
                       <span className={`badge text-xs capitalize ${TYPE_COLORS[acc.type as keyof typeof TYPE_COLORS]}`}>{acc.type}</span>
                     </div>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={e => { e.stopPropagation(); openEdit(acc); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors" title="Edit account">
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); del(acc._id); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Deactivate">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex gap-1">
+                      <button onClick={e => { e.stopPropagation(); openEdit(acc); }} className="p-1.5 text-gray-400 hover:text-brand-500 rounded transition-colors" title="Edit account">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); del(acc._id); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Deactivate">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Balance */}

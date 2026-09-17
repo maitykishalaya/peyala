@@ -54,7 +54,7 @@ export default function WastagePromptBanner() {
 
   // Check backend if wastage or zero-wastage is already logged today
   const checkWastageStatus = useCallback(async () => {
-    if (!user) return;
+    if (!user || user.role === 'viewer') return;
     try {
       setChecking(true);
       const res = await wastageApi.todayStatus();
@@ -177,8 +177,8 @@ export default function WastagePromptBanner() {
     }
   };
 
-  // Only render if after 10 PM and today's wastage has not been recorded
-  if (!isAfter10PM || hasRecordedToday) {
+  // Only render if after 10 PM, today's wastage has not been recorded, and not in viewer demo mode
+  if (!isAfter10PM || hasRecordedToday || user?.role === 'viewer') {
     return null;
   }
 

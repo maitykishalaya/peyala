@@ -25,6 +25,7 @@ import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info, RefreshCw } from 'lucide-react';
 
 const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
@@ -75,6 +76,7 @@ function calcNet(p: any): number {
 }
 
 export default function SalesPage() {
+  const { canWrite } = useAuth();
   // ── List state ──────────────────────────────────────────────────
   const [sales, setSales] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -428,12 +430,18 @@ export default function SalesPage() {
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <button
-              onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}
-              className="btn-primary flex items-center justify-center gap-2 flex-1 sm:flex-initial"
-            >
-              <Plus className="w-4 h-4" /> Add Sales Entry
-            </button>
+            {canWrite ? (
+              <button
+                onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}
+                className="btn-primary flex items-center justify-center gap-2 flex-1 sm:flex-initial"
+              >
+                <Plus className="w-4 h-4" /> Add Sales Entry
+              </button>
+            ) : (
+              <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                Read-only sales ledger
+              </div>
+            )}
           </div>
         </div>
 
@@ -497,10 +505,12 @@ export default function SalesPage() {
                   <td className="table-td">{s.otherSales > 0 ? formatCurrency(s.otherSales) : <span className="text-gray-300">—</span>}</td>
                   <td className="table-td font-bold text-brand-600 text-base">{formatCurrency(s.totalRevenue || 0)}</td>
                   <td className="table-td">
-                    <div className="flex gap-1">
-                      <button onClick={() => openEdit(s)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded"><Pencil className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => del(s._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </div>
+                    {canWrite && (
+                      <div className="flex gap-1">
+                        <button onClick={() => openEdit(s)} className="p-1.5 text-gray-400 hover:text-brand-500 rounded"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => del(s._id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

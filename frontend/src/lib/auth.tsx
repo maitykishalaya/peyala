@@ -6,6 +6,8 @@ interface User { id: string; name: string; email: string; role: string; }
 interface AuthCtx {
   user: User | null;
   token: string | null;
+  isViewer: boolean;
+  canWrite: boolean;
   showWalkthrough: boolean;
   dismissWalkthrough: () => void;
   login: (email: string, pass: string) => Promise<void>;
@@ -53,8 +55,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/login';
   };
 
+  const isViewer = user?.role === 'viewer';
+  const canWrite = Boolean(user && user.role !== 'viewer');
+
   return (
-    <AuthContext.Provider value={{ user, token, showWalkthrough, dismissWalkthrough, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, isViewer, canWrite, showWalkthrough, dismissWalkthrough, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

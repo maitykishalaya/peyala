@@ -11,6 +11,22 @@ const auth = async (req, res, next) => {
     if (!user) return res.status(401).json({ message: 'Token invalid' });
 
     req.user = user;
+
+    // Viewers have strict read-only demo access — block all state-mutating HTTP methods
+    if (user.role === 'viewer' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      const isLogoutOrWalkthrough =
+        req.path === '/logout' ||
+        req.originalUrl?.includes('/api/auth/logout') ||
+        req.path === '/complete-walkthrough' ||
+        req.originalUrl?.includes('/api/auth/complete-walkthrough');
+
+      if (!isLogoutOrWalkthrough) {
+        return res.status(403).json({
+          message: 'Viewer role is read-only. You cannot create, edit, or delete data in demo mode.',
+        });
+      }
+    }
+
     next();
   } catch (err) {
     res.status(401).json({ message: 'Token is not valid' });
