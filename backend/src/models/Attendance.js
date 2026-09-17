@@ -9,6 +9,10 @@ const attendanceSchema = new mongoose.Schema({
 
   // Duty and Shift Time Tracking fields
   dutyHours: { type: Number },
+  timeSlots: [{
+    entry: { type: String, trim: true },
+    exit: { type: String, trim: true },
+  }],
   shift1: {
     entry: { type: String, trim: true },
     exit: { type: String, trim: true },

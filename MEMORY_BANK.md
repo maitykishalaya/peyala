@@ -339,14 +339,19 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 ### 3.16 Staff Duty & Shift Time Tracking (Entry / Exit / 2 Shifts) & Auto-Deductions
 - **Manager & Admin Only Operational Control**:
   - Located at the bottom of the Attendance page (`/attendance`), providing detailed daily shift monitoring, duty hours tracking, and pro-rata salary deduction calculation.
-- **Customizable 2-Shift Support (Split Duty)**:
-  - Supports staff working single shifts or split duty (Shift 1 Entry/Exit + Shift 2 Entry/Exit).
-  - Handles regular shifts and overnight/cross-midnight shifts (calculating total minutes wrapped around 24 hours).
+- **Dynamic Multi-Row Duty Timings (Entry & Exit Rows with `+ Add Row`)**:
+  - Replaced rigid "Shift 1 / Enable Shift 2" toggle with dynamic rows of **Entry Time** and **Exit Time**.
+  - Tapping **`+ Add Row`** dynamically adds additional entry and exit sessions (supporting split shifts, lunch breaks, tea breaks, or multiple duties across the day).
+  - Individual session duration badges show real-time elapsed time per slot (`Xh Ym`).
+  - Row removal via trash icon (minimum 1 row preserved).
+  - Table view displays unified **`Timings (Entry → Exit)`** badges for all logged sessions.
+  - Handles day shifts and cross-midnight/overnight shifts (automatically wrapping 24-hour durations).
+  - Fully backward-compatible with MongoDB records storing legacy `shift1` and `shift2`.
 - **Mandatory Duty Hours & Gross Daily Salary Inputs**:
   - Target duty hours (e.g. 10 hrs) and Gross daily salary (e.g. ₹300) are strictly mandatory fields (`> 0`).
   - Auto-prefilled from staff profile defaults (`staff.dailySalary || Math.round(monthlySalary / 30)` and `staff.defaultDutyHours`) and customizable on the fly.
 - **Pro-Rata Shortage, Penalty & Salary Deduction Engine**:
-  - `totalPresentHours = (shift1Minutes + shift2Minutes) / 60`
+  - `totalPresentHours = sum(slotMinutes) / 60`
   - `absentHours = Math.max(0, dutyHours - totalPresentHours)`
   - `hourlyRate = dailySalary / dutyHours`
   - `deductionAmount = absentHours * hourlyRate`
@@ -468,7 +473,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | **`Account`** | `backend/src/models/Account.js` | `name`, `type` (`cash`, `bank`, `digital`), `currentBalance`, `color`, `isActive`. |
 | **`Supplier`** | `backend/src/models/Supplier.js` | `name`, `phone`, `address`, `category`, `totalPurchased`, `totalPaid`, `outstanding`. |
 | **`Staff`** | `backend/src/models/Staff.js` | `name`, `phone`, `position`, `monthlySalary`, `dailySalary`, `defaultDutyHours`, `totalSalaryPaid`, `totalAdvancePaid`, `status`. |
-| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `penaltyReason`, `penaltyAmount`, `payableAmount`, `note`, `markedBy`. |
+| **`Attendance`** | `backend/src/models/Attendance.js` | `staff` (ref: Staff), `date`, `status` (`present`, `absent`, `leave`, `halfday`), `dutyHours`, `timeSlots` (`entry`, `exit`), `shift1` (`entry`, `exit`), `shift2` (`entry`, `exit`), `totalPresentHours`, `absentHours`, `dailySalary`, `hourlyRate`, `deductionAmount`, `penaltyReason`, `penaltyAmount`, `payableAmount`, `note`, `markedBy`. |
 | **`Payment`** | `backend/src/models/Payment.js` | `date`, `amount`, `payee`, `category`, `subcategory`, `paidFrom`, `paymentMode`. |
 | **`ExpenseLeakReview`** | `backend/src/models/ExpenseLeakReview.js` | `anomalyId` (unique hash), `detector`, `entityType`, `entityKey`, `status` (`new`, `reviewed`, `dismissed`), `dismissedUntil` (30d date), `feedback` (`isUseful`, `reason`, `notes`), `reviewedBy`. |
 | **`Wastage`** | `backend/src/models/Wastage.js` | `itemName`, `quantity`, `unit`, `approxValue`, `date`, `reason`, `createdBy`. |

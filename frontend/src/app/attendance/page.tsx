@@ -8,7 +8,7 @@ import { cn, formatDate, getInitials, formatCurrency } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import {
   CalendarCheck, ChevronLeft, ChevronRight, CalendarDays, Info, RefreshCw,
-  Clock, Plus, Pencil, CheckCircle2, AlertTriangle, ArrowRight, UserCheck, ShieldAlert, Check
+  Clock, Plus, Pencil, CheckCircle2, AlertTriangle, ArrowRight, UserCheck, ShieldAlert, Check, Trash2
 } from 'lucide-react';
 
 const MONTHS = [
@@ -186,13 +186,36 @@ export default function AttendancePage() {
     date: formatDateOnly(today),
     dutyHours: '10',
     dailySalary: '',
-    shift1: { entry: '', exit: '' },
-    shift2: { entry: '', exit: '' },
-    hasSecondShift: false,
+    timeSlots: [{ entry: '', exit: '' }] as Array<{ entry: string; exit: string }>,
     penaltyReason: '',
     penaltyAmount: '',
     note: '',
   });
+
+  const addTimeSlot = () => {
+    setTimeForm((prev) => ({
+      ...prev,
+      timeSlots: [...prev.timeSlots, { entry: '', exit: '' }],
+    }));
+  };
+
+  const removeTimeSlot = (index: number) => {
+    setTimeForm((prev) => {
+      if (prev.timeSlots.length <= 1) return prev;
+      return {
+        ...prev,
+        timeSlots: prev.timeSlots.filter((_, i) => i !== index),
+      };
+    });
+  };
+
+  const updateTimeSlot = (index: number, field: 'entry' | 'exit', value: string) => {
+    setTimeForm((prev) => {
+      const nextSlots = [...prev.timeSlots];
+      nextSlots[index] = { ...nextSlots[index], [field]: value };
+      return { ...prev, timeSlots: nextSlots };
+    });
+  };
 
   const loadDayTimeLogs = async (dateStr = selectedLogDate) => {
     setTimeLogsLoading(true);
@@ -232,25 +255,35 @@ export default function AttendancePage() {
       ? String(targetMember.defaultDutyHours)
       : '10';
 
-    const hasShift2 = Boolean(
-      (existingRecord?.shift2?.entry && existingRecord?.shift2?.entry.trim() !== '') ||
-      (existingRecord?.shift2?.exit && existingRecord?.shift2?.exit.trim() !== '')
-    );
+    let initialSlots: Array<{ entry: string; exit: string }> = [];
+    if (Array.isArray(existingRecord?.timeSlots) && existingRecord.timeSlots.length > 0) {
+      initialSlots = existingRecord.timeSlots.map((s: any) => ({
+        entry: s?.entry || '',
+        exit: s?.exit || '',
+      }));
+    } else if (
+      existingRecord?.shift1?.entry ||
+      existingRecord?.shift1?.exit ||
+      existingRecord?.shift2?.entry ||
+      existingRecord?.shift2?.exit
+    ) {
+      if (existingRecord?.shift1?.entry || existingRecord?.shift1?.exit) {
+        initialSlots.push({ entry: existingRecord.shift1.entry || '', exit: existingRecord.shift1.exit || '' });
+      }
+      if (existingRecord?.shift2?.entry || existingRecord?.shift2?.exit) {
+        initialSlots.push({ entry: existingRecord.shift2.entry || '', exit: existingRecord.shift2.exit || '' });
+      }
+    }
+    if (initialSlots.length === 0) {
+      initialSlots = [{ entry: '', exit: '' }];
+    }
 
     setTimeForm({
       staffId: targetMember._id,
       date: selectedLogDate,
       dutyHours: defaultDuty,
       dailySalary: defaultSalary,
-      shift1: {
-        entry: existingRecord?.shift1?.entry || '',
-        exit: existingRecord?.shift1?.exit || '',
-      },
-      shift2: {
-        entry: existingRecord?.shift2?.entry || '',
-        exit: existingRecord?.shift2?.exit || '',
-      },
-      hasSecondShift: hasShift2,
+      timeSlots: initialSlots,
       penaltyReason: existingRecord?.penaltyReason || '',
       penaltyAmount: existingRecord?.penaltyAmount ? String(existingRecord.penaltyAmount) : '',
       note: existingRecord?.note || '',
@@ -281,25 +314,35 @@ export default function AttendancePage() {
       ? String(foundStaff.defaultDutyHours)
       : '10';
 
-    const hasShift2 = Boolean(
-      (existingRecord?.shift2?.entry && existingRecord?.shift2?.entry.trim() !== '') ||
-      (existingRecord?.shift2?.exit && existingRecord?.shift2?.exit.trim() !== '')
-    );
+    let initialSlots: Array<{ entry: string; exit: string }> = [];
+    if (Array.isArray(existingRecord?.timeSlots) && existingRecord.timeSlots.length > 0) {
+      initialSlots = existingRecord.timeSlots.map((s: any) => ({
+        entry: s?.entry || '',
+        exit: s?.exit || '',
+      }));
+    } else if (
+      existingRecord?.shift1?.entry ||
+      existingRecord?.shift1?.exit ||
+      existingRecord?.shift2?.entry ||
+      existingRecord?.shift2?.exit
+    ) {
+      if (existingRecord?.shift1?.entry || existingRecord?.shift1?.exit) {
+        initialSlots.push({ entry: existingRecord.shift1.entry || '', exit: existingRecord.shift1.exit || '' });
+      }
+      if (existingRecord?.shift2?.entry || existingRecord?.shift2?.exit) {
+        initialSlots.push({ entry: existingRecord.shift2.entry || '', exit: existingRecord.shift2.exit || '' });
+      }
+    }
+    if (initialSlots.length === 0) {
+      initialSlots = [{ entry: '', exit: '' }];
+    }
 
     setTimeForm((prev) => ({
       ...prev,
       staffId,
       dutyHours: defaultDuty,
       dailySalary: defaultSalary,
-      shift1: {
-        entry: existingRecord?.shift1?.entry || '',
-        exit: existingRecord?.shift1?.exit || '',
-      },
-      shift2: {
-        entry: existingRecord?.shift2?.entry || '',
-        exit: existingRecord?.shift2?.exit || '',
-      },
-      hasSecondShift: hasShift2,
+      timeSlots: initialSlots,
       penaltyReason: existingRecord?.penaltyReason || '',
       penaltyAmount: existingRecord?.penaltyAmount ? String(existingRecord.penaltyAmount) : '',
       note: existingRecord?.note || '',
@@ -308,11 +351,10 @@ export default function AttendancePage() {
 
   // Live real-time calculations inside modal
   const timeCalc = useMemo(() => {
-    const shift1Min = calculateShiftMinutes(timeForm.shift1.entry, timeForm.shift1.exit);
-    const shift2Min = timeForm.hasSecondShift
-      ? calculateShiftMinutes(timeForm.shift2.entry, timeForm.shift2.exit)
-      : 0;
-    const totalMinutes = shift1Min + shift2Min;
+    const slotMinutes = timeForm.timeSlots.map((slot) =>
+      calculateShiftMinutes(slot.entry, slot.exit)
+    );
+    const totalMinutes = slotMinutes.reduce((sum, m) => sum + m, 0);
     const totalPresentHours = +(totalMinutes / 60).toFixed(2);
     const dutyHours = parseFloat(timeForm.dutyHours) || 0;
     const absentHours = Math.max(0, +(dutyHours - totalPresentHours).toFixed(2));
@@ -321,15 +363,11 @@ export default function AttendancePage() {
     const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
     const penaltyAmount = Math.max(0, parseFloat(timeForm.penaltyAmount) || 0);
     const payableAmount = Math.max(0, +(dailySalary - deductionAmount - penaltyAmount).toFixed(2));
-    const hasEntry = Boolean(
-      (timeForm.shift1.entry && timeForm.shift1.entry.trim() !== '') ||
-      (timeForm.hasSecondShift && timeForm.shift2.entry && timeForm.shift2.entry.trim() !== '')
-    );
+    const hasEntry = timeForm.timeSlots.some((slot) => slot.entry && slot.entry.trim() !== '');
     const autoStatus = hasEntry ? 'present' : 'absent';
 
     return {
-      shift1Min,
-      shift2Min,
+      slotMinutes,
       totalMinutes,
       totalPresentHours,
       dutyHours,
@@ -366,13 +404,20 @@ export default function AttendancePage() {
 
     setTimeSaving(true);
     try {
+      const cleanSlots = timeForm.timeSlots.filter(
+        (s) => (s.entry && s.entry.trim() !== '') || (s.exit && s.exit.trim() !== '')
+      );
+      const shift1 = cleanSlots[0] || { entry: '', exit: '' };
+      const shift2 = cleanSlots[1] || { entry: '', exit: '' };
+
       await attendanceApi.logTime({
         staffId: timeForm.staffId,
         date: timeForm.date,
         dutyHours: numDuty,
         dailySalary: numDailySalary,
-        shift1: timeForm.shift1,
-        shift2: timeForm.hasSecondShift ? timeForm.shift2 : { entry: '', exit: '' },
+        timeSlots: cleanSlots.length > 0 ? cleanSlots : [{ entry: '', exit: '' }],
+        shift1,
+        shift2,
         penaltyReason: timeForm.penaltyReason.trim(),
         penaltyAmount: Math.max(0, parseFloat(timeForm.penaltyAmount) || 0),
         note: timeForm.note,
@@ -1037,8 +1082,7 @@ export default function AttendancePage() {
               <thead className="bg-gray-50/80 dark:bg-gray-800/80 text-[11px] font-black uppercase tracking-wider text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800">
                 <tr>
                   <th className="py-3 px-3.5">Staff Member</th>
-                  <th className="py-3 px-3 text-center">Shift 1 (Entry - Exit)</th>
-                  <th className="py-3 px-3 text-center">Shift 2 (Entry - Exit)</th>
+                  <th className="py-3 px-3 text-center">Timings (Entry → Exit)</th>
                   <th className="py-3 px-3 text-center">Duty Target</th>
                   <th className="py-3 px-3 text-center">Present Duty</th>
                   <th className="py-3 px-3 text-center">Shortage / Absent</th>
@@ -1052,20 +1096,20 @@ export default function AttendancePage() {
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 text-xs">
                 {timeLogsLoading ? (
                   <tr>
-                    <td colSpan={canEdit ? 11 : 10} className="py-8 text-center text-gray-400 font-bold">
+                    <td colSpan={canEdit ? 10 : 9} className="py-8 text-center text-gray-400 font-bold">
                       <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
                       Loading shift time records for {selectedLogDate}...
                     </td>
                   </tr>
                 ) : timeLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={canEdit ? 11 : 10} className="py-8 text-center text-gray-400 font-medium">
+                    <td colSpan={canEdit ? 10 : 9} className="py-8 text-center text-gray-400 font-medium">
                       No active staff found.
                     </td>
                   </tr>
                 ) : (
                   timeLogs.map(({ staff: member, record }: any) => {
-                    const hasRecord = Boolean(record && (record.dutyHours || record.shift1?.entry));
+                    const hasRecord = Boolean(record && (record.dutyHours || record.shift1?.entry || (record.timeSlots && record.timeSlots.length > 0)));
                     const isPresent = record?.status === 'present';
                     const hasShortage = record?.absentHours > 0;
 
@@ -1087,26 +1131,35 @@ export default function AttendancePage() {
                           </div>
                         </td>
 
-                        {/* Shift 1 */}
+                        {/* Timings (Entry → Exit) */}
                         <td className="py-3 px-3 text-center">
-                          {record?.shift1?.entry ? (
-                            <span className="font-semibold text-gray-800 dark:text-gray-200">
-                              {record.shift1.entry} <span className="text-gray-400">→</span> {record.shift1.exit || 'Active'}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
+                          {(() => {
+                            const slots: Array<{ entry?: string; exit?: string }> =
+                              Array.isArray(record?.timeSlots) && record.timeSlots.length > 0
+                                ? record.timeSlots
+                                : [record?.shift1, record?.shift2].filter(
+                                    (s) => (s?.entry && s.entry.trim() !== '') || (s?.exit && s.exit.trim() !== '')
+                                  );
 
-                        {/* Shift 2 */}
-                        <td className="py-3 px-3 text-center">
-                          {record?.shift2?.entry ? (
-                            <span className="font-semibold text-gray-800 dark:text-gray-200">
-                              {record.shift2.entry} <span className="text-gray-400">→</span> {record.shift2.exit || 'Active'}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
+                            if (slots.length === 0) {
+                              return <span className="text-gray-400">—</span>;
+                            }
+
+                            return (
+                              <div className="inline-flex flex-wrap items-center justify-center gap-1.5 max-w-xs mx-auto">
+                                {slots.map((s, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center gap-1 font-semibold text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-[11px]"
+                                  >
+                                    <span>{s.entry || '--:--'}</span>
+                                    <span className="text-gray-400">→</span>
+                                    <span>{s.exit || 'Active'}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Target Duty */}
@@ -1444,104 +1497,84 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          {/* Shift 1 Timings */}
-          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
+          {/* Duty Timings (Entry & Exit Rows) */}
+          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                Shift 1 (Primary Duty)
-              </span>
-              <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">
-                {timeCalc.shift1Min > 0 ? formatHoursMinutes(timeCalc.shift1Min / 60) : '0 hrs'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Entry Time</label>
-                <input
-                  type="time"
-                  value={timeForm.shift1.entry}
-                  onChange={(e) =>
-                    setTimeForm((prev) => ({
-                      ...prev,
-                      shift1: { ...prev.shift1, entry: e.target.value },
-                    }))
-                  }
-                  className="input font-bold text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Exit Time</label>
-                <input
-                  type="time"
-                  value={timeForm.shift1.exit}
-                  onChange={(e) =>
-                    setTimeForm((prev) => ({
-                      ...prev,
-                      shift1: { ...prev.shift1, exit: e.target.value },
-                    }))
-                  }
-                  className="input font-bold text-sm"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Shift 2 Option (Split Duty) */}
-          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-200 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={timeForm.hasSecondShift}
-                  onChange={(e) =>
-                    setTimeForm((prev) => ({
-                      ...prev,
-                      hasSecondShift: e.target.checked,
-                    }))
-                  }
-                  className="w-4 h-4 rounded text-indigo-600"
-                />
-                <span>Enable Shift 2 (for split duty staff)</span>
-              </label>
-              {timeForm.hasSecondShift && (
-                <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">
-                  {timeCalc.shift2Min > 0 ? formatHoursMinutes(timeCalc.shift2Min / 60) : '0 hrs'}
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-800 dark:text-gray-200">
+                  Duty Timings (Entry & Exit)
                 </span>
-              )}
+              </div>
+              <button
+                type="button"
+                onClick={addTimeSlot}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg border border-indigo-200 dark:border-indigo-800/60 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Row</span>
+              </button>
             </div>
 
-            {timeForm.hasSecondShift && (
-              <div className="grid grid-cols-2 gap-3 pt-1 border-t border-gray-100 dark:border-gray-800">
-                <div>
-                  <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Shift 2 Entry</label>
-                  <input
-                    type="time"
-                    value={timeForm.shift2.entry}
-                    onChange={(e) =>
-                      setTimeForm((prev) => ({
-                        ...prev,
-                        shift2: { ...prev.shift2, entry: e.target.value },
-                      }))
-                    }
-                    className="input font-bold text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400">Shift 2 Exit</label>
-                  <input
-                    type="time"
-                    value={timeForm.shift2.exit}
-                    onChange={(e) =>
-                      setTimeForm((prev) => ({
-                        ...prev,
-                        shift2: { ...prev.shift2, exit: e.target.value },
-                      }))
-                    }
-                    className="input font-bold text-sm"
-                  />
-                </div>
-              </div>
-            )}
+            <div className="space-y-2.5">
+              {timeForm.timeSlots.map((slot, index) => {
+                const slotMin = timeCalc.slotMinutes?.[index] || 0;
+                return (
+                  <div
+                    key={index}
+                    className="p-2.5 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/40 space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-gray-500 dark:text-gray-400">
+                        Session #{index + 1}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {slotMin > 0 && (
+                          <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                            {formatHoursMinutes(slotMin / 60)}
+                          </span>
+                        )}
+                        {timeForm.timeSlots.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeTimeSlot(index)}
+                            className="text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 p-0.5 rounded transition-colors"
+                            title="Delete row"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Entry Time
+                        </label>
+                        <input
+                          type="time"
+                          value={slot.entry}
+                          onChange={(e) => updateTimeSlot(index, 'entry', e.target.value)}
+                          className="input font-bold text-sm h-9"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Exit Time
+                        </label>
+                        <input
+                          type="time"
+                          value={slot.exit}
+                          onChange={(e) => updateTimeSlot(index, 'exit', e.target.value)}
+                          className="input font-bold text-sm h-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Penalty Section */}

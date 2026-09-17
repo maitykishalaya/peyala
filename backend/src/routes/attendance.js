@@ -286,7 +286,18 @@ router.get('/time-logs', async (req, res) => {
 // Manager or Admin only
 router.post('/time-log', adminOrManager, async (req, res) => {
   try {
-    const { staffId, date, dutyHours, dailySalary, shift1, shift2, note, penaltyReason, penaltyAmount } = req.body;
+    const {
+      staffId,
+      date,
+      dutyHours,
+      dailySalary,
+      shift1,
+      shift2,
+      timeSlots,
+      note,
+      penaltyReason,
+      penaltyAmount,
+    } = req.body;
 
     if (!staffId || !date) {
       return res.status(400).json({ message: 'Staff member and date are required' });
@@ -311,21 +322,36 @@ router.post('/time-log', adminOrManager, async (req, res) => {
       return res.status(400).json({ message: 'Cannot mark future dates' });
     }
 
-    // Calculate shift minutes
-    const shift1Min = calculateShiftMinutes(shift1?.entry, shift1?.exit);
-    const shift2Min = calculateShiftMinutes(shift2?.entry, shift2?.exit);
-    const totalMinutes = shift1Min + shift2Min;
+    // Determine slots from timeSlots array or fallback to shift1/shift2
+    let rawSlots = [];
+    if (Array.isArray(timeSlots) && timeSlots.length > 0) {
+      rawSlots = timeSlots;
+    } else {
+      if (shift1 && (shift1.entry || shift1.exit)) rawSlots.push(shift1);
+      if (shift2 && (shift2.entry || shift2.exit)) rawSlots.push(shift2);
+    }
+
+    const cleanSlots = rawSlots.map((s) => ({
+      entry: s?.entry ? String(s.entry).trim() : '',
+      exit: s?.exit ? String(s.exit).trim() : '',
+    }));
+
+    const slotsToSave = cleanSlots.length > 0 ? cleanSlots : [{ entry: '', exit: '' }];
+
+    // Calculate total minutes across all timing slots
+    let totalMinutes = 0;
+    slotsToSave.forEach((slot) => {
+      totalMinutes += calculateShiftMinutes(slot.entry, slot.exit);
+    });
+
     const totalPresentHours = +(totalMinutes / 60).toFixed(2);
     const absentHours = Math.max(0, +(numDutyHours - totalPresentHours).toFixed(2));
     const hourlyRate = +(numDailySalary / numDutyHours).toFixed(2);
     const deductionAmount = +(absentHours * hourlyRate).toFixed(2);
     const payableAmount = Math.max(0, +(numDailySalary - deductionAmount - numPenaltyAmount).toFixed(2));
 
-    // Auto-mark attendance: if entry time is logged -> present, otherwise -> absent
-    const hasEntry = Boolean(
-      (shift1?.entry && String(shift1.entry).trim() !== '') ||
-      (shift2?.entry && String(shift2.entry).trim() !== '')
-    );
+    // Auto-mark attendance: if any entry time is logged -> present, otherwise -> absent
+    const hasEntry = slotsToSave.some((slot) => slot.entry && String(slot.entry).trim() !== '');
     const autoStatus = hasEntry ? 'present' : 'absent';
 
     const record = await Attendance.findOneAndUpdate(
@@ -337,14 +363,9 @@ router.post('/time-log', adminOrManager, async (req, res) => {
         note: note ? String(note).trim() : undefined,
         markedBy: req.user._id,
         dutyHours: numDutyHours,
-        shift1: {
-          entry: shift1?.entry ? String(shift1.entry).trim() : '',
-          exit: shift1?.exit ? String(shift1.exit).trim() : '',
-        },
-        shift2: {
-          entry: shift2?.entry ? String(shift2.entry).trim() : '',
-          exit: shift2?.exit ? String(shift2.exit).trim() : '',
-        },
+        timeSlots: slotsToSave,
+        shift1: slotsToSave[0] || { entry: '', exit: '' },
+        shift2: slotsToSave[1] || { entry: '', exit: '' },
         totalPresentHours,
         absentHours,
         dailySalary: numDailySalary,

@@ -268,13 +268,18 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Instant client-side validation prevents invalid submissions and displays user-friendly, descriptive toast error messages (e.g., missing name, invalid amount, rate <= 0, account selection).
   - API errors are caught in unified try/catch/finally blocks and surfaced cleanly with the exact server reason.
 
-### 14. Staff Duty & Shift Time Tracking (Entry / Exit / 2 Shifts) & Auto-Deductions
+### 14. Staff Duty & Shift Time Tracking (Dynamic Multi-Row Entry / Exit) & Auto-Deductions
 - **Manager & Admin Only Shift Management (`/attendance`)**:
   - Located at the bottom of the Attendance page, providing a dedicated daily duty tracker for staff entry and exit times.
   - Non-authorized roles receive a read-only badge, while Managers and Administrators can log or edit shift times.
-- **Support for Split Duty (Up to 2 Shifts)**:
-  - Custom shift configuration: Single full shift or 2 split shifts (Shift 1 Entry/Exit + Shift 2 Entry/Exit).
+- **Dynamic Multi-Row Duty Timings (Entry & Exit Rows with `+ Add Row`)**:
+  - Replaced rigid "Shift 1 / Enable Shift 2" toggle with dynamic rows of **Entry Time** and **Exit Time**.
+  - Tapping **`+ Add Row`** dynamically adds additional entry and exit sessions (supporting split shifts, lunch breaks, tea breaks, or multiple duties across the day).
+  - Individual session duration badges show real-time elapsed time per slot (`Xh Ym`).
+  - Row removal via trash icon (minimum 1 row preserved).
+  - Table view displays unified **`Timings (Entry → Exit)`** badges for all logged sessions.
   - Handles day shifts and cross-midnight/overnight shifts (automatically wrapping 24-hour durations).
+  - Fully backward-compatible with MongoDB records storing legacy `shift1` and `shift2`.
 - **Mandatory Target Duty Hours & Gross Daily Salary Inputs**:
   - Both Target Duty Hours (e.g. 10.0 hrs) and Gross Daily Salary (e.g. ₹300) are strictly mandatory fields.
   - Automatically pre-filled from the staff member's profile (`staff.dailySalary || Math.round(monthlySalary / 30)` and `staff.defaultDutyHours`) and customizable on the fly.
