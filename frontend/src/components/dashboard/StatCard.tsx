@@ -11,6 +11,7 @@ interface StatCardProps {
   iconColor?: string;
   trend?: number;
   isCurrency?: boolean;
+  isMasked?: boolean;
   accent?: 'green' | 'red' | 'blue' | 'purple' | 'orange';
 }
 
@@ -39,9 +40,14 @@ export default function StatCard({
   icon: Icon,
   trend,
   isCurrency = true,
+  isMasked = false,
   accent = 'blue',
 }: StatCardProps) {
-  const displayValue = isCurrency ? formatCurrency(Number(value)) : value;
+  const displayValue = isMasked
+    ? '••••••'
+    : isCurrency
+    ? (typeof value === 'string' && value === '••••••' ? '••••••' : formatCurrency(value as any))
+    : value;
   return (
     <div className={cn('card p-5 bg-gradient-to-br border', accents[accent])}>
       <div className="flex items-start justify-between">

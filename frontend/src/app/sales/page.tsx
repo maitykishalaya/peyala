@@ -31,9 +31,9 @@ import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp
 const SALES_LIST_CACHE_KEY = 'peyala_sales_list_cache_v1';
 const SALES_ACCOUNTS_CACHE_KEY = 'peyala_sales_accounts_cache_v1';
 
-function readCache(key: string) {
+function readCache(key: string, role = 'default') {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(`${key}_${role}`);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -41,9 +41,9 @@ function readCache(key: string) {
   }
 }
 
-function writeCache(key: string, data: any) {
+function writeCache(key: string, data: any, role = 'default') {
   try {
-    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+    localStorage.setItem(`${key}_${role}`, JSON.stringify({ ...data, savedAt: Date.now() }));
   } catch {
     // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
   }
@@ -76,7 +76,8 @@ function calcNet(p: any): number {
 }
 
 export default function SalesPage() {
-  const { canWrite } = useAuth();
+  const { canWrite, isViewer, user } = useAuth();
+  const userRole = user?.role || 'default';
   // ── List state ──────────────────────────────────────────────────
   const [sales, setSales] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -140,7 +141,7 @@ export default function SalesPage() {
       setSales(r.data.sales);
       setTotal(r.data.total);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      if (isDefaultView) writeCache(SALES_LIST_CACHE_KEY, { sales: r.data.sales, total: r.data.total });
+      if (isDefaultView) writeCache(SALES_LIST_CACHE_KEY, { sales: r.data.sales, total: r.data.total }, userRole);
     } catch (err) {
       console.error('Failed to load sales:', err);
     } finally {
@@ -152,7 +153,7 @@ export default function SalesPage() {
   useEffect(() => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
     if (isDefaultView) {
-      const cached = readCache(SALES_LIST_CACHE_KEY);
+      const cached = readCache(SALES_LIST_CACHE_KEY, userRole);
       if (cached && Array.isArray(cached.sales)) {
         setSales(cached.sales);
         setTotal(cached.total || 0);
@@ -167,7 +168,7 @@ export default function SalesPage() {
       }
     }
     load();
-  }, [page, filters]);
+  }, [page, filters, userRole]);
 
   // When a POS payment is collected in this session, immediately fetch fresh data
   useEffect(() => {
@@ -178,19 +179,19 @@ export default function SalesPage() {
     return () => {
       window.removeEventListener('peyala_sales_updated', handleSalesUpdate);
     };
-  }, [page, filters]);
+  }, [page, filters, userRole]);
 
   useEffect(() => {
-    const cached = readCache(SALES_ACCOUNTS_CACHE_KEY);
+    const cached = readCache(SALES_ACCOUNTS_CACHE_KEY, userRole);
     const isStale = !cached?.savedAt || (Date.now() - cached.savedAt > CACHE_TTL_MS);
     if (cached) setAccounts(cached.accounts || []);
     if (!cached || isStale) {
       accountsApi.list().then(res => {
         setAccounts(res.data);
-        writeCache(SALES_ACCOUNTS_CACHE_KEY, { accounts: res.data });
+        writeCache(SALES_ACCOUNTS_CACHE_KEY, { accounts: res.data }, userRole);
       });
     }
-  }, []);
+  }, [userRole]);
 
   // ── Open edit modal — populate form from existing entry ──────────
   const openEdit = (s: any) => {
@@ -439,7 +440,7 @@ export default function SalesPage() {
               </button>
             ) : (
               <div className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
-                Read-only sales ledger
+                {isViewer ? 'Viewer Demo: Read-only & sales totals protected' : 'Read-only sales ledger'}
               </div>
             )}
           </div>
@@ -471,7 +472,9 @@ export default function SalesPage() {
                 <th className="table-th">Zomato Net</th>
                 <th className="table-th">Fatafat Net</th>
                 <th className="table-th">Other</th>
-                <th className="table-th font-bold">Total</th>
+                <th className="table-th font-bold">
+                  Total {isViewer && <span className="text-[10px] font-normal text-amber-600 dark:text-amber-400 block sm:inline">(Protected)</span>}
+                </th>
                 <th className="table-th"></th>
               </tr>
             </thead>
@@ -483,11 +486,13 @@ export default function SalesPage() {
               ) : sales.map((s: any) => (
                 <tr key={s._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                   <td className="table-td font-medium">{formatDate(s.date)}</td>
-                  <td className="table-td">{formatCurrency(s.outletSales || 0)}</td>
-                  <td className="table-td text-xs text-gray-400">{formatCurrency(s.paymentBreakdown?.cash || 0)}</td>
-                  <td className="table-td text-xs text-gray-400">{formatCurrency((s.paymentBreakdown?.upi || 0) + (s.paymentBreakdown?.card || 0))}</td>
+                  <td className="table-td">{isViewer ? '••••••' : formatCurrency(s.outletSales || 0)}</td>
+                  <td className="table-td text-xs text-gray-400">{isViewer ? '••••••' : formatCurrency(s.paymentBreakdown?.cash || 0)}</td>
+                  <td className="table-td text-xs text-gray-400">{isViewer ? '••••••' : formatCurrency((s.paymentBreakdown?.upi || 0) + (s.paymentBreakdown?.card || 0))}</td>
                   <td className="table-td">
-                    {s.zomato?.grossSales > 0 ? (
+                    {isViewer ? (
+                      <span className="text-gray-400 font-mono">••••••</span>
+                    ) : s.zomato?.grossSales > 0 ? (
                       <div>
                         <div>{formatCurrency(s.zomato.netSettlement || 0)}</div>
                         <div className="text-xs text-gray-400">Gross: {formatCurrency(s.zomato.grossSales)}</div>
@@ -495,15 +500,17 @@ export default function SalesPage() {
                     ) : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="table-td">
-                    {s.fatafat?.grossSales > 0 ? (
+                    {isViewer ? (
+                      <span className="text-gray-400 font-mono">••••••</span>
+                    ) : s.fatafat?.grossSales > 0 ? (
                       <div>
                         <div>{formatCurrency(s.fatafat.netSettlement || 0)}</div>
                         <div className="text-xs text-gray-400">Gross: {formatCurrency(s.fatafat.grossSales)}</div>
                       </div>
                     ) : <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="table-td">{s.otherSales > 0 ? formatCurrency(s.otherSales) : <span className="text-gray-300">—</span>}</td>
-                  <td className="table-td font-bold text-brand-600 text-base">{formatCurrency(s.totalRevenue || 0)}</td>
+                  <td className="table-td">{isViewer ? '••••••' : (s.otherSales > 0 ? formatCurrency(s.otherSales) : <span className="text-gray-300">—</span>)}</td>
+                  <td className="table-td font-bold text-brand-600 text-base">{isViewer ? '••••••' : formatCurrency(s.totalRevenue || 0)}</td>
                   <td className="table-td">
                     {canWrite && (
                       <div className="flex gap-1">

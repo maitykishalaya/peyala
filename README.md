@@ -420,8 +420,14 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Comprehensive UI Read-Only Adaptation**:
   - **Global Header Banner (`AppLayout.tsx`)**: Prominent amber banner notifying users: `👀 Viewer Demo Mode: You have read-only access. Creating, editing, or deleting business data is disabled.`
   - **Sidebar Role Badge**: Displays `Viewer (Demo)` under user avatar.
-  - **Closing Wastage Prompt Bypass**: Automatically suppresses the 10:00 PM Wastage Prompt Banner for viewers so walkthroughs are never interrupted by closing routine checklists.
   - **Control Guarding Across Modules**: Mutation buttons (Add Item, Settle Table, Pay Staff, Add Purchase, Add Sales Entry, Record Expense, Record Wastage, Transfer Funds) are safely hidden or disabled across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers`.
+- **Sensitive Financial Data Masking (Dual-Layer Defense)**:
+  - **Backend API Sanitization**: When `req.user.role === 'viewer'`, API endpoints (`/api/dashboard/summary`, `/api/reports/pnl`, `/api/reports/daily`, `/api/reports/sales`, `/api/sales`) nullify live aggregate figures: total revenue, total expenses, gross profit, net profit, channel sales, sales trends, and settled order amounts. Viewers cannot inspect confidential financial numbers via DevTools Network tab.
+  - **UI Masking & Demo Placeholders**:
+    - `/dashboard`: Total Revenue, Total Expenses, Gross Profit, Net Profit KPI cards display `••••••` with `Protected in Demo` badges. 30-Day Revenue Trend and Expense Breakdown charts are replaced with confidentiality demo placeholders. Yesterday sales/purchases totals and channel performance are masked.
+    - `/reports` (P&L, Daily, Detailed Sales): Financial summary metrics, daily revenue charts, category expense distributions, and payment mode breakdowns display `••••••` or demo protection cards. CSV exports are blocked for viewers.
+    - `/sales`: Daily sales ledger table columns (Outlet Sales, Cash, UPI/Card, Zomato, Fatafat, Other, Total) display `••••••`.
+  - **Safe Caching Isolation**: Client-side localStorage caches for dashboard, sales, and reports are partitioned by role (`_viewer` vs `_admin`) preventing stale cache bleed across logins.
 
 ---
 

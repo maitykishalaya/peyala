@@ -5,7 +5,8 @@ import AppLayout from '@/components/layout/AppLayout';
 import StatCard from '@/components/dashboard/StatCard';
 import { dashboardApi, ownerNoteApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw, ShieldAlert, ArrowRight } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw, ShieldAlert, ArrowRight, EyeOff } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, PieChart, Pie, Cell, Legend, BarChart, Bar
@@ -15,9 +16,9 @@ const COLORS = ['#e26411', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'
 
 const CACHE_KEY = 'peyala_dashboard_cache_v3';
 
-function readCache() {
+function readCache(role = 'default') {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(`${CACHE_KEY}_${role}`);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -25,15 +26,17 @@ function readCache() {
   }
 }
 
-function writeCache(data: any) {
+function writeCache(role = 'default', data: any) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, savedAt: Date.now() }));
+    localStorage.setItem(`${CACHE_KEY}_${role}`, JSON.stringify({ data, savedAt: Date.now() }));
   } catch {
     // Storage full or unavailable (private browsing) — safe to ignore, just no cache this time
   }
 }
 
 export default function DashboardPage() {
+  const { user, isViewer } = useAuth();
+  const userRole = user?.role || 'default';
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,7 +64,7 @@ export default function DashboardPage() {
           setOwnerNote(noteText);
         }
         setData(d);
-        writeCache({ ...d, ownerNote: noteText });
+        writeCache(userRole, { ...d, ownerNote: noteText });
         setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
     } catch (err) {
@@ -79,8 +82,8 @@ export default function DashboardPage() {
       setOwnerNote(note);
     }).catch(() => {});
 
-    // 2. Read local dashboard cache
-    const cached = readCache();
+    // 2. Read local dashboard cache scoped to user role
+    const cached = readCache(userRole);
     if (cached?.data) {
       setData(cached.data);
       if (cached.data.ownerNote) {
@@ -95,7 +98,7 @@ export default function DashboardPage() {
 
     // 3. Only hit server on initial load if no cache exists
     fetchFresh();
-  }, []);
+  }, [userRole]);
 
   if (loading) return (
     <AppLayout>
@@ -186,24 +189,31 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Sales side */}
               <div className="bg-white/10 rounded-lg p-3">
-                <p className="text-xs text-brand-200 mb-2">Sales</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-brand-200">Sales</p>
+                  {isViewer && (
+                    <span className="text-[10px] bg-white/20 text-white font-semibold px-1.5 py-0.5 rounded">
+                      Protected
+                    </span>
+                  )}
+                </div>
                 {yesterday.sales ? (
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs">
                       <span className="text-brand-200">Outlet</span>
-                      <span className="font-semibold">{formatCurrency(yesterday.sales.outlet || 0)}</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.outlet || 0)}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-brand-200">Zomato</span>
-                      <span className="font-semibold">{formatCurrency(yesterday.sales.zomato || 0)}</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.zomato || 0)}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-brand-200">Fatafat</span>
-                      <span className="font-semibold">{formatCurrency(yesterday.sales.fatafat || 0)}</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.fatafat || 0)}</span>
                     </div>
                     <div className="flex justify-between text-sm pt-1.5 mt-1.5 border-t border-white/20">
                       <span className="font-medium">Total</span>
-                      <span className="font-bold">{formatCurrency(yesterday.sales.total || 0)}</span>
+                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.total || 0)}</span>
                     </div>
                   </div>
                 ) : (
@@ -213,16 +223,23 @@ export default function DashboardPage() {
 
               {/* Purchases side */}
               <div className="bg-white/10 rounded-lg p-3">
-                <p className="text-xs text-brand-200 mb-2">
-                  Purchases {yesterday.purchases?.count > 0 && `(${yesterday.purchases.count})`}
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-brand-200">
+                    Purchases {yesterday.purchases?.count > 0 && `(${yesterday.purchases.count})`}
+                  </p>
+                  {isViewer && (
+                    <span className="text-[10px] bg-white/20 text-white font-semibold px-1.5 py-0.5 rounded">
+                      Protected
+                    </span>
+                  )}
+                </div>
                 {yesterday.purchases?.count > 0 ? (
                   <div className="space-y-1">
                     {yesterday.purchases.entries.slice(0, 3).map((p: any, i: number) => (
                       <div key={i} className="flex justify-between text-xs">
                         <span className="text-brand-200 truncate mr-2">{p.supplier}</span>
                         <span className="font-semibold flex items-center gap-1">
-                          {formatCurrency(p.amount)}
+                          {isViewer ? '••••••' : formatCurrency(p.amount)}
                           {!p.isPaid && <span className="text-[10px] bg-yellow-400 text-yellow-900 px-1 rounded">Due</span>}
                         </span>
                       </div>
@@ -232,7 +249,7 @@ export default function DashboardPage() {
                     )}
                     <div className="flex justify-between text-sm pt-1.5 mt-1.5 border-t border-white/20">
                       <span className="font-medium">Total</span>
-                      <span className="font-bold">{formatCurrency(yesterday.purchases.total)}</span>
+                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(yesterday.purchases.total)}</span>
                     </div>
                   </div>
                 ) : (
@@ -249,15 +266,40 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard
             title="This Month Revenue"
-            value={month.revenue || 0}
+            value={isViewer ? '••••••' : (month.revenue || 0)}
+            isMasked={isViewer}
             icon={TrendingUp}
             accent="blue"
-            badge={`Avg: ${formatCurrency(dailyAverage.revenue || 0)}/day`}
-            subtitle={`Outlet + Zomato + Fatafat`}
+            badge={isViewer ? 'Protected in Demo' : `Avg: ${formatCurrency(dailyAverage.revenue || 0)}/day`}
+            subtitle={isViewer ? 'Hidden in Demo' : `Outlet + Zomato + Fatafat`}
           />
-          <StatCard title="Month Expenses" value={month.expenses || 0} icon={ShoppingCart} accent="red" subtitle="All categories" />
-          <StatCard title="Gross Profit" value={month.grossProfit || 0} icon={TrendingUp} accent="green" subtitle={`${month.revenue > 0 ? ((month.grossProfit / month.revenue) * 100).toFixed(1) : 0}% margin`} />
-          <StatCard title="Net Profit" value={month.netProfit || 0} icon={TrendingDown} accent={month.netProfit >= 0 ? 'green' : 'red'} subtitle="After all expenses" />
+          <StatCard
+            title="Month Expenses"
+            value={isViewer ? '••••••' : (month.expenses || 0)}
+            isMasked={isViewer}
+            icon={ShoppingCart}
+            accent="red"
+            badge={isViewer ? 'Protected in Demo' : undefined}
+            subtitle={isViewer ? 'Hidden in Demo' : 'All categories'}
+          />
+          <StatCard
+            title="Gross Profit"
+            value={isViewer ? '••••••' : (month.grossProfit || 0)}
+            isMasked={isViewer}
+            icon={TrendingUp}
+            accent="green"
+            badge={isViewer ? 'Protected in Demo' : undefined}
+            subtitle={isViewer ? 'Hidden in Demo' : `${month.revenue > 0 ? ((month.grossProfit / month.revenue) * 100).toFixed(1) : 0}% margin`}
+          />
+          <StatCard
+            title="Net Profit"
+            value={isViewer ? '••••••' : (month.netProfit || 0)}
+            isMasked={isViewer}
+            icon={TrendingDown}
+            accent={!isViewer && month.netProfit >= 0 ? 'green' : 'red'}
+            badge={isViewer ? 'Protected in Demo' : undefined}
+            subtitle={isViewer ? 'Hidden in Demo' : 'After all expenses'}
+          />
         </div>
 
         {/* Accounts & Inventory */}
@@ -301,15 +343,15 @@ export default function DashboardPage() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">This Month Outlet</span>
-                <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">{formatCurrency(month.outlet || 0)}</span>
+                <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">{isViewer ? '••••••' : formatCurrency(month.outlet || 0)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">This Month Zomato</span>
-                <span className="text-sm font-semibold text-purple-600 dark:text-purple-400">{formatCurrency(month.zomato || 0)}</span>
+                <span className="text-sm font-semibold text-purple-600 dark:text-purple-400">{isViewer ? '••••••' : formatCurrency(month.zomato || 0)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">This Month Fatafat</span>
-                <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">{formatCurrency(month.fatafat || 0)}</span>
+                <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">{isViewer ? '••••••' : formatCurrency(month.fatafat || 0)}</span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800">
                 <span className="text-sm text-gray-500 flex items-center gap-1.5">
@@ -333,13 +375,27 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 card p-5">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-semibold text-gray-900 dark:text-white">30-Day Revenue Trend</h3>
-              {salesTrendData.length > 0 && (
+              {isViewer ? (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                  Protected in Demo
+                </span>
+              ) : salesTrendData.length > 0 && (
                 <span className="text-xs text-gray-400">
                   {salesTrendData.length} {salesTrendData.length === 1 ? 'day recorded' : 'days recorded'}
                 </span>
               )}
             </div>
-            {salesTrendData.length > 0 ? (
+            {isViewer ? (
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-center mb-3">
+                  <EyeOff className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                </div>
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Revenue Trend Protected</h4>
+                <p className="text-xs text-gray-400 max-w-sm mt-1">
+                  Sales charts and daily revenue trends are confidential and hidden in Viewer demo mode.
+                </p>
+              </div>
+            ) : salesTrendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={salesTrendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -354,8 +410,25 @@ export default function DashboardPage() {
 
           {/* Expense Breakdown */}
           <div className="card p-5">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Expense Breakdown</h3>
-            {pieData.length > 0 ? (
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-gray-900 dark:text-white">Expense Breakdown</h3>
+              {isViewer && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                  Protected in Demo
+                </span>
+              )}
+            </div>
+            {isViewer ? (
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 flex items-center justify-center mb-3">
+                  <EyeOff className="w-6 h-6 text-red-500 dark:text-red-400" />
+                </div>
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Expense Breakdown Protected</h4>
+                <p className="text-xs text-gray-400 max-w-xs mt-1">
+                  Categorized expense distribution is confidential and hidden in Viewer demo mode.
+                </p>
+              </div>
+            ) : pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
@@ -388,30 +461,30 @@ export default function DashboardPage() {
             {[
               {
                 label: 'Outlet Sales',
-                value: month.outlet || 0,
-                avg: dailyAverage.outlet || 0,
-                pct: month.revenue > 0 ? ((month.outlet / month.revenue) * 100).toFixed(0) : 0,
+                value: isViewer ? '••••••' : (month.outlet || 0),
+                avg: isViewer ? '••••••' : (dailyAverage.outlet || 0),
+                pct: isViewer ? 0 : (month.revenue > 0 ? ((month.outlet / month.revenue) * 100).toFixed(0) : 0),
                 color: '#e26411',
               },
               {
                 label: 'Zomato Net',
-                value: month.zomato || 0,
-                avg: dailyAverage.zomato || 0,
-                pct: month.revenue > 0 ? ((month.zomato / month.revenue) * 100).toFixed(0) : 0,
+                value: isViewer ? '••••••' : (month.zomato || 0),
+                avg: isViewer ? '••••••' : (dailyAverage.zomato || 0),
+                pct: isViewer ? 0 : (month.revenue > 0 ? ((month.zomato / month.revenue) * 100).toFixed(0) : 0),
                 color: '#ef4444',
               },
               {
                 label: 'Fatafat Net',
-                value: month.fatafat || 0,
-                avg: dailyAverage.fatafat || 0,
-                pct: month.revenue > 0 ? ((month.fatafat / month.revenue) * 100).toFixed(0) : 0,
+                value: isViewer ? '••••••' : (month.fatafat || 0),
+                avg: isViewer ? '••••••' : (dailyAverage.fatafat || 0),
+                pct: isViewer ? 0 : (month.revenue > 0 ? ((month.fatafat / month.revenue) * 100).toFixed(0) : 0),
                 color: '#f97316',
               },
               ...((month.other || 0) > 0 ? [{
                 label: 'Other Sales',
-                value: month.other || 0,
-                avg: dailyAverage.other || 0,
-                pct: month.revenue > 0 ? ((month.other / month.revenue) * 100).toFixed(0) : 0,
+                value: isViewer ? '••••••' : (month.other || 0),
+                avg: isViewer ? '••••••' : (dailyAverage.other || 0),
+                pct: isViewer ? 0 : (month.revenue > 0 ? ((month.other / month.revenue) * 100).toFixed(0) : 0),
                 color: '#8b5cf6',
               }] : []),
             ].map(({ label, value, avg, pct, color }) => (
@@ -421,13 +494,17 @@ export default function DashboardPage() {
               >
                 <div>
                   <p className="text-xs text-gray-500 mb-1 font-medium">{label}</p>
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(value)}</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                    {typeof value === 'string' ? value : formatCurrency(value)}
+                  </p>
 
                   {/* Daily Average Sales Badge */}
                   <div className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-700/80 px-2.5 py-1 rounded-full mt-2 shadow-2xs">
                     <span className="text-gray-400 font-normal">Daily Avg:</span>
-                    <span className="font-bold text-brand-600 dark:text-brand-400">{formatCurrency(avg)}</span>
-                    <span className="text-gray-400 text-[10px] font-normal">/day</span>
+                    <span className="font-bold text-brand-600 dark:text-brand-400">
+                      {typeof avg === 'string' ? avg : formatCurrency(avg)}
+                    </span>
+                    {!isViewer && <span className="text-gray-400 text-[10px] font-normal">/day</span>}
                   </div>
                 </div>
 
@@ -435,7 +512,9 @@ export default function DashboardPage() {
                   <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5">
                     <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">{pct}% of total</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {isViewer ? 'Protected in Demo' : `${pct}% of total`}
+                  </p>
                 </div>
               </div>
             ))}

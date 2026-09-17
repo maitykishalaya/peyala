@@ -252,44 +252,92 @@ router.get('/summary', async (req, res) => {
     const ownerNoteDoc = await OwnerNote.getSingleton();
     const ownerNoteText = ownerNoteDoc?.text || '';
 
+    const isViewer = req.user?.role === 'viewer';
+
+    const finalToday = isViewer ? {
+      sales: { outlet: null, zomato: null, fatafat: null, other: null, total: null },
+      expenses: null,
+    } : {
+      sales: todaySalesData,
+      expenses: todayExpenses,
+    };
+
+    const finalYesterday = isViewer ? {
+      date: yesterdayRange.canonicalDate,
+      sales: { outlet: null, zomato: null, fatafat: null, other: null, total: null },
+      purchases: {
+        total: null,
+        count: yesterdayPurchasesAgg[0]?.count || 0,
+        entries: [],
+      },
+    } : {
+      date: yesterdayRange.canonicalDate,
+      sales: yesterdaySalesData,
+      purchases: {
+        total: yesterdayPurchasesAgg[0]?.total || 0,
+        count: yesterdayPurchasesAgg[0]?.count || 0,
+        entries: yesterdayPurchases.map(p => ({
+          supplier: p.supplier?.name || 'Unknown',
+          amount: p.totalAmount,
+          isPaid: p.isPaid,
+        })),
+      },
+    };
+
+    const finalMonth = isViewer ? {
+      revenue: null,
+      outlet: null,
+      zomato: null,
+      fatafat: null,
+      other: null,
+      expenses: null,
+      grossProfit: null,
+      netProfit: null,
+      daysElapsed,
+      totalDaysInMonth,
+      dailyAverage: {
+        revenue: null,
+        outlet: null,
+        zomato: null,
+        fatafat: null,
+        other: null,
+        expenses: null,
+      },
+    } : {
+      revenue: monthSales.total,
+      outlet: monthSales.outlet,
+      zomato: monthSales.zomato,
+      fatafat: monthSales.fatafat,
+      other: monthSales.other,
+      expenses: totalMonthExpenses,
+      grossProfit: monthSales.total - rawMaterialsThisMonth,
+      netProfit: monthSales.total - totalMonthExpenses,
+      daysElapsed,
+      totalDaysInMonth,
+      dailyAverage,
+    };
+
+    const finalCharts = isViewer ? {
+      salesTrend: [],
+      expenseTrend: [],
+      expenseByCategory: [],
+    } : {
+      salesTrend,
+      expenseTrend,
+      expenseByCategory,
+    };
+
     res.json({
-      today: {
-        sales: todaySalesData,
-        expenses: todayExpenses,
-      },
-      // ── Yesterday summary for the dashboard banner ─────────────
-      yesterday: {
-        date: yesterdayRange.canonicalDate,
-        sales: yesterdaySalesData,
-        purchases: {
-          total: yesterdayPurchasesAgg[0]?.total || 0,
-          count: yesterdayPurchasesAgg[0]?.count || 0,
-          entries: yesterdayPurchases.map(p => ({
-            supplier: p.supplier?.name || 'Unknown',
-            amount: p.totalAmount,
-            isPaid: p.isPaid,
-          })),
-        },
-      },
-      month: {
-        revenue: monthSales.total,
-        outlet: monthSales.outlet,
-        zomato: monthSales.zomato,
-        fatafat: monthSales.fatafat,
-        other: monthSales.other,
-        expenses: totalMonthExpenses,
-        grossProfit: monthSales.total - rawMaterialsThisMonth,
-        netProfit: monthSales.total - totalMonthExpenses,
-        daysElapsed,
-        totalDaysInMonth,
-        dailyAverage,
-      },
+      today: finalToday,
+      yesterday: finalYesterday,
+      month: finalMonth,
       accounts,
       inventoryValue,
       lowStockCount,
       supplierDues: supplierDues[0]?.total || 0,
-      charts: { salesTrend, expenseTrend, expenseByCategory },
+      charts: finalCharts,
       ownerNote: ownerNoteText,
+      isViewerDemo: isViewer,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

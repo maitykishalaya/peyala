@@ -533,6 +533,20 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Top amber banner rendered in `AppLayout.tsx` alerting that demo mode is active and read-only.
   - `WastagePromptBanner.tsx` suppressed for viewers (`user.role === 'viewer'`), eliminating closing checklist popups during demos.
   - Top navigation bar & table/item action buttons across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers` conditionally hide or disable mutation controls using `canWrite` from `useAuth()`.
+- **Confidential Financial Masking (Dual-Layer Defense Model)**:
+  - **Backend Layer (Defense in Depth)**:
+    - In `backend/src/routes/dashboard.js`: `/api/dashboard/summary` nullifies `revenue`, `expenses`, `grossProfit`, `netProfit`, `outlet`, `zomato`, `fatafat`, `other`, daily averages, and sets `charts.salesTrend: []`, `charts.expenseTrend: []`, `charts.expenseByCategory: []` whenever `req.user.role === 'viewer'`.
+    - In `backend/src/routes/reports.js`:
+      - `/api/reports/pnl`: Nullifies `income.total`, `expenses.total`, `grossProfit`, `netProfit`, `grossMargin`, `netMargin`, and sets `dailySales: []`.
+      - `/api/reports/daily`: Nullifies `totalRevenue`, `totalExpenses`, `netProfit`, `sales`, and masks monetary fields on purchases/payments.
+      - `/api/reports/sales`: Nullifies `summary.totalGrossSales`, `summary.totalSettled`, `summary.paymentBreakdown`, and order-level monetary totals.
+    - In `backend/src/routes/sales.js`: `/api/sales` and `/api/sales/today` nullify `totalRevenue`, `outletSales`, and channel net amounts.
+  - **Frontend Layer**:
+    - `formatCurrency` in `frontend/src/lib/utils.ts` handles `null`/`undefined`/`NaN` gracefully by displaying `••••••`.
+    - `/dashboard`: KPI cards display `••••••` with `Protected in Demo` tags; 30-Day Revenue Trend and Expense Breakdown render dedicated `EyeOff` protection placeholders; quick stats and yesterday banner figures are masked.
+    - `/reports`: Summary cards, daily revenue charts, comparison bar charts, and category expense charts show `••••••` or demo protection notice; CSV export is blocked with notification.
+    - `/sales`: Sales ledger columns display `••••••`.
+    - Caching keys for dashboard, sales, and reports are partitioned by `userRole` (`_viewer` vs `_admin`) to eliminate cross-session data leaks.
 
 ---
 

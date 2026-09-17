@@ -11,7 +11,7 @@ import {
   Download, Search, Filter, ChevronDown, ChevronUp, Clock,
   Receipt, CheckCircle, AlertTriangle, Wallet, Smartphone,
   CreditCard, Building2, UtensilsCrossed, RefreshCw,
-  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers
+  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers, EyeOff
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
@@ -21,9 +21,9 @@ const SALES_CACHE_KEY = 'peyala_reports_sales_cache_v1';
 const DAILY_CACHE_KEY = 'peyala_reports_daily_cache_v1';
 const PNL_CACHE_KEY = 'peyala_reports_pnl_cache_v2';
 
-function readCache(key: string) {
+function readCache(key: string, role = 'default') {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(`${key}_${role}`);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -31,9 +31,9 @@ function readCache(key: string) {
   }
 }
 
-function writeCache(key: string, data: any) {
+function writeCache(key: string, data: any, role = 'default') {
   try {
-    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+    localStorage.setItem(`${key}_${role}`, JSON.stringify({ ...data, savedAt: Date.now() }));
   } catch {
     // ignore
   }
@@ -59,7 +59,8 @@ export default function ReportsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const { user } = useAuth();
+  const { user, isViewer } = useAuth();
+  const userRole = user?.role || 'default';
   const isAdmin = user?.role === 'admin';
 
   // Settled Bill Edit & Delete Admin States
@@ -336,7 +337,7 @@ export default function ReportsPage() {
       setPnl(r.data);
       setInventoryReport(ir.data);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      writeCache(PNL_CACHE_KEY, { pnl: r.data, inventoryReport: ir.data });
+      writeCache(PNL_CACHE_KEY, { pnl: r.data, inventoryReport: ir.data }, userRole);
     } catch (err) {
       console.error('Failed to load PnL report:', err);
     } finally {
@@ -352,7 +353,7 @@ export default function ReportsPage() {
       const r = await reportsApi.daily(dailyDate);
       setDaily(r.data);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      writeCache(DAILY_CACHE_KEY, { daily: r.data });
+      writeCache(DAILY_CACHE_KEY, { daily: r.data }, userRole);
     } catch (err) {
       console.error('Failed to load daily report:', err);
     } finally {
@@ -375,7 +376,7 @@ export default function ReportsPage() {
       });
       setSalesData(res.data);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      writeCache(SALES_CACHE_KEY, { salesData: res.data });
+      writeCache(SALES_CACHE_KEY, { salesData: res.data }, userRole);
     } catch (err) {
       console.error('Failed to load detailed sales report:', err);
     } finally {
@@ -386,7 +387,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (tab === 'sales') {
-      const cached = readCache(SALES_CACHE_KEY);
+      const cached = readCache(SALES_CACHE_KEY, userRole);
       if (cached?.salesData) {
         setSalesData(cached.salesData);
         if (cached.savedAt) {
@@ -396,7 +397,7 @@ export default function ReportsPage() {
       }
       loadSales();
     } else if (tab === 'daily') {
-      const cached = readCache(DAILY_CACHE_KEY);
+      const cached = readCache(DAILY_CACHE_KEY, userRole);
       if (cached?.daily) {
         setDaily(cached.daily);
         if (cached.savedAt) {
@@ -406,7 +407,7 @@ export default function ReportsPage() {
       }
       loadDaily();
     } else if (tab === 'pnl') {
-      const cached = readCache(PNL_CACHE_KEY);
+      const cached = readCache(PNL_CACHE_KEY, userRole);
       if (cached?.pnl) {
         setPnl(cached.pnl);
         setInventoryReport(cached.inventoryReport || null);
@@ -417,7 +418,7 @@ export default function ReportsPage() {
       }
       loadPnl();
     }
-  }, [tab]);
+  }, [tab, userRole]);
 
   const handleRefresh = () => {
     if (tab === 'sales') {
@@ -433,6 +434,11 @@ export default function ReportsPage() {
   };
 
   const exportSalesCsv = () => {
+    if (isViewer) {
+      toast.error('Exporting sales reports is disabled for Viewer demo accounts.');
+      return;
+    }
+
     if (!salesData || !salesData.orders || salesData.orders.length === 0) {
       toast.warning('No sales data available to export');
       return;
@@ -588,24 +594,38 @@ export default function ReportsPage() {
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                   {[
-                    { label: 'Total Revenue', value: pnl.income.total, color: 'text-brand-600', bg: 'from-brand-50 to-orange-50 dark:from-brand-900/10' },
-                    { label: 'Total Expenses', value: pnl.expenses.total, color: 'text-red-500', bg: 'from-red-50 to-rose-50 dark:from-red-900/10' },
-                    { label: 'Gross Profit', value: pnl.grossProfit, color: pnl.grossProfit >= 0 ? 'text-green-600' : 'text-red-500', bg: 'from-green-50 to-emerald-50 dark:from-green-900/10' },
-                    { label: 'Net Profit', value: pnl.netProfit, color: pnl.netProfit >= 0 ? 'text-indigo-600' : 'text-red-500', bg: 'from-indigo-50 to-blue-50 dark:from-indigo-900/10' },
+                    { label: 'Total Revenue', value: isViewer ? null : pnl.income.total, color: 'text-brand-600', bg: 'from-brand-50 to-orange-50 dark:from-brand-900/10' },
+                    { label: 'Total Expenses', value: isViewer ? null : pnl.expenses.total, color: 'text-red-500', bg: 'from-red-50 to-rose-50 dark:from-red-900/10' },
+                    { label: 'Gross Profit', value: isViewer ? null : pnl.grossProfit, color: !isViewer && pnl.grossProfit >= 0 ? 'text-green-600' : 'text-red-500', bg: 'from-green-50 to-emerald-50 dark:from-green-900/10' },
+                    { label: 'Net Profit', value: isViewer ? null : pnl.netProfit, color: !isViewer && pnl.netProfit >= 0 ? 'text-indigo-600' : 'text-red-500', bg: 'from-indigo-50 to-blue-50 dark:from-indigo-900/10' },
                     { label: 'Recorded Wastage', value: pnl.wastage?.total || 0, color: 'text-rose-600', bg: 'from-rose-50 to-pink-50 dark:from-rose-950/20' },
                   ].map(({ label, value, color, bg }) => (
                     <div key={label} className={`card p-5 bg-gradient-to-br ${bg}`}>
                       <p className="text-xs text-gray-500 uppercase tracking-wide flex items-center justify-between">
                         <span>{label}</span>
-                        {label === 'Recorded Wastage' && (
+                        {label === 'Recorded Wastage' ? (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300">
                             Info
                           </span>
-                        )}
+                        ) : isViewer ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                            Protected
+                          </span>
+                        ) : null}
                       </p>
-                      <p className={`text-2xl font-bold mt-1 ${color}`}>{formatCurrency(value)}</p>
-                      {label === 'Gross Profit' && <p className="text-xs text-gray-400 mt-1">{pnl.grossMargin}% margin</p>}
-                      {label === 'Net Profit' && <p className="text-xs text-gray-400 mt-1">{pnl.netMargin}% margin</p>}
+                      <p className={`text-2xl font-bold mt-1 ${color}`}>
+                        {isViewer && label !== 'Recorded Wastage' ? '••••••' : formatCurrency(value)}
+                      </p>
+                      {label === 'Gross Profit' && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {isViewer ? 'Protected in Demo' : `${pnl.grossMargin}% margin`}
+                        </p>
+                      )}
+                      {label === 'Net Profit' && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {isViewer ? 'Protected in Demo' : `${pnl.netMargin}% margin`}
+                        </p>
+                      )}
                       {label === 'Recorded Wastage' && (
                         <p className="text-xs text-gray-400 mt-1">
                           {pnl.wastage?.count || 0} entries · {Number((pnl.wastage?.totalQty || 0).toFixed(1))} units
@@ -624,9 +644,7 @@ export default function ReportsPage() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-gray-900 dark:text-white text-sm">
-                            Recorded Food & Material Wastage in this Period
-                          </h4>
+                          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Logged Discarded Items Summary</h4>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300">
                             Operational Info
                           </span>
@@ -651,7 +669,14 @@ export default function ReportsPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Income Breakdown */}
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-500" /> Income Breakdown</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-500" /> Income Breakdown</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          Protected
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-3">
                       {[
                         { label: 'Outlet Sales', value: pnl.income.outlet },
@@ -661,29 +686,42 @@ export default function ReportsPage() {
                       ].map(({ label, value }) => (
                         <div key={label} className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
                           <span className="text-sm text-gray-600 dark:text-gray-400">{label}</span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(value || 0)}</span>
+                          <span className="text-sm font-semibold text-gray-900 dark:text-white">{isViewer ? '••••••' : formatCurrency(value || 0)}</span>
                         </div>
                       ))}
                       <div className="flex justify-between items-center pt-2">
                         <span className="text-sm font-bold text-gray-800 dark:text-gray-200">Total Revenue</span>
-                        <span className="text-base font-bold text-green-600">{formatCurrency(pnl.income.total)}</span>
+                        <span className="text-base font-bold text-green-600">{isViewer ? '••••••' : formatCurrency(pnl.income.total)}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Expense Breakdown */}
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><TrendingDown className="w-4 h-4 text-red-500" /> Expense Breakdown</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2"><TrendingDown className="w-4 h-4 text-red-500" /> Expense Breakdown</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                          Protected
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-2">
-                      {pnl.expenses.byCategory?.map((e: any) => (
-                        <div key={e._id} className="flex justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">{e._id}</span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(e.total)}</span>
+                      {isViewer ? (
+                        <div className="py-8 text-center text-xs text-gray-400">
+                          Detailed expense itemization is confidential and protected in Viewer demo mode.
                         </div>
-                      ))}
-                      <div className="flex justify-between pt-2">
+                      ) : (
+                        pnl.expenses.byCategory?.map((e: any) => (
+                          <div key={e._id} className="flex justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">{e._id}</span>
+                            <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(e.total)}</span>
+                          </div>
+                        ))
+                      )}
+                      <div className="flex justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
                         <span className="text-sm font-bold text-gray-800 dark:text-gray-200">Total Expenses</span>
-                        <span className="text-base font-bold text-red-500">{formatCurrency(pnl.expenses.total)}</span>
+                        <span className="text-base font-bold text-red-500">{isViewer ? '••••••' : formatCurrency(pnl.expenses.total)}</span>
                       </div>
                     </div>
                   </div>
@@ -699,7 +737,11 @@ export default function ReportsPage() {
                       </h3>
                       <p className="text-xs text-gray-500">Per-day sales breakdown across the selected period ({range.start} to {range.end})</p>
                     </div>
-                    {dailySalesData.length > 0 && (
+                    {isViewer ? (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                        Protected in Demo
+                      </span>
+                    ) : dailySalesData.length > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">
                           Total: <strong className="text-gray-900 dark:text-white">{formatCurrency(pnl.income.total)}</strong>
@@ -710,7 +752,17 @@ export default function ReportsPage() {
                       </div>
                     )}
                   </div>
-                  {dailySalesData.length > 0 ? (
+                  {isViewer ? (
+                    <div className="flex flex-col items-center justify-center py-14 text-center">
+                      <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-center mb-3">
+                        <EyeOff className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Daily Sales Chart Protected</h4>
+                      <p className="text-xs text-gray-400 max-w-sm mt-1">
+                        Individual daily sales bars and totals are confidential and hidden in Viewer demo mode.
+                      </p>
+                    </div>
+                  ) : dailySalesData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={dailySalesData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -734,31 +786,67 @@ export default function ReportsPage() {
                 {/* Charts */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Revenue vs Expenses vs Profit</h3>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={incomeVsExpense}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                        <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
-                        <Tooltip formatter={(v: any) => formatCurrency(v)} />
-                        <Bar dataKey="value" radius={[4,4,0,0]}>
-                          {incomeVsExpense.map((e: any, i: number) => <Cell key={i} fill={e.fill} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Revenue vs Expenses vs Profit</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          Protected in Demo
+                        </span>
+                      )}
+                    </div>
+                    {isViewer ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <div className="w-10 h-10 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-center mb-2">
+                          <EyeOff className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                        </div>
+                        <p className="text-xs text-gray-400 max-w-xs">
+                          Comparison chart is confidential and hidden in Viewer demo mode.
+                        </p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart data={incomeVsExpense}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                          <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                          <Tooltip formatter={(v: any) => formatCurrency(v)} />
+                          <Bar dataKey="value" radius={[4,4,0,0]}>
+                            {incomeVsExpense.map((e: any, i: number) => <Cell key={i} fill={e.fill} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
 
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Expense by Category</h3>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={expenseChartData} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
-                        <YAxis dataKey="name" type="category" tick={{ fontSize: 10 }} width={80} />
-                        <Tooltip formatter={(v: any) => formatCurrency(v)} />
-                        <Bar dataKey="Amount" fill="#e26411" radius={[0,4,4,0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Expense by Category</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                          Protected in Demo
+                        </span>
+                      )}
+                    </div>
+                    {isViewer ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 flex items-center justify-center mb-2">
+                          <EyeOff className="w-5 h-5 text-red-500 dark:text-red-400" />
+                        </div>
+                        <p className="text-xs text-gray-400 max-w-xs">
+                          Category expenses chart is confidential and hidden in Viewer demo mode.
+                        </p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart data={expenseChartData} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 10 }} width={80} />
+                          <Tooltip formatter={(v: any) => formatCurrency(v)} />
+                          <Bar dataKey="Amount" fill="#e26411" radius={[0,4,4,0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
 
@@ -782,7 +870,7 @@ export default function ReportsPage() {
                               <td className="table-td font-medium">{it.name}</td>
                               <td className="table-td text-gray-500">{it.category || '-'}</td>
                               <td className="table-td">{it.totalQuantity} {it.unit}</td>
-                              <td className="table-td font-medium text-red-500">{formatCurrency(it.totalSpent)}</td>
+                              <td className="table-td font-medium text-red-500">{isViewer ? '••••••' : formatCurrency(it.totalSpent)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -790,7 +878,7 @@ export default function ReportsPage() {
                           <tr className="border-t border-gray-200 dark:border-gray-700">
                             <td className="table-td font-bold" colSpan={3}>Total</td>
                             <td className="table-td font-bold text-red-500">
-                              {formatCurrency(inventoryReport.items.reduce((s: number, it: any) => s + it.totalSpent, 0))}
+                              {isViewer ? '••••••' : formatCurrency(inventoryReport.items.reduce((s: number, it: any) => s + it.totalSpent, 0))}
                             </td>
                           </tr>
                         </tfoot>
@@ -817,26 +905,44 @@ export default function ReportsPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="card p-4 text-center">
                     <p className="text-xs text-gray-400">Total Revenue</p>
-                    <p className="text-2xl font-bold text-green-600 mt-1">{formatCurrency(daily.totalRevenue)}</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">
+                      {isViewer ? '••••••' : formatCurrency(daily.totalRevenue)}
+                    </p>
+                    {isViewer && <p className="text-[10px] text-gray-400 mt-0.5">Protected in Demo</p>}
                   </div>
                   <div className="card p-4 text-center">
                     <p className="text-xs text-gray-400">Total Expenses</p>
-                    <p className="text-2xl font-bold text-red-500 mt-1">{formatCurrency(daily.totalExpenses)}</p>
+                    <p className="text-2xl font-bold text-red-500 mt-1">
+                      {isViewer ? '••••••' : formatCurrency(daily.totalExpenses)}
+                    </p>
+                    {isViewer && <p className="text-[10px] text-gray-400 mt-0.5">Protected in Demo</p>}
                   </div>
                   <div className="card p-4 text-center">
                     <p className="text-xs text-gray-400">Net Profit</p>
-                    <p className={`text-2xl font-bold mt-1 ${daily.netProfit >= 0 ? 'text-brand-600' : 'text-red-500'}`}>{formatCurrency(daily.netProfit)}</p>
+                    <p className={`text-2xl font-bold mt-1 ${!isViewer && daily.netProfit >= 0 ? 'text-brand-600' : 'text-red-500'}`}>
+                      {isViewer ? '••••••' : formatCurrency(daily.netProfit)}
+                    </p>
+                    {isViewer && <p className="text-[10px] text-gray-400 mt-0.5">Protected in Demo</p>}
                   </div>
                 </div>
 
                 {daily.sales && (
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Sales</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Sales</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          Protected
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                       {[['Outlet', daily.sales.outletSales], ['Zomato Net', daily.sales.zomato?.netSettlement], ['Fatafat Net', daily.sales.fatafat?.netSettlement], ['Other', daily.sales.otherSales]].map(([l, v]) => (
                         <div key={l as string} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                           <p className="text-xs text-gray-400">{l as string}</p>
-                          <p className="text-base font-bold text-gray-900 dark:text-white">{formatCurrency(+(v || 0))}</p>
+                          <p className="text-base font-bold text-gray-900 dark:text-white">
+                            {isViewer ? '••••••' : formatCurrency(+(v || 0))}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -845,7 +951,14 @@ export default function ReportsPage() {
 
                 {daily.purchases?.length > 0 && (
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Purchases</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Purchases</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          Protected
+                        </span>
+                      )}
+                    </div>
                     <table className="w-full text-sm">
                       <thead><tr className="bg-gray-50 dark:bg-gray-800"><th className="table-th">Supplier</th><th className="table-th">Items</th><th className="table-th">Total</th></tr></thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -853,7 +966,9 @@ export default function ReportsPage() {
                           <tr key={p._id}>
                             <td className="table-td">{p.supplier?.name}</td>
                             <td className="table-td">{p.items?.length} items</td>
-                            <td className="table-td font-medium text-red-500">{formatCurrency(p.totalAmount)}</td>
+                            <td className="table-td font-medium text-red-500">
+                              {isViewer ? '••••••' : formatCurrency(p.totalAmount)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -863,15 +978,24 @@ export default function ReportsPage() {
 
                 {daily.payments?.length > 0 && (
                   <div className="card p-5">
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Payments</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">Payments</h3>
+                      {isViewer && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          Protected
+                        </span>
+                      )}
+                    </div>
                     <table className="w-full text-sm">
                       <thead><tr className="bg-gray-50 dark:bg-gray-800"><th className="table-th">Payee</th><th className="table-th">Category</th><th className="table-th">Amount</th></tr></thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                         {daily.payments.map((p: any) => (
                           <tr key={p._id}>
                             <td className="table-td">{p.payee}</td>
-                            <td className="table-td"><span className="badge-blue">{p.category}</span></td>
-                            <td className="table-td font-medium text-red-500">{formatCurrency(p.amount)}</td>
+                            <td className="table-td"><span className="badge badge-gray">{p.category}</span></td>
+                            <td className="table-td font-medium text-red-500">
+                              {isViewer ? '••••••' : formatCurrency(p.amount)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1011,33 +1135,41 @@ export default function ReportsPage() {
                   <div className="card p-4 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 border-green-200 dark:border-green-900/40">
                     <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Net Settled</p>
                     <p className="text-xl font-black text-green-600 mt-1">
-                      {formatCurrency(salesData.summary?.totalSettled || 0)}
+                      {isViewer ? '••••••' : formatCurrency(salesData.summary?.totalSettled || 0)}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Total collected</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {isViewer ? 'Protected in Demo' : 'Total collected'}
+                    </p>
                   </div>
 
                   <div className="card p-4">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase">Gross Sales</p>
                     <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-                      {formatCurrency(salesData.summary?.totalGrossSales || 0)}
+                      {isViewer ? '••••••' : formatCurrency(salesData.summary?.totalGrossSales || 0)}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Subtotal before disc</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {isViewer ? 'Protected in Demo' : 'Subtotal before disc'}
+                    </p>
                   </div>
 
                   <div className="card p-4">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase">Tax / GST</p>
                     <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-                      {formatCurrency(salesData.summary?.totalTax || 0)}
+                      {isViewer ? '••••••' : formatCurrency(salesData.summary?.totalTax || 0)}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">GST collected</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {isViewer ? 'Protected in Demo' : 'GST collected'}
+                    </p>
                   </div>
 
                   <div className="card p-4">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase">Discounts</p>
                     <p className="text-xl font-bold text-red-500 mt-1">
-                      −{formatCurrency(salesData.summary?.totalDiscount || 0)}
+                      {isViewer ? '••••••' : `−${formatCurrency(salesData.summary?.totalDiscount || 0)}`}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Flat & % applied</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {isViewer ? 'Protected in Demo' : 'Flat & % applied'}
+                    </p>
                   </div>
 
                   <div
@@ -1050,9 +1182,11 @@ export default function ReportsPage() {
                   >
                     <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase">Waived Off</p>
                     <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-                      {formatCurrency(salesData.summary?.totalWaived || 0)}
+                      {isViewer ? '••••••' : formatCurrency(salesData.summary?.totalWaived || 0)}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Discrepancy / Rounding</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {isViewer ? 'Protected in Demo' : 'Discrepancy / Rounding'}
+                    </p>
                   </div>
 
                   <div className="card p-4">
@@ -1071,19 +1205,19 @@ export default function ReportsPage() {
                     <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
                       <div className="flex items-center gap-1.5 text-emerald-600">
                         <Wallet className="w-3.5 h-3.5" />
-                        <span>Cash: {formatCurrency(salesData.summary?.paymentBreakdown?.cash || 0)}</span>
+                        <span>Cash: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.cash || 0)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-purple-600">
                         <Smartphone className="w-3.5 h-3.5" />
-                        <span>UPI: {formatCurrency(salesData.summary?.paymentBreakdown?.upi || 0)}</span>
+                        <span>UPI: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.upi || 0)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-blue-600">
                         <CreditCard className="w-3.5 h-3.5" />
-                        <span>Card: {formatCurrency(salesData.summary?.paymentBreakdown?.card || 0)}</span>
+                        <span>Card: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.card || 0)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
                         <Building2 className="w-3.5 h-3.5" />
-                        <span>Other: {formatCurrency(salesData.summary?.paymentBreakdown?.other || 0)}</span>
+                        <span>Other: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.other || 0)}</span>
                       </div>
                     </div>
                   </div>
@@ -1184,10 +1318,10 @@ export default function ReportsPage() {
 
                                   {/* Bill Total */}
                                   <td className="py-3 px-3 text-right whitespace-nowrap font-medium text-gray-600 dark:text-gray-300">
-                                    {formatCurrency(o.total)}
+                                    {isViewer ? '••••••' : formatCurrency(o.total)}
                                     {o.discount > 0 && (
                                       <div className="text-[10px] text-green-600">
-                                        Disc: −{formatCurrency(o.discount)}
+                                        Disc: −{isViewer ? '••••••' : formatCurrency(o.discount)}
                                       </div>
                                     )}
                                   </td>
@@ -1196,7 +1330,7 @@ export default function ReportsPage() {
                                   <td className="py-3 px-3 text-right whitespace-nowrap font-semibold">
                                     {waived > 0 ? (
                                       <span className="text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-                                        {formatCurrency(waived)}
+                                        {isViewer ? '••••••' : formatCurrency(waived)}
                                       </span>
                                     ) : (
                                       <span className="text-gray-400">—</span>
@@ -1205,7 +1339,7 @@ export default function ReportsPage() {
 
                                   {/* Settled Amount */}
                                   <td className="py-3 px-3 text-right whitespace-nowrap font-black text-green-600 text-sm">
-                                    {formatCurrency(settled)}
+                                    {isViewer ? '••••••' : formatCurrency(settled)}
                                   </td>
 
                                   {/* Payment Mode */}

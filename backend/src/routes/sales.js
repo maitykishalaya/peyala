@@ -142,7 +142,44 @@ router.get('/', async (req, res) => {
       .sort('-date')
       .skip((page - 1) * limit)
       .limit(Number(limit));
-    res.json({ sales, total, page: Number(page), pages: Math.ceil(total / limit) });
+    const isViewer = req.user?.role === 'viewer';
+    const safeSales = isViewer
+      ? sales.map(s => {
+          const obj = s.toObject ? s.toObject() : { ...s };
+          return {
+            ...obj,
+            outletSales: null,
+            otherSales: null,
+            totalRevenue: null,
+            paymentBreakdown: {
+              cash: null,
+              upi: null,
+              card: null,
+              bankTransfer: null,
+            },
+            zomato: obj.zomato ? {
+              ...obj.zomato,
+              grossSales: null,
+              platformDiscount: null,
+              restaurantDiscount: null,
+              commission: null,
+              gst: null,
+              netSettlement: null,
+            } : obj.zomato,
+            fatafat: obj.fatafat ? {
+              ...obj.fatafat,
+              grossSales: null,
+              platformDiscount: null,
+              restaurantDiscount: null,
+              commission: null,
+              gst: null,
+              netSettlement: null,
+            } : obj.fatafat,
+          };
+        })
+      : sales;
+
+    res.json({ sales: safeSales, total, page: Number(page), pages: Math.ceil(total / limit), isViewerDemo: isViewer });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -158,6 +195,10 @@ router.get('/today', async (req, res) => {
       .populate({ path: 'zomato.receivedIn', select: 'name' })
       .populate({ path: 'fatafat.receivedIn', select: 'name' })
       .populate({ path: 'otherSalesReceivedIn', select: 'name' });
+
+    if (req.user?.role === 'viewer') {
+      return res.json(null);
+    }
     res.json(sales || null);
   } catch (err) {
     res.status(500).json({ message: err.message });

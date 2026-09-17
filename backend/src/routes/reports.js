@@ -146,6 +146,33 @@ router.get('/pnl', async (req, res) => {
     const grossProfit = sales.total - rawMaterials;
     const netProfit = sales.total - totalExpenses;
 
+    const isViewer = req.user?.role === 'viewer';
+
+    if (isViewer) {
+      return res.json({
+        period: { start, end },
+        income: {
+          outlet: null,
+          zomato: null,
+          fatafat: null,
+          other: null,
+          total: null,
+        },
+        expenses: {
+          rawMaterials: null,
+          byCategory: [],
+          total: null,
+        },
+        wastage: { total: null, count: wastage?.count || 0, totalQty: wastage?.totalQty || 0 },
+        dailySales: [],
+        grossProfit: null,
+        netProfit: null,
+        grossMargin: null,
+        netMargin: null,
+        isViewerDemo: true,
+      });
+    }
+
     res.json({
       period: { start, end },
       income: {
@@ -180,6 +207,28 @@ router.get('/daily', async (req, res) => {
     ]);
 
     const totalExpenses = payments.reduce((s, p) => s + p.amount, 0) + purchases.reduce((s, p) => s + p.totalAmount, 0);
+    const isViewer = req.user?.role === 'viewer';
+
+    if (isViewer) {
+      return res.json({
+        date,
+        sales: null,
+        purchases: purchases.map(p => ({
+          ...p.toObject(),
+          totalAmount: null,
+          items: p.items.map(it => ({ ...it.toObject(), price: null, totalPrice: null }))
+        })),
+        payments: payments.map(p => ({
+          ...p.toObject(),
+          amount: null,
+        })),
+        totalRevenue: null,
+        totalExpenses: null,
+        netProfit: null,
+        isViewerDemo: true,
+      });
+    }
+
     res.json({
       date,
       sales,
@@ -325,25 +374,62 @@ router.get('/sales', async (req, res) => {
     const limitNum = Math.max(1, Number(limit) || 100);
     const paginatedOrders = filteredOrders.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
+    const isViewer = req.user?.role === 'viewer';
+
+    const safeOrders = isViewer
+      ? paginatedOrders.map(o => ({
+          ...o,
+          subtotal: null,
+          taxAmount: null,
+          discount: null,
+          waivedAmount: null,
+          total: null,
+          settledAmount: null,
+          items: o.items?.map(it => ({
+            ...it,
+            price: null,
+            totalPrice: null,
+          })),
+        }))
+      : paginatedOrders;
+
+    const safeSummary = isViewer
+      ? {
+          totalOrders: filteredOrders.length,
+          totalGrossSales: null,
+          totalTax: null,
+          totalDiscount: null,
+          totalWaived: null,
+          totalSettled: null,
+          paymentBreakdown: {
+            cash: null,
+            upi: null,
+            card: null,
+            other: null,
+          },
+        }
+      : {
+          totalOrders: filteredOrders.length,
+          totalGrossSales: Math.round(totalGrossSales * 100) / 100,
+          totalTax: Math.round(totalTax * 100) / 100,
+          totalDiscount: Math.round(totalDiscount * 100) / 100,
+          totalWaived: Math.round(totalWaived * 100) / 100,
+          totalSettled: Math.round(totalSettled * 100) / 100,
+          paymentBreakdown: {
+            cash: Math.round(paymentBreakdown.cash * 100) / 100,
+            upi: Math.round(paymentBreakdown.upi * 100) / 100,
+            card: Math.round(paymentBreakdown.card * 100) / 100,
+            other: Math.round(paymentBreakdown.other * 100) / 100,
+          },
+        };
+
     res.json({
-      summary: {
-        totalOrders: filteredOrders.length,
-        totalGrossSales: Math.round(totalGrossSales * 100) / 100,
-        totalTax: Math.round(totalTax * 100) / 100,
-        totalDiscount: Math.round(totalDiscount * 100) / 100,
-        totalWaived: Math.round(totalWaived * 100) / 100,
-        totalSettled: Math.round(totalSettled * 100) / 100,
-        paymentBreakdown: {
-          cash: Math.round(paymentBreakdown.cash * 100) / 100,
-          upi: Math.round(paymentBreakdown.upi * 100) / 100,
-          card: Math.round(paymentBreakdown.card * 100) / 100,
-          other: Math.round(paymentBreakdown.other * 100) / 100,
-        },
-      },
-      orders: paginatedOrders,
+      summary: safeSummary,
+      orders: safeOrders,
       totalCount: filteredOrders.length,
       page: pageNum,
       totalPages: Math.ceil(filteredOrders.length / limitNum) || 1,
+      isViewerDemo: isViewer,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
