@@ -21,11 +21,11 @@ import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Phone, IndianRupee, ChevronDown, RefreshCw } from 'lucide-react';
 
-const CACHE_KEY = 'peyala_staff_cache_v1';
+const CACHE_KEY = 'peyala_staff_cache_v2';
 
-function readCache() {
+function readCache(role = 'default') {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(`${CACHE_KEY}_${role}`);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -33,9 +33,9 @@ function readCache() {
   }
 }
 
-function writeCache(data: { staff: any[]; accounts: any[] }) {
+function writeCache(role = 'default', data: { staff: any[]; accounts: any[] }) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+    localStorage.setItem(`${CACHE_KEY}_${role}`, JSON.stringify({ ...data, savedAt: Date.now() }));
   } catch {
     // ignore
   }
@@ -49,7 +49,8 @@ const PAYMENT_TYPES = [
 ];
 
 export default function StaffPage() {
-  const { canWrite } = useAuth();
+  const { canWrite, isViewer, user } = useAuth();
+  const userRole = user?.role || 'default';
   const [staff, setStaff] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [modal, setModal] = useState<'create' | 'edit' | 'pay' | 'history' | null>(null);
@@ -86,7 +87,7 @@ export default function StaffPage() {
       setStaff(s.data);
       setAccounts(a.data);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      writeCache({ staff: s.data, accounts: a.data });
+      writeCache(userRole, { staff: s.data, accounts: a.data });
     } catch (err) {
       console.error('Failed to load staff:', err);
     } finally {
@@ -95,7 +96,7 @@ export default function StaffPage() {
   };
 
   useEffect(() => {
-    const cached = readCache();
+    const cached = readCache(userRole);
     if (cached?.staff && cached?.accounts) {
       setStaff(cached.staff);
       setAccounts(cached.accounts);
@@ -105,7 +106,7 @@ export default function StaffPage() {
       return;
     }
     load();
-  }, []);
+  }, [userRole]);
 
   const openEdit = (s: any) => {
     setSelected(s);
@@ -221,7 +222,7 @@ export default function StaffPage() {
   };
 
   const totalSalaryBill = staff.filter(s => s.status === 'active')
-    .reduce((s, m) => s + m.monthlySalary, 0);
+    .reduce((s, m) => s + (m.monthlySalary || 0), 0);
 
   const statusColor = (s: string) => ({
     active: 'badge-green', inactive: 'badge-red', on_leave: 'badge-yellow'
@@ -229,6 +230,7 @@ export default function StaffPage() {
 
   // Remaining salary = Monthly Salary − Total Advance Paid
   const remainingSalary = (member: any) => {
+    if (isViewer) return null;
     const monthly = member.monthlySalary || 0;
     const advance = member.totalAdvancePaid || 0;
     return monthly - advance;
@@ -244,7 +246,7 @@ export default function StaffPage() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Staff</h1>
             <p className="text-sm text-gray-500">
               {staff.filter(s => s.status === 'active').length} active ·
-              Monthly bill: <span className="font-medium text-gray-800 dark:text-gray-200">{formatCurrency(totalSalaryBill)}</span>
+              Monthly bill: <span className="font-medium text-gray-800 dark:text-gray-200">{isViewer ? '••••••' : formatCurrency(totalSalaryBill)}</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -256,7 +258,7 @@ export default function StaffPage() {
             <button
               type="button"
               onClick={() => {
-                localStorage.removeItem(CACHE_KEY);
+                localStorage.removeItem(`${CACHE_KEY}_${userRole}`);
                 load(true);
               }}
               disabled={refreshing}
@@ -324,19 +326,27 @@ export default function StaffPage() {
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-100 dark:border-gray-800 mb-3">
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wider">Monthly Salary</p>
-                  <p className="font-semibold text-gray-900 dark:text-white text-sm">{formatCurrency(member.monthlySalary)}</p>
+                  <p className="font-semibold text-gray-900 dark:text-white text-sm">
+                    {isViewer ? '••••••' : formatCurrency(member.monthlySalary)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wider">Total Advance</p>
-                  <p className="font-semibold text-amber-600 text-sm">{formatCurrency(member.totalAdvancePaid || 0)}</p>
+                  <p className="font-semibold text-amber-600 text-sm">
+                    {isViewer ? '••••••' : formatCurrency(member.totalAdvancePaid || 0)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wider">Salary Paid</p>
-                  <p className="font-semibold text-emerald-600 text-sm">{formatCurrency(member.totalSalaryPaid || 0)}</p>
+                  <p className="font-semibold text-emerald-600 text-sm">
+                    {isViewer ? '••••••' : formatCurrency(member.totalSalaryPaid || 0)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wider">Bonus Paid</p>
-                  <p className="font-semibold text-blue-600 text-sm">{formatCurrency(member.totalBonusPaid || 0)}</p>
+                  <p className="font-semibold text-blue-600 text-sm">
+                    {isViewer ? '••••••' : formatCurrency(member.totalBonusPaid || 0)}
+                  </p>
                 </div>
               </div>
 
@@ -344,13 +354,21 @@ export default function StaffPage() {
               <div className="bg-orange-50 dark:bg-orange-900/10 rounded-lg px-3 py-2 mb-3">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-orange-600 font-medium">Remaining Salary</span>
-                  <span className="text-sm font-bold text-orange-600">{formatCurrency(remainingSalary(member))}</span>
+                  <span className="text-sm font-bold text-orange-600">
+                    {isViewer ? '••••••' : formatCurrency(remainingSalary(member))}
+                  </span>
                 </div>
                 {/* Progress bar showing advance taken vs monthly salary */}
                 <div className="w-full bg-orange-100 dark:bg-orange-900/30 rounded-full h-1.5 mt-1.5">
                   <div
                     className="h-1.5 bg-orange-400 rounded-full transition-all"
-                    style={{ width: `${member.monthlySalary > 0 ? Math.min(100, ((member.totalAdvancePaid || 0) / member.monthlySalary) * 100) : 0}%` }}
+                    style={{
+                      width: `${
+                        !isViewer && member.monthlySalary > 0
+                          ? Math.min(100, ((member.totalAdvancePaid || 0) / member.monthlySalary) * 100)
+                          : 0
+                      }%`,
+                    }}
                   />
                 </div>
               </div>
@@ -607,14 +625,14 @@ export default function StaffPage() {
             {/* Summary */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
-                { label: 'Monthly Salary', value: detail.member.monthlySalary, color: 'text-gray-900 dark:text-white' },
-                { label: 'Salary Paid', value: detail.member.totalSalaryPaid || 0, color: 'text-green-600' },
-                { label: 'Advance Given', value: detail.member.totalAdvancePaid || 0, color: 'text-yellow-600' },
-                { label: 'Bonus Given', value: detail.member.totalBonusPaid || 0, color: 'text-purple-600' },
+                { label: 'Monthly Salary', value: isViewer ? null : detail.member.monthlySalary, color: 'text-gray-900 dark:text-white' },
+                { label: 'Salary Paid', value: isViewer ? null : (detail.member.totalSalaryPaid || 0), color: 'text-green-600' },
+                { label: 'Advance Given', value: isViewer ? null : (detail.member.totalAdvancePaid || 0), color: 'text-yellow-600' },
+                { label: 'Bonus Given', value: isViewer ? null : (detail.member.totalBonusPaid || 0), color: 'text-purple-600' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <p className="text-xs text-gray-400 mb-1">{label}</p>
-                  <p className={`text-lg font-bold ${color}`}>{formatCurrency(value)}</p>
+                  <p className={`text-lg font-bold ${color}`}>{isViewer ? '••••••' : formatCurrency(value)}</p>
                 </div>
               ))}
             </div>
@@ -648,7 +666,9 @@ export default function StaffPage() {
                         </td>
                         <td className="table-td text-gray-500">{p.description || '—'}</td>
                         <td className="table-td text-gray-400">{p.paidFrom?.name || '—'}</td>
-                        <td className="table-td font-semibold text-green-600">{formatCurrency(p.amount)}</td>
+                        <td className="table-td font-semibold text-green-600">
+                          {isViewer ? '••••••' : formatCurrency(p.amount)}
+                        </td>
                       </tr>
                     );
                   })}
@@ -657,7 +677,9 @@ export default function StaffPage() {
                   <tr>
                     <td colSpan={4} className="table-td font-semibold">Total Paid (all types)</td>
                     <td className="table-td font-bold text-brand-600">
-                      {formatCurrency(detail.payments.reduce((s: number, p: any) => s + p.amount, 0))}
+                      {isViewer
+                        ? '••••••'
+                        : formatCurrency(detail.payments.reduce((s: number, p: any) => s + (p.amount || 0), 0))}
                     </td>
                   </tr>
                 </tfoot>

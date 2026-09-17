@@ -533,7 +533,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Top amber banner rendered in `AppLayout.tsx` alerting that demo mode is active and read-only.
   - `WastagePromptBanner.tsx` suppressed for viewers (`user.role === 'viewer'`), eliminating closing checklist popups during demos.
   - Top navigation bar & table/item action buttons across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers` conditionally hide or disable mutation controls using `canWrite` from `useAuth()`.
-- **Confidential Financial Masking (Dual-Layer Defense Model)**:
+- **Confidential Financial & Staff Salary Masking (Dual-Layer Defense Model)**:
   - **Backend Layer (Defense in Depth)**:
     - In `backend/src/routes/dashboard.js`: `/api/dashboard/summary` nullifies `revenue`, `expenses`, `grossProfit`, `netProfit`, `outlet`, `zomato`, `fatafat`, `other`, daily averages, and sets `charts.salesTrend: []`, `charts.expenseTrend: []`, `charts.expenseByCategory: []` whenever `req.user.role === 'viewer'`.
     - In `backend/src/routes/reports.js`:
@@ -541,12 +541,18 @@ Peyala v8 is a production-grade restaurant operations and management system buil
       - `/api/reports/daily`: Nullifies `totalRevenue`, `totalExpenses`, `netProfit`, `sales`, and masks monetary fields on purchases/payments.
       - `/api/reports/sales`: Nullifies `summary.totalGrossSales`, `summary.totalSettled`, `summary.paymentBreakdown`, and order-level monetary totals.
     - In `backend/src/routes/sales.js`: `/api/sales` and `/api/sales/today` nullify `totalRevenue`, `outletSales`, and channel net amounts.
+    - In `backend/src/routes/staff.js`: `/api/staff` and `/api/staff/:id` nullify `monthlySalary`, `dailySalary`, `totalSalaryPaid`, `totalAdvancePaid`, `totalBonusPaid`, `totalPaid`, and individual payment amounts for viewers.
+    - In `backend/src/routes/attendance.js`: `/api/attendance` and `/api/attendance/time-logs` nullify `dailySalary`, `hourlyRate`, `deductionAmount`, `penaltyAmount`, and `payableAmount` on attendance records and staff profiles for viewers.
+    - In `backend/src/routes/payments.js`: `/api/payments` nullifies `amount` for any staff expenses or staff-linked transactions when viewed by viewers.
   - **Frontend Layer**:
     - `formatCurrency` in `frontend/src/lib/utils.ts` handles `null`/`undefined`/`NaN` gracefully by displaying `••••••`.
-    - `/dashboard`: KPI cards display `••••••` with `Protected in Demo` tags; 30-Day Revenue Trend and Expense Breakdown render dedicated `EyeOff` protection placeholders; quick stats and yesterday banner figures are masked.
+    - `/dashboard`: KPI cards display `••••••` with `Protected in Demo` tags; 30-Day Revenue Trend and Expense Breakdown render dedicated `EyeOff` protection placeholders; quick stats and yesterday banner figures are masked. Main container incorporates `pb-20 sm:pb-6` padding to ensure generous mobile clearance over the fixed bottom navigation bar.
+    - `/staff`: Monthly bill header displays `••••••`; staff cards mask Monthly Salary, Total Advance, Salary Paid, Bonus Paid, and Remaining Salary as `••••••`; advance progress bar remains at 0%; payment history modal masks summary cards, payment transaction amounts, and total paid footer.
+    - `/attendance`: Daily Shift Timings & Pro-Rata Salary Deduction table masks Daily Salary, Deduction shortage, and Day Net Pay as `••••••`. Aggregate KPI bar masks Total Daily Gross, Total Deductions, and Net Day Payable as `••••••`.
     - `/reports`: Summary cards, daily revenue charts, comparison bar charts, and category expense charts show `••••••` or demo protection notice; CSV export is blocked with notification.
     - `/sales`: Sales ledger columns display `••••••`.
-    - Caching keys for dashboard, sales, and reports are partitioned by `userRole` (`_viewer` vs `_admin`) to eliminate cross-session data leaks.
+    - `/payments`: Staff expense transactions mask amount as `••••••`.
+    - Caching keys for dashboard, sales, reports, staff, attendance, and payments are strictly partitioned by `userRole` (`_viewer` vs `_admin`) to eliminate cross-session data leaks.
 
 ---
 

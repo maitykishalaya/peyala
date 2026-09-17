@@ -421,13 +421,16 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - **Global Header Banner (`AppLayout.tsx`)**: Prominent amber banner notifying users: `👀 Viewer Demo Mode: You have read-only access. Creating, editing, or deleting business data is disabled.`
   - **Sidebar Role Badge**: Displays `Viewer (Demo)` under user avatar.
   - **Control Guarding Across Modules**: Mutation buttons (Add Item, Settle Table, Pay Staff, Add Purchase, Add Sales Entry, Record Expense, Record Wastage, Transfer Funds) are safely hidden or disabled across `/tables`, `/menu`, `/staff`, `/attendance`, `/sales`, `/purchases`, `/inventory`, `/payments`, `/accounts`, and `/suppliers`.
-- **Sensitive Financial Data Masking (Dual-Layer Defense)**:
-  - **Backend API Sanitization**: When `req.user.role === 'viewer'`, API endpoints (`/api/dashboard/summary`, `/api/reports/pnl`, `/api/reports/daily`, `/api/reports/sales`, `/api/sales`) nullify live aggregate figures: total revenue, total expenses, gross profit, net profit, channel sales, sales trends, and settled order amounts. Viewers cannot inspect confidential financial numbers via DevTools Network tab.
+- **Sensitive Financial & Staff Salary Data Masking (Dual-Layer Defense)**:
+  - **Backend API Sanitization**: When `req.user.role === 'viewer'`, API endpoints (`/api/dashboard/summary`, `/api/reports/pnl`, `/api/reports/daily`, `/api/reports/sales`, `/api/sales`, `/api/staff`, `/api/attendance`, `/api/attendance/time-logs`, `/api/payments`) nullify live aggregate figures and confidential compensation data: total revenue, total expenses, gross profit, net profit, channel sales, sales trends, settled order amounts, staff monthly/daily salaries, total salary/advance/bonus paid, hourly rates, pro-rata deductions, daily net payables, and staff payment amounts. Viewers cannot inspect confidential figures via browser DevTools.
   - **UI Masking & Demo Placeholders**:
-    - `/dashboard`: Total Revenue, Total Expenses, Gross Profit, Net Profit KPI cards display `••••••` with `Protected in Demo` badges. 30-Day Revenue Trend and Expense Breakdown charts are replaced with confidentiality demo placeholders. Yesterday sales/purchases totals and channel performance are masked.
+    - `/dashboard`: Total Revenue, Total Expenses, Gross Profit, Net Profit KPI cards display `••••••` with `Protected in Demo` badges. 30-Day Revenue Trend and Expense Breakdown charts are replaced with confidentiality demo placeholders. Yesterday sales/purchases totals and channel performance are masked. Enhanced mobile viewport ergonomics with dedicated bottom padding (`pb-20 sm:pb-6`) clearing fixed bottom navigation.
+    - `/staff`: Roster header masks monthly bill as `••••••`. Staff cards mask Monthly Salary, Total Advance, Salary Paid, Bonus Paid, and Remaining Salary as `••••••`; advance progress bar is neutralized to 0%. Payment history modal masks summary metrics, individual payment amounts, and total paid footer.
+    - `/attendance`: Daily Shift Timings & Pro-Rata Salary Deduction table masks Daily Salary, Shortage Deductions, and Day Net Pay as `••••••`. Aggregate KPI bar masks Total Daily Gross, Total Deductions, and Net Day Payable as `••••••`.
     - `/reports` (P&L, Daily, Detailed Sales): Financial summary metrics, daily revenue charts, category expense distributions, and payment mode breakdowns display `••••••` or demo protection cards. CSV exports are blocked for viewers.
     - `/sales`: Daily sales ledger table columns (Outlet Sales, Cash, UPI/Card, Zomato, Fatafat, Other, Total) display `••••••`.
-  - **Safe Caching Isolation**: Client-side localStorage caches for dashboard, sales, and reports are partitioned by role (`_viewer` vs `_admin`) preventing stale cache bleed across logins.
+    - `/payments`: Staff expense payments display `••••••` for transaction amounts.
+  - **Safe Caching Isolation**: Client-side localStorage caches for dashboard, sales, reports, staff, attendance, and payments are strictly partitioned by user role (`_viewer` vs `_admin`) preventing stale cache bleed across different account sessions.
 
 ---
 

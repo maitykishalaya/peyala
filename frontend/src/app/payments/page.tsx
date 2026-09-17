@@ -22,7 +22,7 @@ import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
 
-const PAYMENTS_CACHE_KEY = 'peyala_payments_cache_v1';
+const getPaymentsCacheKey = (role = 'default') => `peyala_payments_cache_v2_${role}`;
 
 function readCache(key: string) {
   try {
@@ -45,7 +45,8 @@ function writeCache(key: string, data: any) {
 const CACHE_TTL_MS = 0.5 * 60 * 1000; // 30s — reuse cache as-is within this window, no network call at all
 
 export default function PaymentsPage() {
-  const { canWrite } = useAuth();
+  const { canWrite, user } = useAuth();
+  const userRole = user?.role || 'default';
   // ── Data state ──────────────────────────────────────────────────
   const [payments, setPayments] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -101,7 +102,7 @@ export default function PaymentsPage() {
       setCategories(c.data);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       if (isDefaultView) {
-        writeCache(PAYMENTS_CACHE_KEY, {
+        writeCache(getPaymentsCacheKey(userRole), {
           payments: p.data.payments, total: p.data.total,
           accounts: a.data, suppliers: s.data, categories: c.data,
         });
@@ -117,7 +118,7 @@ export default function PaymentsPage() {
   useEffect(() => {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
     if (isDefaultView) {
-      const cached = readCache(PAYMENTS_CACHE_KEY);
+      const cached = readCache(getPaymentsCacheKey(userRole));
       if (cached?.payments) {
         setPayments(cached.payments || []);
         setTotal(cached.total || 0);
@@ -132,7 +133,7 @@ export default function PaymentsPage() {
       }
     }
     load();
-  }, [page, filters]);
+  }, [page, filters, userRole]);
 
   // ── When category changes, update subcategory list ───────────────
   const handleCategoryChange = (catName: string) => {
@@ -252,7 +253,7 @@ export default function PaymentsPage() {
             <button
               type="button"
               onClick={() => {
-                localStorage.removeItem(PAYMENTS_CACHE_KEY);
+                localStorage.removeItem(getPaymentsCacheKey(userRole));
                 load(true);
               }}
               disabled={refreshing}

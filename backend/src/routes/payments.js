@@ -54,6 +54,20 @@ router.get('/', async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit);
 
+    if (req.user?.role === 'viewer') {
+      const sanitized = payments.map((p) => {
+        const doc = p.toJSON ? p.toJSON() : { ...(p._doc || p) };
+        if (doc.staff || doc.category === 'Staff Expenses') {
+          return {
+            ...doc,
+            amount: null,
+          };
+        }
+        return doc;
+      });
+      return res.json({ payments: sanitized, total, page, pages: Math.ceil(total / limit) });
+    }
+
     res.json({ payments, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ message: err.message });

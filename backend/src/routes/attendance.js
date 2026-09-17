@@ -57,6 +57,21 @@ router.get('/', async (req, res) => {
       .populate('staff', 'name status')
       .sort('staff date');
 
+    if (req.user?.role === 'viewer') {
+      const sanitized = records.map((r) => {
+        const doc = r.toJSON ? r.toJSON() : { ...(r._doc || r) };
+        return {
+          ...doc,
+          dailySalary: null,
+          hourlyRate: null,
+          deductionAmount: null,
+          penaltyAmount: null,
+          payableAmount: null,
+        };
+      });
+      return res.json(sanitized);
+    }
+
     res.json(records);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -271,10 +286,35 @@ router.get('/time-logs', async (req, res) => {
       attMap[r.staff.toString()] = r;
     });
 
-    const logs = staffList.map((s) => ({
-      staff: s,
-      record: attMap[s._id.toString()] || null,
-    }));
+    const isViewer = req.user?.role === 'viewer';
+    const logs = staffList.map((s) => {
+      const staffDoc = s.toJSON ? s.toJSON() : { ...(s._doc || s) };
+      const rec = attMap[s._id.toString()] || null;
+      const recDoc = rec ? (rec.toJSON ? rec.toJSON() : { ...(rec._doc || rec) }) : null;
+
+      if (isViewer) {
+        return {
+          staff: {
+            ...staffDoc,
+            monthlySalary: null,
+            dailySalary: null,
+          },
+          record: recDoc ? {
+            ...recDoc,
+            dailySalary: null,
+            hourlyRate: null,
+            deductionAmount: null,
+            penaltyAmount: null,
+            payableAmount: null,
+          } : null,
+        };
+      }
+
+      return {
+        staff: s,
+        record: rec,
+      };
+    });
 
     res.json({ date: formatDateKey(targetDate), logs });
   } catch (err) {

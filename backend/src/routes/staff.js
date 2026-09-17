@@ -21,10 +21,27 @@ const { log } = require('../utils/audit');
 
 router.use(auth);
 
+const sanitizeStaffForViewer = (member) => {
+  if (!member) return member;
+  const doc = member.toJSON ? member.toJSON() : { ...(member._doc || member) };
+  return {
+    ...doc,
+    monthlySalary: null,
+    dailySalary: null,
+    totalSalaryPaid: null,
+    totalAdvancePaid: null,
+    totalBonusPaid: null,
+    totalPaid: null,
+  };
+};
+
 // ── GET /api/staff ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
     const staff = await Staff.find().sort('name');
+    if (req.user?.role === 'viewer') {
+      return res.json(staff.map(sanitizeStaffForViewer));
+    }
     res.json(staff);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
@@ -34,9 +51,23 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const member = await Staff.findById(req.params.id);
+    if (!member) return res.status(404).json({ message: 'Staff member not found' });
     const payments = await Payment.find({ staff: req.params.id })
       .populate('paidFrom', 'name')
       .sort('-date');
+
+    if (req.user?.role === 'viewer') {
+      const sanitizedMember = sanitizeStaffForViewer(member);
+      const sanitizedPayments = payments.map((p) => {
+        const doc = p.toJSON ? p.toJSON() : { ...(p._doc || p) };
+        return {
+          ...doc,
+          amount: null,
+        };
+      });
+      return res.json({ member: sanitizedMember, payments: sanitizedPayments });
+    }
+
     res.json({ member, payments });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });

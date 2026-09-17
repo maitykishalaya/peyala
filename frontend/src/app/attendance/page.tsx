@@ -107,8 +107,8 @@ function calculateShiftMinutes(entry?: string, exit?: string) {
   }
 }
 
-const STAFF_CACHE_KEY = 'peyala_attendance_staff_cache_v1';
-const getAttendanceCacheKey = (y: number, m: number) => `peyala_attendance_${y}_${m}_v1`;
+const getStaffCacheKey = (role = 'default') => `peyala_attendance_staff_cache_v2_${role}`;
+const getAttendanceCacheKey = (y: number, m: number, role = 'default') => `peyala_attendance_${y}_${m}_v2_${role}`;
 
 function readCache(key: string) {
   try {
@@ -129,7 +129,8 @@ function writeCache(key: string, data: any) {
 }
 
 export default function AttendancePage() {
-  const { user } = useAuth();
+  const { user, isViewer } = useAuth();
+  const userRole = user?.role || 'default';
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -509,7 +510,7 @@ export default function AttendancePage() {
         const staffRes = await staffApi.list();
         currentStaff = staffRes.data || [];
         setStaff(currentStaff);
-        writeCache(STAFF_CACHE_KEY, { staff: currentStaff });
+        writeCache(getStaffCacheKey(userRole), { staff: currentStaff });
       }
 
       const active = currentStaff.filter((member: any) => member.status === 'active');
@@ -528,7 +529,7 @@ export default function AttendancePage() {
       setAttendance(attData);
       setSummaries(sumMap);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      writeCache(getAttendanceCacheKey(year, month), { attendance: attData, summaries: sumMap });
+      writeCache(getAttendanceCacheKey(year, month, userRole), { attendance: attData, summaries: sumMap });
     } catch (err) {
       console.error('Failed to load attendance:', err);
     } finally {
@@ -540,14 +541,14 @@ export default function AttendancePage() {
   useEffect(() => {
     let currentStaff = staff;
     if (!currentStaff.length) {
-      const cachedStaff = readCache(STAFF_CACHE_KEY);
+      const cachedStaff = readCache(getStaffCacheKey(userRole));
       if (cachedStaff?.staff) {
         currentStaff = cachedStaff.staff;
         setStaff(currentStaff);
       }
     }
 
-    const cacheKey = getAttendanceCacheKey(year, month);
+    const cacheKey = getAttendanceCacheKey(year, month, userRole);
     const cachedAtt = readCache(cacheKey);
     if (cachedAtt?.attendance && currentStaff.length) {
       setAttendance(cachedAtt.attendance);
@@ -560,7 +561,7 @@ export default function AttendancePage() {
     }
 
     loadData();
-  }, [month, year]);
+  }, [month, year, userRole]);
 
   useEffect(() => {
     if (today.getMonth() + 1 === month && today.getFullYear() === year) {
@@ -707,7 +708,8 @@ export default function AttendancePage() {
             <button
               type="button"
               onClick={() => {
-                localStorage.removeItem(getAttendanceCacheKey(year, month));
+                localStorage.removeItem(getAttendanceCacheKey(year, month, userRole));
+                localStorage.removeItem(getStaffCacheKey(userRole));
                 loadData(true);
               }}
               disabled={refreshing}
@@ -1217,7 +1219,9 @@ export default function AttendancePage() {
 
                         {/* Daily Salary */}
                         <td className="py-3 px-3 text-right font-medium text-gray-700 dark:text-gray-300">
-                          {record?.dailySalary
+                          {isViewer
+                            ? '••••••'
+                            : record?.dailySalary
                             ? formatCurrency(record.dailySalary)
                             : member.dailySalary
                             ? formatCurrency(member.dailySalary)
@@ -1228,7 +1232,9 @@ export default function AttendancePage() {
 
                         {/* Deduction */}
                         <td className="py-3 px-3 text-right">
-                          {hasRecord && ((record?.deductionAmount > 0) || (record?.penaltyAmount > 0)) ? (
+                          {isViewer ? (
+                            <span className="text-gray-400">••••••</span>
+                          ) : hasRecord && ((record?.deductionAmount > 0) || (record?.penaltyAmount > 0)) ? (
                             <div className="flex flex-col items-end">
                               {record?.deductionAmount > 0 && (
                                 <span className="font-black text-rose-600 dark:text-rose-400">
@@ -1253,7 +1259,9 @@ export default function AttendancePage() {
 
                         {/* Day Net Pay */}
                         <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
-                          {hasRecord && record?.payableAmount !== undefined ? (
+                          {isViewer ? (
+                            <span className="text-gray-400 font-semibold">••••••</span>
+                          ) : hasRecord && record?.payableAmount !== undefined ? (
                             formatCurrency(record.payableAmount)
                           ) : (
                             <span className="text-gray-400">—</span>
@@ -1323,21 +1331,28 @@ export default function AttendancePage() {
               <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-center">
                 <span className="text-[10px] font-black uppercase text-gray-400">Total Daily Gross</span>
                 <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">
-                  {formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.dailySalary || 0), 0))}
+                  {isViewer ? '••••••' : formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.dailySalary || 0), 0))}
                 </p>
               </div>
 
               <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-800/60 text-center">
                 <span className="text-[10px] font-black uppercase text-rose-600 dark:text-rose-400">Total Deductions</span>
                 <p className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5">
-                  -{formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.deductionAmount || 0) + (l.record?.penaltyAmount || 0), 0))}
+                  {isViewer
+                    ? '••••••'
+                    : `-${formatCurrency(
+                        timeLogs.reduce(
+                          (sum, l) => sum + (l.record?.deductionAmount || 0) + (l.record?.penaltyAmount || 0),
+                          0
+                        )
+                      )}`}
                 </p>
               </div>
 
               <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 text-center">
                 <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400">Net Day Payable</span>
                 <p className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
-                  {formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.payableAmount || 0), 0))}
+                  {isViewer ? '••••••' : formatCurrency(timeLogs.reduce((sum, l) => sum + (l.record?.payableAmount || 0), 0))}
                 </p>
               </div>
             </div>
