@@ -268,10 +268,10 @@ export const ordersApi = {
     api.get<Order>(`/orders/${id}`),
   getActiveForTable: (tableId: string) =>
     api.get<Order | null>(`/orders/table/${tableId}/active`),
-  create: (data: { tableId: string; items: OrderInputItem[] }) =>
+  create: (data: { tableId: string; items: OrderInputItem[]; shouldPrint?: boolean }) =>
     api.post<Order>('/orders', data),
-  addItems: (id: string, items: OrderInputItem[]) =>
-    api.post<Order>(`/orders/${id}/items`, { items }),
+  addItems: (id: string, items: OrderInputItem[], options?: { shouldPrint?: boolean }) =>
+    api.post<Order>(`/orders/${id}/items`, { items, shouldPrint: options?.shouldPrint }),
   updateItem: (id: string, itemId: string, data: { status?: string; quantity?: number; notes?: string }) =>
     api.patch<Order>(`/orders/${id}/items/${itemId}`, data),
   cancelItem: (id: string, itemId: string) =>

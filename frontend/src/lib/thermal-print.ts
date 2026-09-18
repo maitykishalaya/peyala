@@ -44,7 +44,8 @@ export interface KOTItem {
   quantity: number;
   notes?: string;
   variantName?: string;
-  addons?: string[];
+  variant?: { name: string; price?: number } | string;
+  addons?: Array<string | { name: string; price?: number }>;
 }
 
 export interface KOTPrintData {
@@ -156,16 +157,26 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
   const rows = data.items
     .map((item, idx) => {
-      const variantHtml = item.variantName?.trim()
-        ? ` <span style="font-size: 11.5px; font-weight: 700; color: #333;">(${escapeHtml(item.variantName.trim())})</span>`
+      const rawVariant =
+        item.variantName ||
+        (typeof (item as any).variant === 'string'
+          ? (item as any).variant
+          : (item as any).variant?.name) ||
+        '';
+      const vName = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+      const variantHtml = vName
+        ? ` <span style="font-size: 12.5px; font-weight: 900; color: #000; text-transform: uppercase;">[${escapeHtml(vName)}]</span>`
         : '';
-      const addonsHtml = item.addons && item.addons.length > 0
-        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: 700; color: #222; margin-top: 1px;">
-             + ${item.addons.map(escapeHtml).join(', ')}
+      const addonsList = Array.isArray(item.addons)
+        ? item.addons.map((a: any) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean)
+        : [];
+      const addonsHtml = addonsList.length > 0
+        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: 700; color: #000; margin-top: 1px;">
+             + ${addonsList.map(escapeHtml).join(', ')}
            </div>`
         : '';
       const notesHtml = item.notes?.trim()
-        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: bold; color: #111; margin-top: 2px;">
+        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: bold; color: #000; margin-top: 2px;">
              &gt;&gt; NOTE: ${escapeHtml(item.notes.trim())}
            </div>`
         : '';
@@ -345,8 +356,15 @@ export function generateBillHtml(data: BillPrintData): string {
   const rows = data.items
     .map((item, idx) => {
       const lineTotal = item.price * item.quantity;
-      const variantHtml = item.variantName?.trim()
-        ? `<div style="font-size: 10px; color: #444; font-weight: 600;">(${escapeHtml(item.variantName.trim())})</div>`
+      const rawVariant =
+        item.variantName ||
+        (typeof (item as any).variant === 'string'
+          ? (item as any).variant
+          : (item as any).variant?.name) ||
+        '';
+      const vName = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+      const variantHtml = vName
+        ? `<div style="font-size: 10px; color: #222; font-weight: 700;">(${escapeHtml(vName)})</div>`
         : '';
       const addonsHtml = item.addons && item.addons.length > 0
         ? `<div style="font-size: 9.5px; color: #555;">+ ${item.addons.map((a) => `${escapeHtml(a.name)} (₹${a.price})`).join(', ')}</div>`

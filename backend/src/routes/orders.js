@@ -90,11 +90,26 @@ router.get('/pending-kots', async (req, res) => {
             roundTag: round.roundTag || (round.roundNumber === 1 ? '[INITIAL ORDER]' : `[ROUND ${round.roundNumber} - ADD-ON]`),
             billerName: order.createdBy ? order.createdBy.name : 'Staff',
             createdAt: round.createdAt || order.createdAt,
-            items: round.items.map((it) => ({
-              name: it.name,
-              quantity: it.quantity,
-              notes: it.notes || '',
-            })),
+            items: round.items.map((it) => {
+              let vName = it.variantName || '';
+              if (!vName) {
+                const match = (order.items || []).find(
+                  (oi) => oi.name === it.name && oi.variant && oi.variant.name
+                );
+                if (match) vName = match.variant.name;
+              }
+              const addonsList = Array.isArray(it.addons) && it.addons.length > 0
+                ? it.addons
+                : (order.items || []).find((oi) => oi.name === it.name && oi.selectedAddons?.length)?.selectedAddons?.map((a) => a.name) || [];
+
+              return {
+                name: it.name,
+                quantity: it.quantity,
+                notes: it.notes || '',
+                variantName: vName,
+                addons: addonsList,
+              };
+            }),
           });
         }
       }
@@ -410,7 +425,7 @@ router.get('/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 router.post('/', staffOrAdmin, async (req, res) => {
   try {
-    const { tableId, items } = req.body;
+    const { tableId, items, shouldPrint } = req.body;
 
     if (!tableId) {
       return res.status(400).json({ message: 'Table ID is required' });
@@ -443,8 +458,12 @@ router.post('/', staffOrAdmin, async (req, res) => {
 
       let basePrice = mi.price;
       let variantObj = undefined;
-      if (it.variant && typeof it.variant.price === 'number') {
-        basePrice = Number(it.variant.price);
+      if (it.variant && (it.variant.name || typeof it.variant.price === 'number')) {
+        if (typeof it.variant.price === 'number') {
+          basePrice = Number(it.variant.price);
+        } else if (it.variant.price) {
+          basePrice = Number(it.variant.price) || basePrice;
+        }
         variantObj = {
           name: String(it.variant.name || '').trim(),
           price: basePrice,
@@ -489,6 +508,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
     const orderCount = await Order.countDocuments();
     const orderNumber = 4500 + orderCount + 1;
 
+    const isAutoPrint = shouldPrint !== false;
     const initialKotRound = {
       roundNumber: 1,
       roundTag: '[INITIAL ORDER]',
@@ -499,7 +519,8 @@ router.post('/', staffOrAdmin, async (req, res) => {
         variantName: i.variant?.name || '',
         addons: i.selectedAddons?.map((a) => a.name) || [],
       })),
-      printed: false,
+      printed: !isAutoPrint,
+      printedAt: !isAutoPrint ? new Date() : null,
       createdAt: new Date(),
     };
 
@@ -541,7 +562,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/items', staffOrAdmin, async (req, res) => {
   try {
-    const { items } = req.body;
+    const { items, shouldPrint } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'Items array is required' });
     }
@@ -568,8 +589,12 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
 
       let basePrice = mi.price;
       let variantObj = undefined;
-      if (it.variant && typeof it.variant.price === 'number') {
-        basePrice = Number(it.variant.price);
+      if (it.variant && (it.variant.name || typeof it.variant.price === 'number')) {
+        if (typeof it.variant.price === 'number') {
+          basePrice = Number(it.variant.price);
+        } else if (it.variant.price) {
+          basePrice = Number(it.variant.price) || basePrice;
+        }
         variantObj = {
           name: String(it.variant.name || '').trim(),
           price: basePrice,
@@ -626,6 +651,7 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
       order.kotRounds = [];
     }
 
+    const isAutoPrint = shouldPrint !== false;
     order.kotRounds.push({
       roundNumber: nextKotCount,
       roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
@@ -636,7 +662,8 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
         variantName: i.variant?.name || '',
         addons: i.selectedAddons?.map((a) => a.name) || [],
       })),
-      printed: false,
+      printed: !isAutoPrint,
+      printedAt: !isAutoPrint ? new Date() : null,
       createdAt: new Date(),
     });
 
@@ -1578,6 +1605,8 @@ router.post('/:orderId/reprint', async (req, res) => {
         name: i.name,
         quantity: i.quantity,
         notes: i.notes || '',
+        variantName: i.variant?.name || '',
+        addons: (i.selectedAddons || []).map((a) => a.name),
       }));
 
     if (activeItems.length === 0) {

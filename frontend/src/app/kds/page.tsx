@@ -24,6 +24,7 @@ import {
   Sparkles,
   Search,
   BellRing,
+  X,
 } from 'lucide-react';
 
 // Web Audio API dual-frequency chime synthesizer (880Hz -> 1320Hz bell)
@@ -79,6 +80,22 @@ export default function KitchenDisplayPage() {
   const [stationFilter, setStationFilter] = useState<'all' | 'veg' | 'beverage'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Notification popup for "Item is ready"
+  const [readyPopup, setReadyPopup] = useState<{
+    id: string;
+    name: string;
+    variantName?: string;
+    tables?: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!readyPopup) return;
+    const timer = setTimeout(() => {
+      setReadyPopup(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [readyPopup]);
+
   // Clock
   const [currentTime, setCurrentTime] = useState(new Date());
   useEffect(() => {
@@ -122,12 +139,12 @@ export default function KitchenDisplayPage() {
     }
   }, [soundEnabled]);
 
-  // Polling interval every 8 seconds for real-time kitchen sync
+  // Polling interval every 20 seconds for real-time kitchen sync
   useEffect(() => {
     loadKdsData();
     const interval = setInterval(() => {
       loadKdsData(true);
-    }, 8000);
+    }, 20000);
     return () => clearInterval(interval);
   }, [loadKdsData]);
 
@@ -190,7 +207,25 @@ export default function KitchenDisplayPage() {
     try {
       setActionLoading(prepItem.key);
       await ordersApi.batchBumpKdsItem(prepItem.menuItemId, prepItem.variantName);
-      toast.success(`Prepared batch: ${prepItem.name} ${prepItem.variantName ? `(${prepItem.variantName})` : ''} marked ready! ✨`);
+
+      const variantPart = prepItem.variantName ? ` (${prepItem.variantName})` : '';
+      const itemDisplayName = `${prepItem.name}${variantPart}`;
+
+      // Toast notification: "<item name> is ready"
+      toast.success(`${itemDisplayName} is ready`);
+
+      // Prominent popup notification banner in KDS
+      setReadyPopup({
+        id: String(Date.now()),
+        name: prepItem.name,
+        variantName: prepItem.variantName,
+        tables: prepItem.tables?.map((t) => t.tableNumber),
+      });
+
+      if (soundEnabled) {
+        playKitchenChime();
+      }
+
       await loadKdsData(true);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to batch-bump item');
@@ -329,6 +364,46 @@ export default function KitchenDisplayPage() {
 
   return (
     <AppLayout>
+      {/* Prominent Floating "Item is ready" Notification Popup / Toast */}
+      {readyPopup && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in zoom-in-95 slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-3.5 bg-emerald-600 dark:bg-emerald-700 text-white px-4 sm:px-5 py-3 rounded-2xl shadow-2xl border-2 border-emerald-400 ring-4 ring-emerald-500/20">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5 text-white stroke-[2.5]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-100 bg-emerald-800/70 px-2 py-0.5 rounded">
+                  Batch Ready
+                </span>
+                {readyPopup.tables && readyPopup.tables.length > 0 && (
+                  <span className="text-[11px] font-bold text-emerald-100 truncate">
+                    Tables: {readyPopup.tables.map((t) => `T${t}`).join(', ')}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm sm:text-base font-black text-white truncate mt-0.5">
+                {readyPopup.name}
+                {readyPopup.variantName && (
+                  <span className="text-emerald-100 font-bold ml-1 text-xs sm:text-sm">
+                    ({readyPopup.variantName})
+                  </span>
+                )}
+                {' '}is ready
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReadyPopup(null)}
+              className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3 p-1 sm:p-2">
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* TOP BAR: KDS BRANDING, CLOCK, CHIME, REFRESH & NAVIGATION */}

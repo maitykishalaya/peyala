@@ -240,7 +240,7 @@ export default function TablesPage() {
   // Live timer tick for KOT elapsed minutes
   const [, setKotTick] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setKotTick((t) => t + 1), 30000);
+    const timer = setInterval(() => setKotTick((t) => t + 1), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -438,7 +438,7 @@ export default function TablesPage() {
       ) {
         loadData();
       }
-    }, 6000);
+    }, 60000);
     return () => clearInterval(tablePoller);
   }, [activeView, showOrderDetailsModal, moveModal.open, orderModalLoading]);
 
@@ -900,7 +900,7 @@ export default function TablesPage() {
       if (isRound2Mode && activeOrder) {
         // CASE: Add round to existing table order
         const roundNum = (activeOrder.kotRounds?.length || 1) + 1;
-        const res = await ordersApi.addItems(activeOrder._id, payloadItems);
+        const res = await ordersApi.addItems(activeOrder._id, payloadItems, { shouldPrint });
         const updatedOrder = res.data;
 
         if (shouldPrint) {
@@ -930,9 +930,19 @@ export default function TablesPage() {
             createdAt: new Date(),
             items: printableItems,
           });
+
+          const newRound = updatedOrder.kotRounds?.[updatedOrder.kotRounds.length - 1];
+          if (newRound?._id) {
+            inFlightKotsRef.current.add(`${updatedOrder._id}-${newRound._id}`);
+            if (isPrintStation) {
+              ordersApi.markKotPrinted(updatedOrder._id, newRound._id).catch(() => {});
+            }
+          }
         }
 
-        const msg = `Round ${roundNum} KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        const msg = shouldPrint
+          ? `Round ${roundNum} KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
+          : `Round ${roundNum} KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
         toast.success(msg);
         setNoticeMessage(msg);
         setTimeout(() => setNoticeMessage(null), 4000);
@@ -941,6 +951,7 @@ export default function TablesPage() {
         const res = await ordersApi.create({
           tableId: targetTable?._id || tables[0]?._id,
           items: payloadItems,
+          shouldPrint,
         });
         const createdOrder = res.data;
 
@@ -971,9 +982,19 @@ export default function TablesPage() {
             createdAt: new Date(),
             items: printableItems,
           });
+
+          const firstRound = createdOrder.kotRounds?.[0];
+          if (firstRound?._id) {
+            inFlightKotsRef.current.add(`${createdOrder._id}-${firstRound._id}`);
+            if (isPrintStation) {
+              ordersApi.markKotPrinted(createdOrder._id, firstRound._id).catch(() => {});
+            }
+          }
         }
 
-        const msg = `KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        const msg = shouldPrint
+          ? `KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
+          : `KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
         toast.success(msg);
         setNoticeMessage(msg);
         setTimeout(() => setNoticeMessage(null), 4000);
@@ -1022,12 +1043,13 @@ export default function TablesPage() {
         }));
 
         if (targetOrder) {
-          const addRes = await ordersApi.addItems(targetOrder._id, payloadItems);
+          const addRes = await ordersApi.addItems(targetOrder._id, payloadItems, { shouldPrint: false });
           targetOrder = addRes.data;
         } else {
           const createRes = await ordersApi.create({
             tableId: selectedTable?._id || tables[0]?._id,
             items: payloadItems,
+            shouldPrint: false,
           });
           targetOrder = createRes.data;
         }
