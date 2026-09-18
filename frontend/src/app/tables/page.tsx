@@ -19,7 +19,9 @@ import {
 } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { playTwoBlinkAlertSound, listenToKdsReady, KdsReadyEvent } from '@/lib/audio-alerts';
 import {
+  BellRing,
   Plus,
   Users,
   Utensils,
@@ -208,6 +210,11 @@ export default function TablesPage() {
   const inFlightKotsRef = useRef<Set<string>>(new Set());
   const inFlightBillsRef = useRef<Set<string>>(new Set());
 
+  // KDS Ready Notification for Cashier Notice
+  const [kdsReadyAlert, setKdsReadyAlert] = useState<KdsReadyEvent | null>(null);
+  const prevServedOrderIdsRef = useRef<Set<string>>(new Set());
+  const isFirstTableLoadRef = useRef<boolean>(true);
+
   // Table Management Modal (create/edit)
   const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
   const [editingTable, setEditingTable] = useState<Table | null>(null);
@@ -270,12 +277,60 @@ export default function TablesPage() {
       setMenuItems(itemRes.data);
       setCategories(catRes.data);
       setAddons(addonRes.data);
+
+      // Check for orders that were marked served by KDS to notify the cashier
+      const newlyServedTables = (tableRes.data || []).filter((t) => {
+        const ord = t.activeOrder as any;
+        if (!ord || !ord._id) return false;
+        return ord.status === 'served' && !prevServedOrderIdsRef.current.has(ord._id);
+      });
+
+      if (!isFirstTableLoadRef.current && newlyServedTables.length > 0) {
+        for (const t of newlyServedTables) {
+          setKdsReadyAlert({
+            id: (t.activeOrder as any)._id,
+            name: `Table ${t.tableNumber}`,
+            tables: [String(t.tableNumber)],
+            timestamp: Date.now(),
+          });
+          playTwoBlinkAlertSound();
+          toast.success(`Food ready for Table ${t.tableNumber}! 🍽️`);
+        }
+      }
+
+      const nextServedSet = new Set<string>();
+      (tableRes.data || []).forEach((t) => {
+        const ord = t.activeOrder as any;
+        if (ord && ord._id && ord.status === 'served') {
+          nextServedSet.add(ord._id);
+        }
+      });
+      prevServedOrderIdsRef.current = nextServedSet;
+      isFirstTableLoadRef.current = false;
     } catch (err: any) {
       console.error('Failed to load POS data:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  // Auto-dismiss KDS Ready alert
+  useEffect(() => {
+    if (!kdsReadyAlert) return;
+    const timer = setTimeout(() => setKdsReadyAlert(null), 5500);
+    return () => clearTimeout(timer);
+  }, [kdsReadyAlert]);
+
+  // Real-time listener for KDS ready broadcasts to alert the Cashier with 2-blink sound
+  useEffect(() => {
+    const unsubscribe = listenToKdsReady((event) => {
+      setKdsReadyAlert(event);
+      playTwoBlinkAlertSound();
+      const vStr = event.variantName ? ` (${event.variantName})` : '';
+      toast.success(`${event.name}${vStr} is ready for pickup! 🍽️`);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -1402,6 +1457,50 @@ export default function TablesPage() {
 
   return (
     <AppLayout>
+      {/* High-Visibility Floating "KDS Food Ready / Cashier Notice" Notification Banner */}
+      {kdsReadyAlert && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in zoom-in-95 slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white px-4 sm:px-5 py-3.5 rounded-2xl shadow-2xl border-2 border-amber-300 ring-4 ring-amber-400/30 animate-[pulse_1.2s_ease-in-out_2]">
+            <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-300 flex items-center justify-center shrink-0">
+              <BellRing className="w-5 h-5 text-amber-300 animate-bounce" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-amber-950 bg-amber-300 px-2 py-0.5 rounded shadow-sm">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-600 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-700"></span>
+                  </span>
+                  Kitchen Ready
+                </span>
+                {kdsReadyAlert.tables && kdsReadyAlert.tables.length > 0 && (
+                  <span className="text-[11px] font-black text-amber-200 truncate">
+                    Tables: {kdsReadyAlert.tables.map((t) => `T${t}`).join(', ')}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm sm:text-base font-black text-white truncate mt-0.5">
+                {kdsReadyAlert.name}
+                {kdsReadyAlert.variantName && (
+                  <span className="text-amber-200 font-bold ml-1 text-xs sm:text-sm">
+                    ({kdsReadyAlert.variantName})
+                  </span>
+                )}
+                {' '}is ready for pickup! 🍽️
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setKdsReadyAlert(null)}
+              className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3 pb-8">
         {/* Toast / Notification Banner */}
         {noticeMessage && (

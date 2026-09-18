@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import { ordersApi, Order, KdsPrepNextItem, OrderItem } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { playTwoBlinkAlertSound, broadcastKdsReady } from '@/lib/audio-alerts';
 import Link from 'next/link';
 import {
   ChefHat,
@@ -83,6 +84,7 @@ export default function KitchenDisplayPage() {
   // Notification popup for "Item is ready"
   const [readyPopup, setReadyPopup] = useState<{
     id: string;
+    title?: string;
     name: string;
     variantName?: string;
     tables?: string[];
@@ -174,7 +176,30 @@ export default function KitchenDisplayPage() {
       setActionLoading(order._id);
       await ordersApi.bumpKdsOrder(order._id);
       setFulfilledHistory((prev) => [order, ...prev.slice(0, 19)]);
-      toast.success(`Ticket for Table ${typeof order.table === 'object' ? order.table.tableNumber : 'Order'} completed! 🎉`);
+      const tableStr = typeof order.table === 'object' ? order.table.tableNumber : 'Order';
+      const orderLabel = `Table ${tableStr}`;
+      toast.success(`Ticket for ${orderLabel} completed! 🎉`);
+
+      // 2-blink notification popup & sound alert for cashier notice
+      setReadyPopup({
+        id: String(Date.now()),
+        title: 'Ticket Ready',
+        name: `Order #${order.orderNumber || order._id.slice(-4)} (${orderLabel})`,
+        tables: [String(tableStr)],
+      });
+
+      if (soundEnabled) {
+        playTwoBlinkAlertSound();
+      }
+
+      broadcastKdsReady({
+        id: String(Date.now()),
+        name: `Order #${order.orderNumber || order._id.slice(-4)} (${orderLabel})`,
+        tables: [String(tableStr)],
+        tableNumber: String(tableStr),
+        timestamp: Date.now(),
+      });
+
       await loadKdsData(true);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to bump ticket');
@@ -214,17 +239,28 @@ export default function KitchenDisplayPage() {
       // Toast notification: "<item name> is ready"
       toast.success(`${itemDisplayName} is ready`);
 
-      // Prominent popup notification banner in KDS
+      // Prominent popup notification banner with 2-blink styling
       setReadyPopup({
         id: String(Date.now()),
+        title: 'Batch Ready',
         name: prepItem.name,
         variantName: prepItem.variantName,
         tables: prepItem.tables?.map((t) => t.tableNumber),
       });
 
+      // 2-blink audio alert to catch cashier notice
       if (soundEnabled) {
-        playKitchenChime();
+        playTwoBlinkAlertSound();
       }
+
+      // Broadcast to Cashier POS screens across tabs/monitors
+      broadcastKdsReady({
+        id: String(Date.now()),
+        name: prepItem.name,
+        variantName: prepItem.variantName,
+        tables: prepItem.tables?.map((t) => t.tableNumber),
+        timestamp: Date.now(),
+      });
 
       await loadKdsData(true);
     } catch (err: any) {
@@ -364,20 +400,24 @@ export default function KitchenDisplayPage() {
 
   return (
     <AppLayout>
-      {/* Prominent Floating "Item is ready" Notification Popup / Toast */}
+      {/* Prominent Floating "Food Ready / Cashier Notice" Notification Banner */}
       {readyPopup && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in zoom-in-95 slide-in-from-top-4 duration-300">
-          <div className="flex items-center gap-3.5 bg-emerald-600 dark:bg-emerald-700 text-white px-4 sm:px-5 py-3 rounded-2xl shadow-2xl border-2 border-emerald-400 ring-4 ring-emerald-500/20">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-5 h-5 text-white stroke-[2.5]" />
+          <div className="flex items-center gap-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white px-4 sm:px-5 py-3.5 rounded-2xl shadow-2xl border-2 border-amber-300 ring-4 ring-amber-400/40 animate-[pulse_1.2s_ease-in-out_2]">
+            <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-300 flex items-center justify-center shrink-0">
+              <BellRing className="w-5 h-5 text-amber-300 animate-bounce" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-100 bg-emerald-800/70 px-2 py-0.5 rounded">
-                  Batch Ready
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-amber-950 bg-amber-300 px-2 py-0.5 rounded shadow-sm">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-600 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-700"></span>
+                  </span>
+                  {readyPopup.title || 'Batch Ready'}
                 </span>
                 {readyPopup.tables && readyPopup.tables.length > 0 && (
-                  <span className="text-[11px] font-bold text-emerald-100 truncate">
+                  <span className="text-[11px] font-black text-amber-200 truncate">
                     Tables: {readyPopup.tables.map((t) => `T${t}`).join(', ')}
                   </span>
                 )}
@@ -385,11 +425,11 @@ export default function KitchenDisplayPage() {
               <p className="text-sm sm:text-base font-black text-white truncate mt-0.5">
                 {readyPopup.name}
                 {readyPopup.variantName && (
-                  <span className="text-emerald-100 font-bold ml-1 text-xs sm:text-sm">
+                  <span className="text-amber-200 font-bold ml-1 text-xs sm:text-sm">
                     ({readyPopup.variantName})
                   </span>
                 )}
-                {' '}is ready
+                {' '}is ready for pickup! 🍽️
               </p>
             </div>
             <button
@@ -465,14 +505,14 @@ export default function KitchenDisplayPage() {
               <span>{soundEnabled ? 'Chime ON' : 'Muted'}</span>
             </button>
 
-            {/* Chime Test Button */}
+            {/* 2-Blink Chime Test Button */}
             <button
               type="button"
-              onClick={() => playKitchenChime()}
+              onClick={() => playTwoBlinkAlertSound()}
               className="p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 cursor-pointer"
-              title="Test Kitchen Audio Chime"
+              title="Test 2-Blink Cashier Alert Sound"
             >
-              <BellRing className="w-4 h-4" />
+              <BellRing className="w-4 h-4 text-amber-500" />
             </button>
 
             {/* Live Sync Badge & Refresh Button */}
