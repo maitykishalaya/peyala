@@ -1757,7 +1757,7 @@ export default function TablesPage() {
                       </div>
 
                       {/* Tables Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5">
+                      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 sm:gap-4">
                         {secTables.map((table) => {
                           const isOccupied = table.status === 'occupied';
                           const isAvailable = table.status === 'available';
@@ -1792,7 +1792,7 @@ export default function TablesPage() {
                                 }
                               }}
                               className={cn(
-                                'rounded-xl p-2.5 sm:p-3 transition-all duration-150 cursor-pointer relative overflow-hidden flex flex-col justify-between group min-h-[110px] sm:min-h-[118px] select-none',
+                                'rounded-2xl p-3.5 sm:p-4 transition-all duration-150 cursor-pointer relative flex flex-col justify-between group min-h-[145px] sm:min-h-[155px] select-none shadow-xs hover:shadow-md',
                                 // Blank Table
                                 isAvailable &&
                                   'border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 hover:border-red-400 hover:shadow-md',
@@ -1870,37 +1870,62 @@ export default function TablesPage() {
                                   </div>
                                 </div>
 
-                                {/* Table Name & Capacity */}
-                                <div className="mt-1.5 text-center sm:text-left">
-                                  <h3 className="font-black text-sm sm:text-base tracking-tight leading-tight">
-                                    {table.tableNumber}
-                                  </h3>
+                                {/* Table Name, Capacity & Direct "View KOT" Button */}
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <h3 className="font-black text-base sm:text-lg tracking-tight leading-tight truncate">
+                                      {table.tableNumber}
+                                    </h3>
+                                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold">
+                                      {table.capacity || 4} Seats
+                                    </span>
+                                  </div>
+
+                                  {/* Dedicated Eye / View KOT button for running tables */}
+                                  {isOccupied && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleViewOrderDetails(table, e)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-gray-900/10 dark:bg-white/15 hover:bg-gray-900/20 dark:hover:bg-white/25 text-gray-900 dark:text-white font-extrabold text-xs flex items-center gap-1.5 shadow-2xs border border-black/10 dark:border-white/15 transition-all active:scale-95 cursor-pointer shrink-0"
+                                      title="View Whole KOT & Order Details"
+                                    >
+                                      <Eye className="w-4 h-4 text-gray-900 dark:text-white stroke-[2.5]" />
+                                      <span>View KOT</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
                               {/* Middle / Bottom Info */}
-                              <div className="mt-2 pt-1.5 border-t border-black/10 dark:border-white/10 flex items-center justify-between">
+                              <div className="mt-2.5 pt-2 border-t border-black/10 dark:border-white/10 flex items-center justify-between gap-2 flex-wrap">
                                 {isOccupied && order ? (
-                                  <span className="text-xs sm:text-sm font-black text-gray-950 dark:text-white">
-                                    {formatCurrency(order.total)}
-                                  </span>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-sm sm:text-base font-black text-gray-950 dark:text-white leading-tight">
+                                      {formatCurrency(order.total)}
+                                    </span>
+                                    {order.items && (
+                                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+                                        {order.items.filter((i) => i.status !== 'cancelled').length} items
+                                      </span>
+                                    )}
+                                  </div>
                                 ) : (
-                                  <span className="text-[10px] text-gray-400 font-semibold">
+                                  <span className="text-xs text-gray-400 font-semibold">
                                     Tap to order
                                   </span>
                                 )}
 
                                 {/* Bottom Quick Action Icons */}
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
                                   {/* If Billed: Green [ 💵 Settle ] button */}
                                   {isBilled && (
                                     <button
                                       type="button"
                                       onClick={(e) => handleViewOrderDetails(table, e)}
-                                      className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-xs transition-colors mr-0.5 cursor-pointer"
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
                                       title="Enter Payment Amount & Settle Table"
                                     >
-                                      <Wallet className="w-3 h-3" />
+                                      <Wallet className="w-3.5 h-3.5" />
                                       <span>Settle</span>
                                     </button>
                                   )}
@@ -1910,10 +1935,10 @@ export default function TablesPage() {
                                     <button
                                       type="button"
                                       onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                      className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-xs transition-colors mr-0.5 cursor-pointer"
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
                                       title="Generate & Print Customer Bill (Turns Table Green)"
                                     >
-                                      <Receipt className="w-3 h-3" />
+                                      <Receipt className="w-3.5 h-3.5" />
                                       <span>Bill</span>
                                     </button>
                                   )}
@@ -1924,19 +1949,19 @@ export default function TablesPage() {
                                       <button
                                         type="button"
                                         onClick={(e) => handleQuickMarkServed(table, e)}
-                                        className="px-1.5 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black flex items-center gap-0.5 shadow-xs transition-colors cursor-pointer"
+                                        className="px-2 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
                                         title="Optional: Mark Food as Served to Customer"
                                       >
-                                        <Utensils className="w-3 h-3" />
+                                        <Utensils className="w-3.5 h-3.5" />
                                         <span>Served</span>
                                       </button>
                                       <button
                                         type="button"
                                         onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
                                         title="Generate & Print Customer Bill directly (Skip Food Served)"
                                       >
-                                        <Receipt className="w-3 h-3" />
+                                        <Receipt className="w-3.5 h-3.5" />
                                         <span>Bill</span>
                                       </button>
                                     </>
@@ -1949,10 +1974,10 @@ export default function TablesPage() {
                                         <button
                                           type="button"
                                           onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                          className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                          className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
                                           title="Reprint Customer Bill"
                                         >
-                                          <Printer className="w-3.5 h-3.5" />
+                                          <Printer className="w-4 h-4" />
                                         </button>
                                       )}
 
@@ -1960,20 +1985,20 @@ export default function TablesPage() {
                                       <button
                                         type="button"
                                         onClick={(e) => handleOpenMoveModal(table, e)}
-                                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                        className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
                                         title="Move KOT / Transfer Table"
                                       >
-                                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                                        <ArrowRightLeft className="w-4 h-4" />
                                       </button>
 
                                       {/* View Items (Eye) Icon */}
                                       <button
                                         type="button"
                                         onClick={(e) => handleViewOrderDetails(table, e)}
-                                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200"
+                                        className="p-1.5 rounded-lg bg-black/10 dark:bg-white/15 hover:bg-black/20 dark:hover:bg-white/25 text-gray-800 dark:text-gray-100 transition-colors cursor-pointer flex items-center gap-1"
                                         title="View Ordered Items & Settle Bill"
                                       >
-                                        <Eye className="w-3.5 h-3.5" />
+                                        <Eye className="w-4 h-4 stroke-[2.5]" />
                                       </button>
                                     </>
                                   )}
@@ -1985,10 +2010,10 @@ export default function TablesPage() {
                                         e.stopPropagation();
                                         openEditTable(table);
                                       }}
-                                      className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded"
+                                      className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg cursor-pointer"
                                       title="Edit Table"
                                     >
-                                      <Pencil className="w-3 h-3" />
+                                      <Pencil className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                 </div>
