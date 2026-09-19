@@ -11,7 +11,7 @@ import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
   Menu, X, LogOut, ChevronRight, Moon, Sun, Scale, CalendarCheck,
-  UtensilsCrossed, ChefHat, ShieldAlert, Trash2
+  UtensilsCrossed, ChefHat, ShieldAlert, Trash2, BookOpen
 } from 'lucide-react';
 import DiningTableIcon from '@/components/ui/DiningTableIcon';
 
@@ -25,6 +25,7 @@ const NAV = [
   { href: '/purchases', label: 'Purchases', icon: ShoppingCart },
   { href: '/suppliers', label: 'Suppliers', icon: Users },
   { href: '/sales', label: 'Sales', icon: TrendingUp },
+  { href: '/dues', label: 'Customer Dues', icon: BookOpen },
   { href: '/payments', label: 'Payments', icon: ArrowUpRight },
   { href: '/wastage', label: 'Wastage', icon: Trash2 },
   { href: '/expense-leak-detector', label: 'Leak Detector', icon: ShieldAlert },

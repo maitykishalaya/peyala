@@ -19,6 +19,7 @@
 
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { balanceSheetApi, accountsApi } from '@/lib/api';
@@ -27,7 +28,7 @@ import { toast } from '@/lib/toast';
 import {
   Scale, Plus, Pencil, Trash2, RefreshCw,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp, History, IndianRupee
+  ChevronDown, ChevronUp, History, IndianRupee, Users, ArrowRight, BookOpen
 } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_balancesheet_cache_v1';
@@ -250,6 +251,7 @@ export default function BalanceSheetPage() {
 
   // Shorthand references for cleaner JSX
   const assets = bs?.assets || { accounts: [], total: 0 };
+  const customerDues = bs?.customerDues || { total: 0, count: 0 };
   const liabilities = bs?.liabilities || { gst: 0, supplierDues: { total: 0, breakdown: [] }, custom: [], total: 0 };
   const equity = bs?.equity || { value: 0, isPositive: true };
   const gstLog = bs?.gstLog || [];
@@ -292,12 +294,33 @@ export default function BalanceSheetPage() {
         </div>
 
         {/* ── Summary Bar ──────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-          {/* Total Assets */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {/* Total Assets (Bank & Cash) */}
           <div className="card p-6 sm:p-7 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border-blue-100 dark:border-blue-900/30">
-            <p className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">Total Assets</p>
+            <p className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">Cash & Bank Accounts</p>
             <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-blue-700 dark:text-blue-300">{formatCurrency(assets.total)}</p>
             <p className="text-xs sm:text-sm text-blue-400 mt-1.5">{assets.accounts.length} account{assets.accounts.length !== 1 ? 's' : ''} included</p>
+          </div>
+
+          {/* Customer Dues (Receivable) */}
+          <div className="card p-6 sm:p-7 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/10 dark:to-orange-900/10 border-amber-200 dark:border-amber-900/30 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs sm:text-sm font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Customer Dues (Receivable)</p>
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">Khata</span>
+              </div>
+              <p className="text-3xl sm:text-4xl lg:text-5xl font-black text-amber-700 dark:text-amber-400">{formatCurrency(customerDues.total)}</p>
+              <p className="text-xs sm:text-sm text-amber-600/80 dark:text-amber-400/80 mt-1.5">
+                {customerDues.count} customer{customerDues.count !== 1 ? 's' : ''} with pending dues
+              </p>
+            </div>
+            <Link
+              href="/dues"
+              className="mt-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+            >
+              <span>View Due Report</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
 
           {/* Total Liabilities */}
@@ -378,8 +401,42 @@ export default function BalanceSheetPage() {
 
                 {/* Total row */}
                 <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 mt-2">
-                  <span className="text-base font-bold text-blue-700 dark:text-blue-300">Total Assets</span>
+                  <span className="text-base font-bold text-blue-700 dark:text-blue-300">Total Liquid Accounts</span>
                   <span className="text-lg sm:text-xl font-extrabold text-blue-700 dark:text-blue-300">{formatCurrency(assets.total)}</span>
+                </div>
+
+                {/* Customer Dues (Accounts Receivable) Box */}
+                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/60 mt-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-800 flex items-center justify-center text-amber-700 dark:text-amber-300">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold text-amber-900 dark:text-amber-200">Customer Dues (Receivable)</span>
+                        </div>
+                        <p className="text-xs text-amber-700/80 dark:text-amber-400">
+                          {customerDues.count} regular customer{customerDues.count !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-base sm:text-lg font-black text-amber-800 dark:text-amber-300">
+                      {formatCurrency(customerDues.total)}
+                    </span>
+                  </div>
+                  <div className="mt-3 pt-2.5 border-t border-amber-200/80 dark:border-amber-800/40 flex items-center justify-between">
+                    <span className="text-xs text-amber-700/90 dark:text-amber-300/80">
+                      Khata balances to collect
+                    </span>
+                    <Link
+                      href="/dues"
+                      className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-900 dark:text-amber-200 hover:underline"
+                    >
+                      <span>Open Due Report</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 </div>
 
                 {bs?.showPurchaseGstPaid && (

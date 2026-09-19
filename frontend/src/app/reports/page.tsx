@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import { reportsApi } from '@/lib/api';
 import { ordersApi, menuApi, MenuItem } from '@/lib/pos-api';
@@ -11,7 +12,7 @@ import {
   Download, Search, Filter, ChevronDown, ChevronUp, Clock,
   Receipt, CheckCircle, AlertTriangle, Wallet, Smartphone,
   CreditCard, Building2, UtensilsCrossed, RefreshCw,
-  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers, EyeOff
+  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers, EyeOff, BookOpen
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
@@ -567,6 +568,9 @@ export default function ReportsPage() {
             <button onClick={() => setTab('sales')} className={tab === 'sales' ? 'btn-primary' : 'btn-secondary'}>Detailed Sales Report</button>
             <button onClick={() => setTab('daily')} className={tab === 'daily' ? 'btn-primary' : 'btn-secondary'}>Daily Report</button>
             <button onClick={() => setTab('pnl')} className={tab === 'pnl' ? 'btn-primary' : 'btn-secondary'}>P&L Statement</button>
+            <Link href="/dues" className="btn-secondary text-xs sm:text-sm py-2 px-3 flex items-center gap-1.5 text-amber-700 dark:text-amber-400 hover:border-amber-400">
+              <BookOpen className="w-3.5 h-3.5" /> Customer Dues
+            </Link>
           </div>
         </div>
 
@@ -1878,8 +1882,11 @@ export default function ReportsPage() {
                       <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
                         Settlement Payment Method
                       </label>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {(['cash', 'upi', 'card', 'other', 'part'] as const).map((m) => (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {(editPaymentMethod === 'other'
+                          ? (['cash', 'upi', 'card', 'part', 'other'] as const)
+                          : (['cash', 'upi', 'card', 'part'] as const)
+                        ).map((m) => (
                           <button
                             key={m}
                             type="button"
@@ -1937,7 +1944,7 @@ export default function ReportsPage() {
                           Part Payment Mode Selected
                         </div>
                         <p className="text-[11px] mt-0.5">
-                          Allocate split amounts below across Cash, UPI, Card, and Other.
+                          Allocate split amounts below across Cash, UPI, and Card.
                         </p>
                       </div>
                     )}
@@ -1956,7 +1963,7 @@ export default function ReportsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      <div className={`grid grid-cols-1 sm:grid-cols-2 ${numEditPartOther > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-2`}>
                         {/* Cash */}
                         <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
                           <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -2048,34 +2055,36 @@ export default function ReportsPage() {
                         </div>
 
                         {/* Other */}
-                        <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
-                          <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
-                            <span className="flex items-center gap-1">
-                              <Building2 className="w-3.5 h-3.5 text-purple-600" /> Other / Bank
-                            </span>
-                            {editPartDifference > 0 && numEditPartOther === 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setEditPartOther(String(editPartDifference))}
-                                className="text-[10px] text-brand-600 hover:underline font-bold"
-                              >
-                                + Fill
-                              </button>
-                            )}
+                        {numEditPartOther > 0 && (
+                          <div className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 space-y-1">
+                            <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-300">
+                              <span className="flex items-center gap-1">
+                                <Building2 className="w-3.5 h-3.5 text-purple-600" /> Other / Bank
+                              </span>
+                              {editPartDifference > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditPartOther(String(editPartDifference))}
+                                  className="text-[10px] text-brand-600 hover:underline font-bold"
+                                >
+                                  + Fill
+                                </button>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={editPartOther}
+                                onChange={(e) => setEditPartOther(e.target.value)}
+                                placeholder="0.00"
+                                className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
+                              />
+                            </div>
                           </div>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">₹</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={editPartOther}
-                              onChange={(e) => setEditPartOther(e.target.value)}
-                              placeholder="0.00"
-                              className="input pl-6 py-1 text-xs font-bold w-full h-8 bg-white dark:bg-gray-900"
-                            />
-                          </div>
-                        </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] px-2.5 py-1 rounded bg-gray-100 dark:bg-gray-800">

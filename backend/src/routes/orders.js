@@ -5,6 +5,7 @@ const MenuItem = require('../models/MenuItem');
 const SalesEntry = require('../models/SalesEntry');
 const Account = require('../models/Account');
 const BalanceSheet = require('../models/BalanceSheet');
+const Customer = require('../models/Customer');
 const { auth, adminOnly, managerOrAdmin, staffOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
@@ -16,6 +17,7 @@ const populateOrder = (query) => {
   return query
     .populate('table', 'tableNumber capacity status')
     .populate('items.menuItem', 'name price isVeg isAvailable category')
+    .populate('customer', 'name phone totalDue')
     .populate('createdBy', 'name');
 };
 
@@ -176,6 +178,57 @@ router.get('/pending-bills', async (req, res) => {
   }
 });
 
+// Helper to determine effective priority time for an item on an order
+const getItemEffectiveTime = (order, item) => {
+  if (item.effectiveTime) return new Date(item.effectiveTime);
+
+  const orderCreated = new Date(order.createdAt);
+  if (item.createdAt) {
+    const itemCreated = new Date(item.createdAt);
+    // If item was created more than 45 seconds after the initial order creation:
+    if (itemCreated.getTime() - orderCreated.getTime() > 45000) {
+      // Check if food was already served before this item's creation
+      if (order.foodServedAt && new Date(order.foodServedAt) <= itemCreated) {
+        return itemCreated;
+      }
+      // Check prior items (items created before this item)
+      const priorItems = (order.items || []).filter(
+        (i) => i._id && String(i._id) !== String(item._id) && i.createdAt && new Date(i.createdAt) < itemCreated
+      );
+      // If all prior items were already served or cancelled, this is a fresh round
+      if (priorItems.length > 0 && priorItems.every((i) => i.status === 'served' || i.status === 'cancelled')) {
+        return itemCreated;
+      }
+      // If any prior items are still unserved (pending/preparing), inherit the oldest unserved priority time
+      const unservedPrior = priorItems.filter((i) => i.status === 'pending' || i.status === 'preparing');
+      if (unservedPrior.length > 0) {
+        const oldest = unservedPrior.reduce((min, it) => {
+          const t = getItemEffectiveTime(order, it);
+          return t < min ? t : min;
+        }, getItemEffectiveTime(order, unservedPrior[0]));
+        return oldest;
+      }
+      return itemCreated;
+    }
+  }
+  return orderCreated;
+};
+
+// Helper to recalculate order.effectiveActiveTime from remaining unserved items
+const updateOrderActiveTimestamp = (order) => {
+  const unserved = (order.items || []).filter(
+    (i) => i.status === 'pending' || i.status === 'preparing'
+  );
+  if (unserved.length === 0) {
+    order.effectiveActiveTime = null;
+  } else {
+    order.effectiveActiveTime = unserved.reduce((oldest, it) => {
+      const t = getItemEffectiveTime(order, it);
+      return t < oldest ? t : oldest;
+    }, getItemEffectiveTime(order, unserved[0]));
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────
 // GET /api/orders/kds/active — Kitchen Display System Active Feed
 // Returns active cooking orders and smart "Prep Next" aggregated items
@@ -185,13 +238,42 @@ router.get('/kds/active', async (req, res) => {
     const orders = await populateOrder(
       Order.find({
         status: { $in: ['open', 'preparing', 'served', 'billed'] },
-      }).sort({ createdAt: 1 })
+      })
     );
 
     // Filter out orders that have no active items left (all cancelled or already completed)
     const activeOrders = orders.filter((o) => {
       if (!Array.isArray(o.items) || o.items.length === 0) return false;
       return o.items.some((i) => i.status !== 'cancelled');
+    });
+
+    // Compute effectiveActiveTime for each order and sort active orders
+    for (const order of activeOrders) {
+      const unserved = (order.items || []).filter(
+        (i) => i.status === 'pending' || i.status === 'preparing'
+      );
+      if (unserved.length > 0) {
+        const oldestActiveTime = unserved.reduce((min, it) => {
+          const t = getItemEffectiveTime(order, it);
+          return t < min ? t : min;
+        }, getItemEffectiveTime(order, unserved[0]));
+        order._doc.effectiveActiveTime = oldestActiveTime;
+      } else {
+        order._doc.effectiveActiveTime = order.foodServedAt || order.createdAt;
+      }
+    }
+
+    // Sort activeOrders: orders with unserved items first (sorted by oldest active waiting time), then served orders
+    activeOrders.sort((a, b) => {
+      const aUnserved = (a.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
+      const bUnserved = (b.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
+
+      if (aUnserved && !bUnserved) return -1;
+      if (!aUnserved && bUnserved) return 1;
+
+      const aTime = new Date(a._doc.effectiveActiveTime || a.createdAt).getTime();
+      const bTime = new Date(b._doc.effectiveActiveTime || b.createdAt).getTime();
+      return aTime - bTime;
     });
 
     // Compute "Prep Next" (Smart Item-wise Aggregation)
@@ -204,11 +286,11 @@ router.get('/kds/active', async (req, res) => {
           ? order.table.tableNumber
           : 'Takeaway'
         : 'Takeaway';
-      const orderCreatedAt = order.createdAt;
 
       for (const item of order.items) {
         if (item.status === 'cancelled' || item.status === 'served') continue;
 
+        const itemPriorityTime = getItemEffectiveTime(order, item);
         const menuItemId = item.menuItem
           ? typeof item.menuItem === 'object'
             ? String(item.menuItem._id)
@@ -216,6 +298,19 @@ router.get('/kds/active', async (req, res) => {
           : item.name;
         const variantName = item.variant?.name || '';
         const key = `${menuItemId}__${variantName}`;
+
+        const tableEntry = {
+          orderId: order._id,
+          itemId: item._id,
+          tableNumber,
+          tokenNumber: order.orderNumber,
+          quantity: item.quantity,
+          status: item.status,
+          notes: item.notes || '',
+          createdAt: itemPriorityTime,
+          orderedAt: item.createdAt || order.createdAt,
+          effectiveTime: itemPriorityTime,
+        };
 
         const existing = prepMap.get(key);
         if (!existing) {
@@ -235,48 +330,32 @@ router.get('/kds/active', async (req, res) => {
             totalQuantity: item.quantity,
             pendingQuantity: item.status === 'pending' ? item.quantity : 0,
             preparingQuantity: item.status === 'preparing' ? item.quantity : 0,
-            oldestOrderAt: orderCreatedAt,
+            oldestOrderAt: itemPriorityTime,
             notes: item.notes ? [item.notes] : [],
-            tables: [
-              {
-                orderId: order._id,
-                itemId: item._id,
-                tableNumber,
-                tokenNumber: order.orderNumber,
-                quantity: item.quantity,
-                status: item.status,
-                notes: item.notes || '',
-                createdAt: orderCreatedAt,
-              },
-            ],
+            tables: [tableEntry],
           });
         } else {
           existing.totalQuantity += item.quantity;
           if (item.status === 'pending') existing.pendingQuantity += item.quantity;
           if (item.status === 'preparing') existing.preparingQuantity += item.quantity;
-          if (new Date(orderCreatedAt) < new Date(existing.oldestOrderAt)) {
-            existing.oldestOrderAt = orderCreatedAt;
+          if (new Date(itemPriorityTime) < new Date(existing.oldestOrderAt)) {
+            existing.oldestOrderAt = itemPriorityTime;
           }
           if (item.notes && !existing.notes.includes(item.notes)) {
             existing.notes.push(item.notes);
           }
-          existing.tables.push({
-            orderId: order._id,
-            itemId: item._id,
-            tableNumber,
-            tokenNumber: order.orderNumber,
-            quantity: item.quantity,
-            status: item.status,
-            notes: item.notes || '',
-            createdAt: orderCreatedAt,
-          });
+          existing.tables.push(tableEntry);
         }
       }
     }
 
-    const prepNext = Array.from(prepMap.values()).sort(
-      (a, b) => new Date(a.oldestOrderAt).getTime() - new Date(b.oldestOrderAt).getTime()
-    );
+    const prepNext = Array.from(prepMap.values())
+      .map((p) => {
+        // Sort tables waiting for this item by priority timestamp (oldest waiting table first)
+        p.tables.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        return p;
+      })
+      .sort((a, b) => new Date(a.oldestOrderAt).getTime() - new Date(b.oldestOrderAt).getTime());
 
     res.json({ orders: activeOrders, prepNext });
   } catch (err) {
@@ -322,6 +401,7 @@ router.post('/kds/batch-bump', async (req, res) => {
             order.status = 'served';
           }
         }
+        updateOrderActiveTimestamp(order);
         await order.save();
         updatedOrdersCount++;
       }
@@ -366,6 +446,7 @@ router.patch('/:id/items/:itemId/kds-status', async (req, res) => {
       order.status = 'preparing';
     }
 
+    updateOrderActiveTimestamp(order);
     await order.save();
     const populated = await populateOrder(Order.findById(order._id));
     res.json(populated);
@@ -396,6 +477,7 @@ router.post('/:id/kds-bump', async (req, res) => {
     if (!['billed', 'paid', 'cancelled'].includes(order.status)) {
       order.status = 'served';
     }
+    order.effectiveActiveTime = null;
 
     await order.save();
     const populated = await populateOrder(Order.findById(order._id));
@@ -488,6 +570,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
 
       const finalUnitPrice = basePrice + addonsTotal;
 
+      const itemNow = new Date();
       snapshottedItems.push({
         menuItem: mi._id,
         name: mi.name,
@@ -498,6 +581,9 @@ router.post('/', staffOrAdmin, async (req, res) => {
         variant: variantObj,
         selectedAddons: validSelectedAddons,
         status: 'pending',
+        roundNumber: 1,
+        effectiveTime: itemNow,
+        createdAt: itemNow,
       });
     }
 
@@ -509,6 +595,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
     const orderNumber = 4500 + orderCount + 1;
 
     const isAutoPrint = shouldPrint !== false;
+    const orderNow = new Date();
     const initialKotRound = {
       roundNumber: 1,
       roundTag: '[INITIAL ORDER]',
@@ -521,7 +608,8 @@ router.post('/', staffOrAdmin, async (req, res) => {
       })),
       printed: !isAutoPrint,
       printedAt: !isAutoPrint ? new Date() : null,
-      createdAt: new Date(),
+      createdAt: orderNow,
+      effectiveTime: orderNow,
     };
 
     const order = await Order.create({
@@ -536,6 +624,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
       discount: 0,
       total: totals.total,
       createdBy: req.user._id,
+      effectiveActiveTime: orderNow,
     });
 
     // Mark table as occupied and assign activeOrder
@@ -579,6 +668,30 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     const itemIds = items.map((i) => i.menuItemId);
     const menuItems = await MenuItem.find({ _id: { $in: itemIds } });
     const menuItemMap = new Map(menuItems.map((m) => [m._id.toString(), m]));
+
+    const now = new Date();
+
+    // Check if table currently has unserved items (pending or preparing)
+    const unservedPriorItems = (order.items || []).filter(
+      (i) => i.status === 'pending' || i.status === 'preparing'
+    );
+    const hasUnservedPriorItems = unservedPriorItems.length > 0;
+
+    // If order has unserved items, new round inherits the oldest unserved item's priority time.
+    // If all previous items were already served, this round starts fresh with priority timestamp 'now'.
+    let effectivePriorityTime = now;
+    if (hasUnservedPriorItems) {
+      const oldestPriorTime = unservedPriorItems.reduce((oldest, it) => {
+        const t = getItemEffectiveTime(order, it);
+        return t < oldest ? t : oldest;
+      }, getItemEffectiveTime(order, unservedPriorItems[0]));
+      effectivePriorityTime = oldestPriorTime;
+    } else {
+      effectivePriorityTime = now;
+    }
+
+    const nextKotCount = (order.kotCount || 1) + 1;
+    order.kotCount = nextKotCount;
 
     const newRoundItems = [];
     for (const it of items) {
@@ -629,6 +742,9 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
         variant: variantObj,
         selectedAddons: validSelectedAddons,
         status: 'pending',
+        roundNumber: nextKotCount,
+        effectiveTime: effectivePriorityTime,
+        createdAt: now,
       };
       order.items.push(itemObj);
       newRoundItems.push(itemObj);
@@ -637,15 +753,13 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     // If order was billed or served, adding items re-opens it for kitchen preparation
     if (['billed', 'served'].includes(order.status)) {
       order.status = 'open';
+      order.foodServedAt = null;
     }
 
     const totals = Order.calcTotals(order.items, order.discount);
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
     order.total = totals.total;
-
-    const nextKotCount = (order.kotCount || 1) + 1;
-    order.kotCount = nextKotCount;
 
     if (!Array.isArray(order.kotRounds)) {
       order.kotRounds = [];
@@ -664,8 +778,11 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
       })),
       printed: !isAutoPrint,
       printedAt: !isAutoPrint ? new Date() : null,
-      createdAt: new Date(),
+      createdAt: now,
+      effectiveTime: effectivePriorityTime,
     });
+
+    order.effectiveActiveTime = effectivePriorityTime;
 
     await order.save();
 
@@ -922,7 +1039,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Cannot pay a cancelled order' });
     }
 
-    const validMethods = ['cash', 'card', 'upi', 'other', 'part'];
+    const validMethods = ['cash', 'card', 'upi', 'due', 'other', 'part'];
     if (!validMethods.includes(paymentMethod)) {
       return res.status(400).json({ message: `Invalid payment method "${paymentMethod}". Allowed: ${validMethods.join(', ')}` });
     }
@@ -930,15 +1047,16 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     // Determine breakdown and settled/waived amounts
     let finalSettled = order.total;
     let waivedAmount = 0;
-    let orderPaymentBreakdown = { cash: 0, upi: 0, card: 0, other: 0 };
+    let orderPaymentBreakdown = { cash: 0, upi: 0, card: 0, due: 0, other: 0 };
 
     if (paymentMethod === 'part') {
       const pb = req.body.paymentBreakdown || {};
       const cashPart = Math.max(0, Math.round((Number(pb.cash) || 0) * 100) / 100);
       const upiPart = Math.max(0, Math.round((Number(pb.upi) || 0) * 100) / 100);
       const cardPart = Math.max(0, Math.round((Number(pb.card) || 0) * 100) / 100);
+      const duePart = Math.max(0, Math.round((Number(pb.due) || 0) * 100) / 100);
       const otherPart = Math.max(0, Math.round((Number(pb.other) || 0) * 100) / 100);
-      const sumParts = Math.round((cashPart + upiPart + cardPart + otherPart) * 100) / 100;
+      const sumParts = Math.round((cashPart + upiPart + cardPart + duePart + otherPart) * 100) / 100;
 
       if (sumParts <= 0) {
         return res.status(400).json({ message: 'Part payment requires at least one positive payment amount.' });
@@ -950,7 +1068,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       } else {
         waivedAmount = 0;
       }
-      orderPaymentBreakdown = { cash: cashPart, upi: upiPart, card: cardPart, other: otherPart };
+      orderPaymentBreakdown = { cash: cashPart, upi: upiPart, card: cardPart, due: duePart, other: otherPart };
     } else {
       if (settlementAmount !== undefined && settlementAmount !== null && String(settlementAmount).trim() !== '') {
         const parsed = Number(settlementAmount);
@@ -968,7 +1086,47 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       if (paymentMethod === 'cash') orderPaymentBreakdown.cash = finalSettled;
       else if (paymentMethod === 'upi') orderPaymentBreakdown.upi = finalSettled;
       else if (paymentMethod === 'card') orderPaymentBreakdown.card = finalSettled;
+      else if (paymentMethod === 'due') orderPaymentBreakdown.due = finalSettled;
       else orderPaymentBreakdown.other = finalSettled;
+    }
+
+    // Process Customer Due / Khata if any due portion is present
+    const duePortion = paymentMethod === 'due' ? finalSettled : (orderPaymentBreakdown.due || 0);
+    if (duePortion > 0) {
+      const customerInfo = req.body.customerInfo || {};
+      const custName = String(customerInfo.name || req.body.customerName || '').trim();
+      const custPhone = String(customerInfo.phone || req.body.customerPhone || '').trim();
+
+      if (!custName || !custPhone) {
+        return res.status(400).json({ message: 'Customer Name and Phone Number are required to settle as Due / Khata.' });
+      }
+
+      // Upsert customer by unique phone number
+      let customerDoc = await Customer.findOne({ phone: custPhone });
+      if (!customerDoc) {
+        customerDoc = await Customer.create({
+          name: custName,
+          phone: custPhone,
+          totalDue: duePortion,
+          totalOrders: 1,
+          lastVisit: new Date(),
+        });
+      } else {
+        if (custName && customerDoc.name !== custName) {
+          customerDoc.name = custName;
+        }
+        customerDoc.totalDue = Math.round(((customerDoc.totalDue || 0) + duePortion) * 100) / 100;
+        customerDoc.totalOrders = (customerDoc.totalOrders || 0) + 1;
+        customerDoc.lastVisit = new Date();
+        await customerDoc.save();
+      }
+
+      order.customer = customerDoc._id;
+      order.customerName = customerDoc.name;
+      order.customerPhone = customerDoc.phone;
+      order.dueAmount = duePortion;
+      order.dueSettled = false;
+      order.dueSettledAmount = 0;
     }
 
     // 1. Upsert TODAY's single SalesEntry using Indian Standard Time calendar range
@@ -978,7 +1136,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     if (!salesEntry) {
       salesEntry = new SalesEntry({
         date: canonicalDate,
-        paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0 },
+        paymentBreakdown: { cash: 0, upi: 0, card: 0, due: 0, bankTransfer: 0 },
         outletSales: 0,
         totalRevenue: 0,
         createdBy: req.user._id,
@@ -986,13 +1144,14 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     }
 
     if (!salesEntry.paymentBreakdown) {
-      salesEntry.paymentBreakdown = { cash: 0, upi: 0, card: 0, bankTransfer: 0 };
+      salesEntry.paymentBreakdown = { cash: 0, upi: 0, card: 0, due: 0, bankTransfer: 0 };
     }
 
     // Accumulate the collected breakdown amounts into the single daily row
     salesEntry.paymentBreakdown.cash = (salesEntry.paymentBreakdown.cash || 0) + orderPaymentBreakdown.cash;
     salesEntry.paymentBreakdown.upi = (salesEntry.paymentBreakdown.upi || 0) + orderPaymentBreakdown.upi;
     salesEntry.paymentBreakdown.card = (salesEntry.paymentBreakdown.card || 0) + orderPaymentBreakdown.card;
+    salesEntry.paymentBreakdown.due = (salesEntry.paymentBreakdown.due || 0) + (orderPaymentBreakdown.due || 0);
     salesEntry.paymentBreakdown.bankTransfer = (salesEntry.paymentBreakdown.bankTransfer || 0) + orderPaymentBreakdown.other;
 
     const { outletSales, totalRevenue } = SalesEntry.calcTotals(salesEntry);
@@ -1049,7 +1208,6 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     order.paymentBreakdown = orderPaymentBreakdown;
     order.settledAmount = finalSettled;
     order.waivedAmount = waivedAmount;
-    order.billPrinted = false;
 
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
@@ -1956,23 +2114,24 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       : Math.min(newSubtotal, discountValue);
 
     // 4. Grand Total & Settlement recalculation
-    const newTotal = Math.max(0, Math.round((newSubtotal - newDiscount + newTaxAmount) * 100) / 100);
+    const newTotal = Math.max(0, Math.round(newSubtotal - newDiscount + newTaxAmount));
 
-    const validMethods = ['cash', 'card', 'upi', 'other', 'part'];
+    const validMethods = ['cash', 'card', 'upi', 'due', 'other', 'part'];
     const newMethod = req.body.paymentMethod && validMethods.includes(req.body.paymentMethod)
       ? req.body.paymentMethod.toLowerCase()
       : oldMethod;
 
     let newSettled = newTotal;
-    let newCash = 0, newUpi = 0, newCard = 0, newOther = 0;
+    let newCash = 0, newUpi = 0, newCard = 0, newDue = 0, newOther = 0;
 
     if (newMethod === 'part') {
       const pb = req.body.paymentBreakdown || {};
       newCash = Math.max(0, Math.round((Number(pb.cash) || 0) * 100) / 100);
       newUpi = Math.max(0, Math.round((Number(pb.upi) || 0) * 100) / 100);
       newCard = Math.max(0, Math.round((Number(pb.card) || 0) * 100) / 100);
+      newDue = Math.max(0, Math.round((Number(pb.due) || 0) * 100) / 100);
       newOther = Math.max(0, Math.round((Number(pb.other) || 0) * 100) / 100);
-      newSettled = Math.round((newCash + newUpi + newCard + newOther) * 100) / 100;
+      newSettled = Math.round((newCash + newUpi + newCard + newDue + newOther) * 100) / 100;
     } else {
       if (req.body.settlementAmount !== undefined && req.body.settlementAmount !== null && String(req.body.settlementAmount).trim() !== '') {
         const parsed = Number(req.body.settlementAmount);
@@ -1983,6 +2142,7 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       if (newMethod === 'cash') newCash = newSettled;
       else if (newMethod === 'upi') newUpi = newSettled;
       else if (newMethod === 'card') newCard = newSettled;
+      else if (newMethod === 'due') newDue = newSettled;
       else newOther = newSettled;
     }
 
@@ -2053,7 +2213,7 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
     order.settledAmount = newSettled;
     order.waivedAmount = newWaived;
     order.paymentMethod = newMethod;
-    order.paymentBreakdown = { cash: newCash, upi: newUpi, card: newCard, other: newOther };
+    order.paymentBreakdown = { cash: newCash, upi: newUpi, card: newCard, due: newDue, other: newOther };
     await order.save();
 
     // 9. Audit Logging

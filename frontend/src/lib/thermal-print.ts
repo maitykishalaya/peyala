@@ -87,7 +87,7 @@ export interface BillPrintData {
   settledAmount?: number;
   waivedAmount?: number;
   paymentMethod?: string;
-  paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number };
+  paymentBreakdown?: { cash?: number; upi?: number; card?: number; due?: number; other?: number };
   isPaid?: boolean;
 }
 
@@ -352,6 +352,9 @@ export function generateBillHtml(data: BillPrintData): string {
 
   // 5% GST split: 2.5% CGST + 2.5% SGST
   const halfTax = Math.round((data.taxAmount / 2) * 100) / 100;
+  const roundedBillTotal = Math.round(data.total);
+  const rawCalculatedTotal = data.subtotal + halfTax * 2 - (data.discount || 0);
+  const roundOff = Math.round((roundedBillTotal - rawCalculatedTotal) * 100) / 100;
 
   const rows = data.items
     .map((item, idx) => {
@@ -546,6 +549,12 @@ export function generateBillHtml(data: BillPrintData): string {
               <td style="text-align: right; color: #111;">-&#8377;${Number(data.discount).toFixed(2)}</td>
             </tr>
           ` : ''}
+          ${Math.abs(roundOff) >= 0.01 ? `
+            <tr>
+              <td>Round Off</td>
+              <td style="text-align: right;">${roundOff > 0 ? `+&#8377;${roundOff.toFixed(2)}` : `-&#8377;${Math.abs(roundOff).toFixed(2)}`}</td>
+            </tr>
+          ` : ''}
         </table>
 
         <div class="divider-solid"></div>
@@ -553,7 +562,7 @@ export function generateBillHtml(data: BillPrintData): string {
         <!-- Total Payable -->
         <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 900; margin: 4px 0;">
           <span>${(data.waivedAmount || 0) > 0 ? 'Total Bill Amount:' : 'Total Payable Amount:'}</span>
-          <span>&#8377;${data.total.toFixed(2)}</span>
+          <span>&#8377;${roundedBillTotal.toFixed(2)}</span>
         </div>
 
         ${(data.waivedAmount || 0) > 0 ? `
@@ -571,7 +580,7 @@ export function generateBillHtml(data: BillPrintData): string {
           <div style="display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-bottom: 2px;">
             <span>Payment Mode:</span>
             <span style="font-weight: bold; text-transform: uppercase;">
-              ${data.paymentMethod === 'part' ? 'PART PAYMENT' : data.paymentMethod} (PAID)
+              ${data.paymentMethod === 'due' ? 'DUE / KHATA' : data.paymentMethod === 'part' ? 'PART PAYMENT' : `${data.paymentMethod} (PAID)`}
             </span>
           </div>
           ${data.paymentMethod === 'part' && data.paymentBreakdown ? `
@@ -580,8 +589,18 @@ export function generateBillHtml(data: BillPrintData): string {
                 data.paymentBreakdown.cash ? `Cash: &#8377;${Number(data.paymentBreakdown.cash).toFixed(2)}` : null,
                 data.paymentBreakdown.upi ? `UPI: &#8377;${Number(data.paymentBreakdown.upi).toFixed(2)}` : null,
                 data.paymentBreakdown.card ? `Card: &#8377;${Number(data.paymentBreakdown.card).toFixed(2)}` : null,
+                data.paymentBreakdown.due ? `Due: &#8377;${Number(data.paymentBreakdown.due).toFixed(2)}` : null,
                 data.paymentBreakdown.other ? `Other: &#8377;${Number(data.paymentBreakdown.other).toFixed(2)}` : null,
               ].filter(Boolean).join(' | ')}
+            </div>
+          ` : ''}
+          ${(data.paymentMethod === 'due' || (data.paymentBreakdown && (data.paymentBreakdown.due || 0) > 0)) ? `
+            <div style="margin-top: 14px; padding-top: 4px; border-top: 1px dashed #333; font-size: 9.5px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Customer Signature:</span>
+                <span>_______________________</span>
+              </div>
+              <div style="font-size: 8.5px; color: #555; text-align: center;">I acknowledge and agree to clear the outstanding due amount.</div>
             </div>
           ` : ''}
         ` : ''}

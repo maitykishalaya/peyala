@@ -61,7 +61,9 @@ import {
   Bike,
   Percent,
   Banknote,
+  UserCheck,
 } from 'lucide-react';
+import { customersApi, Customer } from '@/lib/api';
 import {
   printKOT,
   printCustomerBill,
@@ -193,14 +195,23 @@ export default function TablesPage() {
   const [discountType, setDiscountType] = useState<'flat' | 'percentage'>('flat');
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [settlementInput, setSettlementInput] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'other' | 'part'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi' | 'due' | 'part'>('cash');
   const [isPaidChecked, setIsPaidChecked] = useState<boolean>(false);
   const [partCash, setPartCash] = useState<string>('');
   const [partUpi, setPartUpi] = useState<string>('');
   const [partCard, setPartCard] = useState<string>('');
+  const [partDue, setPartDue] = useState<string>('');
   const [partOther, setPartOther] = useState<string>('');
   const [actionLoading, setActionLoading] = useState(false);
   const [printMode, setPrintModeState] = useState<PrintMode>('test');
+
+  // Customer Due / Khata state
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([]);
+  const [customerSearching, setCustomerSearching] = useState(false);
+  const [selectedDueCustomer, setSelectedDueCustomer] = useState<Customer | null>(null);
+  const [dueCustomerName, setDueCustomerName] = useState('');
+  const [dueCustomerPhone, setDueCustomerPhone] = useState('');
 
   // Print Station state
   const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
@@ -251,12 +262,33 @@ export default function TablesPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // Fast customer search debounce for Khata / Due settlement
+  useEffect(() => {
+    if (!customerSearchQuery || customerSearchQuery.trim().length < 2) {
+      setCustomerSearchResults([]);
+      setCustomerSearching(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setCustomerSearching(true);
+      try {
+        const res = await customersApi.search(customerSearchQuery.trim());
+        setCustomerSearchResults(res.data || []);
+      } catch {
+        setCustomerSearchResults([]);
+      } finally {
+        setCustomerSearching(false);
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [customerSearchQuery]);
+
   const getKotElapsedMinutes = (order: any) => {
     if (!order) return null;
     const latestRound = order.kotRounds && order.kotRounds.length > 0
       ? order.kotRounds[order.kotRounds.length - 1]
       : null;
-    const kotTime = latestRound?.createdAt || order.createdAt;
+    const kotTime = order.effectiveActiveTime || latestRound?.createdAt || order.createdAt;
     if (!kotTime) return null;
     const diffMs = Date.now() - new Date(kotTime).getTime();
     if (isNaN(diffMs) || diffMs < 0) return 0;
@@ -909,7 +941,7 @@ export default function TablesPage() {
 
     subtotal = Math.round(subtotal * 100) / 100;
     taxAmount = Math.round(taxAmount * 100) / 100;
-    const total = Math.round((subtotal + taxAmount) * 100) / 100;
+    const total = Math.round(subtotal + taxAmount);
 
     return { itemCount, subtotal, taxAmount, total };
   }, [cart, menuItems]);
@@ -1263,8 +1295,8 @@ export default function TablesPage() {
   const numPartCash = Math.max(0, parseFloat(partCash) || 0);
   const numPartUpi = Math.max(0, parseFloat(partUpi) || 0);
   const numPartCard = Math.max(0, parseFloat(partCard) || 0);
-  const numPartOther = Math.max(0, parseFloat(partOther) || 0);
-  const totalPartAllocated = Math.round((numPartCash + numPartUpi + numPartCard + numPartOther) * 100) / 100;
+  const numPartDue = Math.max(0, parseFloat(partDue) || 0);
+  const totalPartAllocated = Math.round((numPartCash + numPartUpi + numPartCard + numPartDue) * 100) / 100;
   const partDifference = activeOrder ? Math.round((activeOrder.total - totalPartAllocated) * 100) / 100 : 0;
   const partRemaining = Math.max(0, partDifference);
 
@@ -1275,9 +1307,25 @@ export default function TablesPage() {
       return;
     }
 
+    // Validation for Customer Khata if Due is selected or included in part payment
+    let customerInfoPayload: { name: string; phone: string; notes?: string } | undefined = undefined;
+    if (paymentMethod === 'due' || (paymentMethod === 'part' && numPartDue > 0)) {
+      const finalName = (dueCustomerName || selectedDueCustomer?.name || '').trim();
+      const finalPhone = (dueCustomerPhone || selectedDueCustomer?.phone || '').trim();
+      if (!finalName) {
+        toast.error('Customer name is required for Due / Khata settlement.');
+        return;
+      }
+      if (!finalPhone || finalPhone.replace(/\D/g, '').length < 10) {
+        toast.error('Please enter a valid 10-digit mobile number for Due / Khata settlement.');
+        return;
+      }
+      customerInfoPayload = { name: finalName, phone: finalPhone };
+    }
+
     if (paymentMethod === 'part') {
       if (totalPartAllocated <= 0) {
-        toast.error('Please enter at least one part payment amount (Cash, UPI, Card, or Other).');
+        toast.error('Please enter at least one part payment amount (Cash, UPI, Card, or Due).');
         return;
       }
 
@@ -1286,7 +1334,7 @@ export default function TablesPage() {
         numPartCash > 0 ? `Cash: ${formatCurrency(numPartCash)}` : null,
         numPartUpi > 0 ? `UPI: ${formatCurrency(numPartUpi)}` : null,
         numPartCard > 0 ? `Card: ${formatCurrency(numPartCard)}` : null,
-        numPartOther > 0 ? `Other: ${formatCurrency(numPartOther)}` : null,
+        numPartDue > 0 ? `Due: ${formatCurrency(numPartDue)}` : null,
       ].filter(Boolean).join(', ');
 
       const confirmMsg = waived > 0
@@ -1301,28 +1349,29 @@ export default function TablesPage() {
           cash: numPartCash,
           upi: numPartUpi,
           card: numPartCard,
-          other: numPartOther,
+          due: numPartDue,
+          other: 0,
         };
-        const res = await ordersApi.pay(activeOrder._id, 'part', totalPartAllocated, breakdownPayload);
-        if (isPrintStation || printMode === 'test') {
-          handlePrintCustomerBill(res.data, true);
-        } else {
-          await ordersApi.queueBillPrint(res.data._id);
-          setNoticeMessage(`Part payment recorded! Receipt for Table ${selectedTable?.tableNumber} sent to Counter Printer 🖨️`);
-          setTimeout(() => setNoticeMessage(null), 4000);
-        }
+        await ordersApi.pay(activeOrder._id, 'part', totalPartAllocated, breakdownPayload, customerInfoPayload);
         toast.success(`Part payment recorded successfully! Table ${selectedTable?.tableNumber} is now available.`);
 
         if (typeof window !== 'undefined') {
           localStorage.removeItem('peyala_sales_list_cache_v1');
           localStorage.removeItem('peyala_dashboard_cache_v1');
           localStorage.removeItem('peyala_accounts_cache_v1');
+          localStorage.removeItem('peyala_balancesheet_cache_v1');
+          localStorage.removeItem('peyala_dues_cache_v1');
           window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
         }
 
         setShowOrderDetailsModal(false);
         setActiveOrder(null);
         setSelectedTable(null);
+        setSelectedDueCustomer(null);
+        setDueCustomerName('');
+        setDueCustomerPhone('');
+        setCustomerSearchQuery('');
+        setPartDue('');
         await loadData();
         setActiveView('table_view');
       } catch (err: any) {
@@ -1341,7 +1390,9 @@ export default function TablesPage() {
 
     const waived = Math.max(0, Math.round((activeOrder.total - enteredSettlement) * 100) / 100);
     const changeDue = Math.max(0, Math.round((enteredSettlement - activeOrder.total) * 100) / 100);
-    const confirmMsg = changeDue > 0
+    const confirmMsg = paymentMethod === 'due'
+      ? `Settle ${formatCurrency(enteredSettlement)} as DUE / KHATA for ${customerInfoPayload?.name} (${customerInfoPayload?.phone}) and free Table ${selectedTable?.tableNumber}?`
+      : changeDue > 0
       ? `Collect ${formatCurrency(Math.min(enteredSettlement, activeOrder.total))} via ${paymentMethod.toUpperCase()} (Tendered: ${formatCurrency(enteredSettlement)}, Return Change: ${formatCurrency(changeDue)}) and free Table ${selectedTable?.tableNumber}?`
       : waived > 0
       ? `Collect ${formatCurrency(enteredSettlement)} via ${paymentMethod.toUpperCase()} (Waived Shortage: ${formatCurrency(waived)}) and free Table ${selectedTable?.tableNumber}?`
@@ -1351,26 +1402,30 @@ export default function TablesPage() {
 
     try {
       setActionLoading(true);
-      const res = await ordersApi.pay(activeOrder._id, paymentMethod, enteredSettlement);
-      if (isPrintStation || printMode === 'test') {
-        handlePrintCustomerBill(res.data, true);
-      } else {
-        await ordersApi.queueBillPrint(res.data._id);
-        setNoticeMessage(`Payment recorded! Receipt for Table ${selectedTable?.tableNumber} sent to Counter Printer 🖨️`);
-        setTimeout(() => setNoticeMessage(null), 4000);
-      }
-      toast.success(`Payment recorded successfully! Table ${selectedTable?.tableNumber} is now available.`);
+      await ordersApi.pay(activeOrder._id, paymentMethod, enteredSettlement, undefined, customerInfoPayload);
+      toast.success(
+        paymentMethod === 'due'
+          ? `Order marked as DUE / KHATA for ${customerInfoPayload?.name}! Table ${selectedTable?.tableNumber} is now available.`
+          : `Payment recorded successfully! Table ${selectedTable?.tableNumber} is now available.`
+      );
 
       if (typeof window !== 'undefined') {
         localStorage.removeItem('peyala_sales_list_cache_v1');
         localStorage.removeItem('peyala_dashboard_cache_v1');
         localStorage.removeItem('peyala_accounts_cache_v1');
+        localStorage.removeItem('peyala_balancesheet_cache_v1');
+        localStorage.removeItem('peyala_dues_cache_v1');
         window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
       }
 
       setShowOrderDetailsModal(false);
       setActiveOrder(null);
       setSelectedTable(null);
+      setSelectedDueCustomer(null);
+      setDueCustomerName('');
+      setDueCustomerPhone('');
+      setCustomerSearchQuery('');
+      setPartDue('');
       await loadData();
       setActiveView('table_view');
     } catch (err: any) {
@@ -2546,7 +2601,8 @@ export default function TablesPage() {
                       {[
                         { id: 'cash', label: 'Cash' },
                         { id: 'card', label: 'Card' },
-                        { id: 'upi', label: 'Due / UPI' },
+                        { id: 'upi', label: 'UPI' },
+                        { id: 'due', label: 'Due' },
                         { id: 'part', label: 'Part' },
                       ].map(({ id, label }) => (
                         <button
@@ -3271,6 +3327,19 @@ export default function TablesPage() {
                         <span>−{formatCurrency(activeOrder.discount)}</span>
                       </div>
                     )}
+                    {(() => {
+                      const net = activeOrder.subtotal + activeOrder.taxAmount - (activeOrder.discount || 0);
+                      const roundOff = Math.round((activeOrder.total - net) * 100) / 100;
+                      if (Math.abs(roundOff) >= 0.01) {
+                        return (
+                          <div className="flex justify-between text-gray-500 text-xs">
+                            <span>Round Off:</span>
+                            <span>{roundOff > 0 ? `+${formatCurrency(roundOff)}` : `−${formatCurrency(Math.abs(roundOff))}`}</span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                     <div className="flex justify-between text-sm font-black text-gray-900 dark:text-white pt-1 border-t">
                       <span>Total:</span>
                       <span className="text-red-600">{formatCurrency(activeOrder.total)}</span>
@@ -3312,7 +3381,7 @@ export default function TablesPage() {
                         { id: 'cash', label: 'Cash', icon: Banknote },
                         { id: 'upi', label: 'UPI', icon: Smartphone },
                         { id: 'card', label: 'Card', icon: CreditCard },
-                        { id: 'other', label: 'Other', icon: Wallet },
+                        { id: 'due', label: 'Due / Khata', icon: UserCheck },
                         { id: 'part', label: 'Part Payment', icon: Layers },
                       ].map(({ id, label, icon: Icon }) => {
                         const isSelected = paymentMethod === id;
@@ -3324,7 +3393,9 @@ export default function TablesPage() {
                             className={cn(
                               'flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg font-bold text-xs border transition-all duration-150 cursor-pointer',
                               isSelected
-                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm ring-2 ring-emerald-500/30'
+                                ? id === 'due'
+                                  ? 'bg-amber-600 text-white border-amber-700 shadow-sm ring-2 ring-amber-500/30'
+                                  : 'bg-emerald-600 text-white border-emerald-700 shadow-sm ring-2 ring-emerald-500/30'
                                 : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             )}
                           >
@@ -3339,10 +3410,147 @@ export default function TablesPage() {
                   {/* 2. Amount Input & Calculation */}
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-                      2. {paymentMethod === 'part' ? 'Enter Split Amounts (₹)' : 'Payment Amount Received (₹)'}
+                      2. {paymentMethod === 'part' ? 'Enter Split Amounts (₹)' : paymentMethod === 'due' ? 'Customer Khata Details' : 'Payment Amount Received (₹)'}
                     </label>
 
-                    {paymentMethod !== 'part' ? (
+                    {paymentMethod === 'due' ? (
+                      <div className="space-y-3 p-3.5 bg-white dark:bg-gray-800/90 rounded-xl border-2 border-amber-400 dark:border-amber-600/70 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                            <UserCheck className="w-4 h-4 text-amber-600" />
+                            Regular Customer Khata
+                          </span>
+                          <span className="text-[11px] font-black px-2.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300">
+                            Bill Total: {formatCurrency(activeOrder.total)}
+                          </span>
+                        </div>
+
+                        {selectedDueCustomer ? (
+                          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-800 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-1.5">
+                                  <span>{selectedDueCustomer.name}</span>
+                                  <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({selectedDueCustomer.phone})</span>
+                                </div>
+                                <div className="text-[11px] text-gray-500">
+                                  Regular Customer • {selectedDueCustomer.totalOrders} past visits
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedDueCustomer(null);
+                                  setDueCustomerName('');
+                                  setDueCustomerPhone('');
+                                  setCustomerSearchQuery('');
+                                }}
+                                className="text-xs text-brand-600 hover:underline font-bold"
+                              >
+                                Change Customer
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-amber-200/60 dark:border-amber-800/60 text-center">
+                              <div className="p-1.5 rounded bg-white dark:bg-gray-900 border border-amber-100 dark:border-gray-700">
+                                <div className="text-[10px] text-gray-500 font-bold uppercase">Previous Due</div>
+                                <div className="text-xs font-black text-amber-700 dark:text-amber-400">{formatCurrency(selectedDueCustomer.totalDue)}</div>
+                              </div>
+                              <div className="p-1.5 rounded bg-white dark:bg-gray-900 border border-amber-100 dark:border-gray-700">
+                                <div className="text-[10px] text-gray-500 font-bold uppercase">This Bill</div>
+                                <div className="text-xs font-black text-red-600 dark:text-red-400">+{formatCurrency(activeOrder.total)}</div>
+                              </div>
+                              <div className="p-1.5 rounded bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700">
+                                <div className="text-[10px] text-amber-900 dark:text-amber-200 font-black uppercase">New Total Due</div>
+                                <div className="text-xs font-black text-amber-900 dark:text-white">{formatCurrency(selectedDueCustomer.totalDue + activeOrder.total)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {/* Autocomplete Search input */}
+                            <div className="relative">
+                              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                              <input
+                                type="text"
+                                value={customerSearchQuery}
+                                onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                                placeholder="Search regular customer by name or phone digits..."
+                                className="input pl-9 pr-8 text-xs font-semibold h-9 w-full"
+                              />
+                              {customerSearching && (
+                                <div className="w-3.5 h-3.5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                              )}
+                              {customerSearchResults.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-50 max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+                                  {customerSearchResults.map((cust) => (
+                                    <button
+                                      key={cust._id}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedDueCustomer(cust);
+                                        setDueCustomerName(cust.name);
+                                        setDueCustomerPhone(cust.phone);
+                                        setCustomerSearchQuery('');
+                                        setCustomerSearchResults([]);
+                                      }}
+                                      className="w-full text-left p-2.5 hover:bg-amber-50 dark:hover:bg-gray-800 flex items-center justify-between text-xs cursor-pointer transition-colors"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                          <span>{cust.name}</span>
+                                          <span className="text-gray-500 text-[11px]">({cust.phone})</span>
+                                        </div>
+                                        <div className="text-[10px] text-gray-400">Past Orders: {cust.totalOrders}</div>
+                                      </div>
+                                      <div className="text-right">
+                                        <span className="text-[10px] text-gray-400 block uppercase">Current Due</span>
+                                        <span className="font-black text-amber-700 dark:text-amber-400">{formatCurrency(cust.totalDue)}</span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider text-center">
+                              — or enter customer details manually —
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase">
+                                  Customer Name *
+                                </label>
+                                <input
+                                  type="text"
+                                  value={dueCustomerName}
+                                  onChange={(e) => setDueCustomerName(e.target.value)}
+                                  placeholder="e.g. Rahul Sharma"
+                                  className="input h-8 text-xs font-bold w-full"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase">
+                                  Mobile Number (10 Digits) *
+                                </label>
+                                <input
+                                  type="tel"
+                                  maxLength={10}
+                                  value={dueCustomerPhone}
+                                  onChange={(e) => setDueCustomerPhone(e.target.value.replace(/\D/g, ''))}
+                                  placeholder="e.g. 9874561230"
+                                  className="input h-8 text-xs font-bold w-full"
+                                />
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-gray-500">
+                              ℹ️ Customer will be saved in Khata. Dues accumulate across visits and can be cleared anytime at month-end.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : paymentMethod !== 'part' ? (
                       <div className="space-y-2">
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 font-bold text-sm">
@@ -3436,7 +3644,7 @@ export default function TablesPage() {
                       </div>
                     ) : (
                       /* Part Payment Split breakdown */
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           <div>
                             <span className="text-[10px] font-bold text-gray-500 uppercase">Cash (₹)</span>
@@ -3472,17 +3680,62 @@ export default function TablesPage() {
                             />
                           </div>
                           <div>
-                            <span className="text-[10px] font-bold text-gray-500 uppercase">Other (₹)</span>
+                            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase">Due / Khata (₹)</span>
                             <input
                               type="number"
                               min="0"
-                              value={partOther}
-                              onChange={(e) => setPartOther(e.target.value)}
+                              value={partDue}
+                              onChange={(e) => setPartDue(e.target.value)}
                               placeholder="0.00"
-                              className="input h-9 text-xs font-bold py-0"
+                              className="input h-9 text-xs font-bold py-0 border-amber-300 dark:border-amber-700"
                             />
                           </div>
                         </div>
+
+                        {/* Customer Khata prompt inside Part Payment if Due > 0 */}
+                        {numPartDue > 0 && (
+                          <div className="p-3 bg-amber-50/80 dark:bg-amber-950/40 rounded-xl border border-amber-300 dark:border-amber-700 space-y-2">
+                            <div className="text-[11px] font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                              <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                              Customer for Due Portion ({formatCurrency(numPartDue)})
+                            </div>
+
+                            {selectedDueCustomer ? (
+                              <div className="flex items-center justify-between text-xs bg-white dark:bg-gray-900 p-2 rounded-lg border border-amber-200">
+                                <div>
+                                  <span className="font-bold">{selectedDueCustomer.name}</span>
+                                  <span className="text-gray-500 text-[11px] ml-1">({selectedDueCustomer.phone})</span>
+                                  <span className="text-amber-600 text-[11px] block">Current Due: {formatCurrency(selectedDueCustomer.totalDue)}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDueCustomer(null)}
+                                  className="text-xs text-brand-600 font-bold hover:underline"
+                                >
+                                  Change
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input
+                                  type="text"
+                                  value={dueCustomerName}
+                                  onChange={(e) => setDueCustomerName(e.target.value)}
+                                  placeholder="Customer Name *"
+                                  className="input h-8 text-xs font-bold"
+                                />
+                                <input
+                                  type="tel"
+                                  maxLength={10}
+                                  value={dueCustomerPhone}
+                                  onChange={(e) => setDueCustomerPhone(e.target.value.replace(/\D/g, ''))}
+                                  placeholder="10-digit Mobile No *"
+                                  className="input h-8 text-xs font-bold"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white dark:bg-gray-800 border">
                           <span className="font-bold text-gray-700 dark:text-gray-300">
@@ -3510,16 +3763,34 @@ export default function TablesPage() {
                       disabled={
                         !canManageOrders ||
                         actionLoading ||
+                        ((paymentMethod === 'due' || (paymentMethod === 'part' && numPartDue > 0)) && (
+                          (!dueCustomerName.trim() && !selectedDueCustomer?.name) ||
+                          (!dueCustomerPhone.trim() && !selectedDueCustomer?.phone) ||
+                          (dueCustomerPhone.trim() || selectedDueCustomer?.phone || '').replace(/\D/g, '').length < 10
+                        )) ||
                         (paymentMethod === 'part' && totalPartAllocated <= 0) ||
-                        (paymentMethod !== 'part' && (
+                        (paymentMethod !== 'part' && paymentMethod !== 'due' && (
                           isNaN(settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total) ||
                           (settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total) < 0
                         ))
                       }
                       className={cn(
                         'w-full py-2.5 px-4 rounded-xl font-black text-sm text-white shadow-md flex items-center justify-center gap-2 transition-all',
-                        !canManageOrders || actionLoading
+                        !canManageOrders ||
+                        actionLoading ||
+                        ((paymentMethod === 'due' || (paymentMethod === 'part' && numPartDue > 0)) && (
+                          (!dueCustomerName.trim() && !selectedDueCustomer?.name) ||
+                          (!dueCustomerPhone.trim() && !selectedDueCustomer?.phone) ||
+                          (dueCustomerPhone.trim() || selectedDueCustomer?.phone || '').replace(/\D/g, '').length < 10
+                        )) ||
+                        (paymentMethod === 'part' && totalPartAllocated <= 0) ||
+                        (paymentMethod !== 'part' && paymentMethod !== 'due' && (
+                          isNaN(settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total) ||
+                          (settlementInput.trim() !== '' ? Number(settlementInput) : activeOrder.total) < 0
+                        ))
                           ? 'bg-gray-400 cursor-not-allowed opacity-80'
+                          : paymentMethod === 'due'
+                          ? 'bg-amber-600 hover:bg-amber-700 active:scale-[0.99] cursor-pointer'
                           : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] cursor-pointer'
                       )}
                     >
@@ -3531,7 +3802,12 @@ export default function TablesPage() {
                       ) : actionLoading ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Settling Table &amp; Printing Receipt...</span>
+                          <span>Recording Settlement...</span>
+                        </>
+                      ) : paymentMethod === 'due' ? (
+                        <>
+                          <UserCheck className="w-4 h-4" />
+                          <span>Settle Table as DUE / KHATA ({formatCurrency(activeOrder.total)})</span>
                         </>
                       ) : paymentMethod === 'part' ? (
                         <>

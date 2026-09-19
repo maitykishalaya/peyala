@@ -21,6 +21,8 @@ const orderItemSchema = new mongoose.Schema({
     enum: ['pending', 'preparing', 'served', 'cancelled'],
     default: 'pending',
   },
+  roundNumber: { type: Number, default: 1 },
+  effectiveTime: { type: Date, default: null },
 }, { timestamps: true });
 
 const kotRoundSchema = new mongoose.Schema({
@@ -36,6 +38,7 @@ const kotRoundSchema = new mongoose.Schema({
   printed: { type: Boolean, default: false },
   printedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
+  effectiveTime: { type: Date, default: null },
 }, { timestamps: true });
 
 const orderSchema = new mongoose.Schema({
@@ -63,15 +66,23 @@ const orderSchema = new mongoose.Schema({
   waivedAmount: { type: Number, default: 0, min: 0 },
   paymentMethod: {
     type: String,
-    enum: ['cash', 'card', 'upi', 'other', 'part', null],
+    enum: ['cash', 'card', 'upi', 'due', 'other', 'part', null],
     default: null,
   },
   paymentBreakdown: {
     cash: { type: Number, default: 0 },
     upi: { type: Number, default: 0 },
     card: { type: Number, default: 0 },
+    due: { type: Number, default: 0 },
     other: { type: Number, default: 0 },
   },
+  customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
+  customerName: { type: String, trim: true },
+  customerPhone: { type: String, trim: true },
+  dueAmount: { type: Number, default: 0 },
+  dueSettled: { type: Boolean, default: false },
+  dueSettledAmount: { type: Number, default: 0 },
+  dueSettledAt: { type: Date, default: null },
   paidAt: { type: Date, default: null },
   billPrinted: { type: Boolean, default: false },
   billPrintedAt: { type: Date, default: null },
@@ -79,11 +90,14 @@ const orderSchema = new mongoose.Schema({
   billPrintQueuedAt: { type: Date, default: null },
   billPrintSeq: { type: Number, default: 0 },
   foodServedAt: { type: Date, default: null },
+  effectiveActiveTime: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
 orderSchema.index({ billPrintQueued: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
+orderSchema.index({ customer: 1, dueSettled: 1 });
+orderSchema.index({ paymentMethod: 1, dueSettled: 1 });
 
 // Static helper to calculate order financial totals excluding cancelled items
 orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discountType = 'flat') {
@@ -103,29 +117,32 @@ orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discoun
     taxAmount += lineTax;
   }
 
+  const cleanSubtotal = Math.round(subtotal * 100) / 100;
+  const cleanTax = Math.round(taxAmount * 100) / 100;
+
   // Handle discountType: 'percentage' vs 'flat'
   let cleanDiscount = 0;
   const rawValue = Math.max(0, Number(discountInput) || 0);
 
   if (discountType === 'percentage') {
-    cleanDiscount = (subtotal * rawValue) / 100;
+    cleanDiscount = Math.round(((cleanSubtotal * rawValue) / 100) * 100) / 100;
   } else {
-    cleanDiscount = rawValue;
+    cleanDiscount = Math.round(rawValue * 100) / 100;
   }
 
   // Discount cannot exceed subtotal + taxAmount
-  cleanDiscount = Math.min(cleanDiscount, subtotal + taxAmount);
+  cleanDiscount = Math.min(cleanDiscount, cleanSubtotal + cleanTax);
   cleanDiscount = Math.max(0, cleanDiscount);
 
-  const rawTotal = Math.max(0, subtotal + taxAmount - cleanDiscount);
+  const rawTotal = Math.max(0, Math.round((cleanSubtotal + cleanTax - cleanDiscount) * 100) / 100);
 
   return {
-    subtotal: Math.round(subtotal * 100) / 100,
-    taxAmount: Math.round(taxAmount * 100) / 100,
+    subtotal: cleanSubtotal,
+    taxAmount: cleanTax,
     discountType: discountType === 'percentage' ? 'percentage' : 'flat',
     discountValue: Math.round(rawValue * 100) / 100,
-    discount: Math.round(cleanDiscount * 100) / 100,
-    total: Math.round(rawTotal * 100) / 100,
+    discount: cleanDiscount,
+    total: Math.round(rawTotal),
   };
 };
 

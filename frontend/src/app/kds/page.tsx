@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
-import { ordersApi, Order, KdsPrepNextItem, OrderItem } from '@/lib/pos-api';
+import { ordersApi, Order, KdsPrepNextItem, OrderItem, KdsPrepTableEntry } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { playTwoBlinkAlertSound, broadcastKdsReady } from '@/lib/audio-alerts';
@@ -270,6 +270,55 @@ export default function KitchenDisplayPage() {
     }
   };
 
+  // Mark a single table's item ready from Prep Next (when multiple tables order same item)
+  const handleSingleTableReady = async (
+    prepItem: KdsPrepNextItem,
+    tableEntry: KdsPrepTableEntry
+  ) => {
+    const actionKey = `${tableEntry.orderId}-${tableEntry.itemId}`;
+    try {
+      setActionLoading(actionKey);
+      await ordersApi.updateKdsItemStatus(tableEntry.orderId, tableEntry.itemId, 'served');
+
+      const variantPart = prepItem.variantName ? ` (${prepItem.variantName})` : '';
+      const tableLabel = tableEntry.tableNumber.startsWith('Table')
+        ? tableEntry.tableNumber
+        : `Table ${tableEntry.tableNumber}`;
+      const itemDisplayName = `${prepItem.name}${variantPart}`;
+
+      // Toast notification: "<item name> for Table X is ready"
+      toast.success(`${itemDisplayName} for ${tableLabel} is ready! 🍽️`);
+
+      // Prominent popup notification banner with 2-blink styling
+      setReadyPopup({
+        id: String(Date.now()),
+        title: 'Item Ready',
+        name: `${itemDisplayName} (${tableLabel})`,
+        tables: [String(tableEntry.tableNumber)],
+      });
+
+      // 2-blink audio alert to catch cashier notice
+      if (soundEnabled) {
+        playTwoBlinkAlertSound();
+      }
+
+      // Broadcast to Cashier POS screens across tabs/monitors
+      broadcastKdsReady({
+        id: String(Date.now()),
+        name: `${itemDisplayName} (${tableLabel})`,
+        tables: [String(tableEntry.tableNumber)],
+        tableNumber: String(tableEntry.tableNumber),
+        timestamp: Date.now(),
+      });
+
+      await loadKdsData(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to mark item ready');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Start cooking a batch of items
   const handleStartBatchCooking = async (prepItem: KdsPrepNextItem) => {
     try {
@@ -389,6 +438,19 @@ export default function KitchenDisplayPage() {
         return tNum.toLowerCase().includes(q) || hasItem || String(o.orderNumber || '').includes(q);
       });
     }
+
+    // Sort: unserved tickets first (sorted by active waiting priority time), then fully served tickets
+    list.sort((a, b) => {
+      const aUnserved = (a.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
+      const bUnserved = (b.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
+
+      if (aUnserved && !bUnserved) return -1;
+      if (!aUnserved && bUnserved) return 1;
+
+      const aTime = new Date(a.effectiveActiveTime || a.createdAt).getTime();
+      const bTime = new Date(b.effectiveActiveTime || b.createdAt).getTime();
+      return aTime - bTime;
+    });
 
     return list;
   }, [orders, stationFilter, searchQuery]);
@@ -736,27 +798,70 @@ export default function KitchenDisplayPage() {
                           </div>
                         )}
 
-                        {/* Waiting Tables Breakdown */}
+                        {/* Waiting Tables Breakdown with Individual "Ready" Buttons */}
                         <div className="mt-2.5 pt-2 border-t border-gray-100 dark:border-gray-800">
-                          <p className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-1">
-                            Tables Waiting ({item.tables.length})
-                          </p>
-                          <div className="flex flex-wrap gap-1">
-                            {item.tables.map((t, idx) => (
-                              <span
-                                key={idx}
-                                className={cn(
-                                  'text-xs font-bold px-2 py-0.5 rounded-md border flex items-center gap-1',
-                                  t.status === 'preparing'
-                                    ? 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300'
-                                    : 'bg-gray-50 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-200'
-                                )}
-                              >
-                                <span>{t.tableNumber}</span>
-                                <span className="text-[10px] opacity-75 font-black">x{t.quantity}</span>
-                                {t.status === 'preparing' && <Flame className="w-2.5 h-2.5 text-blue-600 animate-pulse" />}
-                              </span>
-                            ))}
+                          <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                              Tables Waiting ({item.tables.length})
+                            </p>
+                            <span className="text-[10px] text-gray-400 font-semibold">
+                              Mark per table or batch below
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                            {item.tables.map((t, idx) => {
+                              const itemKey = `${t.orderId}-${t.itemId}`;
+                              const isItemLoading = actionLoading === itemKey;
+
+                              return (
+                                <div
+                                  key={`${t.orderId}-${t.itemId}-${idx}`}
+                                  className="flex items-center justify-between gap-2 p-1.5 px-2.5 rounded-xl bg-gray-50 dark:bg-gray-800/80 border border-gray-200/90 dark:border-gray-700/80 hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors"
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                    <span className="text-xs font-black text-gray-900 dark:text-gray-100">
+                                      {t.tableNumber.startsWith('Table') ? t.tableNumber : `Table ${t.tableNumber}`}
+                                    </span>
+                                    <span className="text-[11px] font-black px-1.5 py-0.2 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                                      ×{t.quantity}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                                      {getElapsedMinutes(t.createdAt)}m
+                                    </span>
+                                    {t.status === 'preparing' && (
+                                      <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
+                                        <Flame className="w-2.5 h-2.5 animate-pulse" />
+                                        Prep
+                                      </span>
+                                    )}
+                                    {t.notes && (
+                                      <span
+                                        className="text-[10px] text-amber-700 dark:text-amber-300 font-bold truncate max-w-[120px]"
+                                        title={t.notes}
+                                      >
+                                        • {t.notes}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSingleTableReady(item, t)}
+                                    disabled={isItemLoading || isProcessing}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] font-black flex items-center gap-1 shadow-2xs transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                                    title={`Mark ${item.name} for Table ${t.tableNumber} as Ready`}
+                                  >
+                                    {isItemLoading ? (
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-3 h-3" />
+                                    )}
+                                    <span>Ready</span>
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
@@ -819,7 +924,8 @@ export default function KitchenDisplayPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filteredOrders.map((order) => {
                   const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
-                  const elapsedMins = getElapsedMinutes(order.createdAt);
+                  const ticketEffectiveTime = order.effectiveActiveTime || order.createdAt;
+                  const elapsedMins = getElapsedMinutes(ticketEffectiveTime);
                   const urgency = getUrgencyColor(elapsedMins);
                   const latestRound = order.kotRounds && order.kotRounds.length > 0
                     ? order.kotRounds[order.kotRounds.length - 1]
@@ -869,7 +975,7 @@ export default function KitchenDisplayPage() {
                         {/* Waiter Name & Order Time */}
                         <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 py-1.5">
                           <span>Waiter: {order.createdBy?.name || 'Staff'}</span>
-                          <span>{new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span>{new Date(ticketEffectiveTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
 
                         {/* Items Checklist */}

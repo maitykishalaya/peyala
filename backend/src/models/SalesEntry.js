@@ -42,10 +42,11 @@ const salesEntrySchema = new mongoose.Schema({
     cash: { type: Number, default: 0 },          // goes to Cash Counter
     upi: { type: Number, default: 0 },           // goes to Current Account
     card: { type: Number, default: 0 },          // goes to Current Account
+    due: { type: Number, default: 0 },           // Accounts Receivable
     bankTransfer: { type: Number, default: 0 },  // goes to Current Account
   },
 
-  // Total outlet sales = cash + upi + card + bankTransfer
+  // Total outlet sales = cash + upi + card + due + bankTransfer
   // AUTO-CALCULATED — do not set manually
   outletSales: { type: Number, default: 0 },
 
@@ -74,7 +75,7 @@ const salesEntrySchema = new mongoose.Schema({
 salesEntrySchema.statics.calcTotals = function(data) {
   // Sum up outlet payment modes to get outletSales
   const pb = data.paymentBreakdown || {};
-  const outletSales = (pb.cash || 0) + (pb.upi || 0) + (pb.card || 0) + (pb.bankTransfer || 0);
+  const outletSales = (pb.cash || 0) + (pb.upi || 0) + (pb.card || 0) + (pb.due || 0) + (pb.bankTransfer || 0);
 
   // Sum up all revenue channels
   const totalRevenue = outletSales

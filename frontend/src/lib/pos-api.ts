@@ -56,6 +56,9 @@ export interface OrderItem {
   variant?: { name: string; price: number };
   selectedAddons?: Array<{ addon?: string; name: string; price: number }>;
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
+  roundNumber?: number;
+  effectiveTime?: string;
+  createdAt?: string;
 }
 
 export interface KotRound {
@@ -72,6 +75,7 @@ export interface KotRound {
   printed: boolean;
   printedAt?: string | null;
   createdAt?: string;
+  effectiveTime?: string | null;
 }
 
 export interface Order {
@@ -95,18 +99,27 @@ export interface Order {
   total: number;
   settledAmount?: number | null;
   waivedAmount?: number;
-  paymentMethod?: 'cash' | 'card' | 'upi' | 'other' | 'part' | null;
+  paymentMethod?: 'cash' | 'card' | 'upi' | 'due' | 'other' | 'part' | null;
   paymentBreakdown?: {
     cash?: number;
     upi?: number;
     card?: number;
+    due?: number;
     other?: number;
   };
+  customer?: { _id: string; name: string; phone: string; totalDue?: number } | string | null;
+  customerName?: string;
+  customerPhone?: string;
+  dueAmount?: number;
+  dueSettled?: boolean;
+  dueSettledAmount?: number;
+  dueSettledAt?: string | null;
   billPrinted?: boolean;
   billPrintedAt?: string | null;
   billPrintQueued?: boolean;
   billPrintSeq?: number;
   foodServedAt?: string | null;
+  effectiveActiveTime?: string | null;
   paidAt?: string | null;
   createdBy?: { _id: string; name: string };
   createdAt: string;
@@ -284,11 +297,12 @@ export const ordersApi = {
     api.post<Order>(`/orders/${id}/bill`),
   pay: (
     id: string,
-    paymentMethod: 'cash' | 'card' | 'upi' | 'other' | 'part',
+    paymentMethod: 'cash' | 'card' | 'upi' | 'due' | 'other' | 'part',
     settlementAmount?: number,
-    paymentBreakdown?: { cash?: number; upi?: number; card?: number; other?: number }
+    paymentBreakdown?: { cash?: number; upi?: number; card?: number; due?: number; other?: number },
+    customerInfo?: { name: string; phone: string; notes?: string }
   ) =>
-    api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount, paymentBreakdown }),
+    api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount, paymentBreakdown, customerInfo }),
   cancel: (id: string) =>
     api.post<Order>(`/orders/${id}/cancel`),
   getPendingKots: () =>
@@ -338,6 +352,8 @@ export interface KdsPrepTableEntry {
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
   notes?: string;
   createdAt: string;
+  orderedAt?: string;
+  effectiveTime?: string;
 }
 
 export interface KdsPrepNextItem {

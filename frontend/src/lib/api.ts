@@ -213,3 +213,59 @@ export const expenseLeakApi = {
   submitFeedback: (anomalyId: string, data: { isUseful: boolean; feedbackReason?: string; feedbackNotes?: string }) =>
     api.post(`/expense-leaks/${anomalyId}/feedback`, data),
 };
+
+// ── Customer Khata & Due Ledger API ──────────────────────────────
+export interface Customer {
+  _id: string;
+  name: string;
+  phone: string;
+  totalDue: number;
+  totalOrders: number;
+  lastVisit?: string;
+  notes?: string;
+  unpaidBillsCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DueReportBillItem {
+  _id: string;
+  orderNumber: number;
+  tableNumber: string;
+  createdAt: string;
+  customerName: string;
+  customerPhone: string;
+  customerId?: string;
+  total: number;
+  dueAmount: number;
+  dueSettledAmount: number;
+  remainingDue: number;
+  dueSettled: boolean;
+  dueSettledAt?: string | null;
+  billerName: string;
+}
+
+export interface DueReportResponse {
+  metrics: {
+    totalOutstandingDue: number;
+    totalDueCustomers: number;
+    totalDuesCollectedThisMonth: number;
+    totalUnpaidBills: number;
+  };
+  view: 'customer' | 'bill';
+  data: any[];
+  totalCount: number;
+  page: number;
+  totalPages: number;
+}
+
+export const customersApi = {
+  search: (q: string) => api.get<Customer[]>(`/customers/search?q=${encodeURIComponent(q)}`),
+  getDueReport: (params?: { view?: 'customer' | 'bill'; search?: string; status?: 'unpaid' | 'cleared' | 'all'; page?: number; limit?: number }) =>
+    api.get<DueReportResponse>('/customers/due-report', { params }),
+  getById: (id: string) => api.get<any>(`/customers/${id}`),
+  collectDue: (customerId: string, data: { amount: number; paymentMethod: 'cash' | 'upi' | 'card'; accountId?: string; notes?: string }) =>
+    api.post<{ success: boolean; message: string; customer: Customer; paymentRecord: any }>(`/customers/${customerId}/collect-due`, data),
+  create: (data: { name: string; phone: string; notes?: string }) => api.post<Customer>('/customers', data),
+};
+

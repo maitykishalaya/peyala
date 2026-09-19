@@ -14,6 +14,7 @@ const BalanceSheet = require('../models/BalanceSheet');
 const Account = require('../models/Account');
 const Supplier = require('../models/Supplier');
 const PurchaseEntry = require('../models/PurchaseEntry');
+const Customer = require('../models/Customer');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
@@ -72,6 +73,14 @@ router.get('/', async (req, res) => {
     ]);
     const purchaseGstPaidTotal = gstPaidAggregate[0]?.totalGstPaid || 0;
 
+    // ── CUSTOMER DUES (Accounts Receivable) ──────────────────────
+    const customerDuesAggregate = await Customer.aggregate([
+      { $match: { totalDue: { $gt: 0 }, isActive: true } },
+      { $group: { _id: null, total: { $sum: '$totalDue' }, count: { $sum: 1 } } }
+    ]);
+    const customerDuesTotal = customerDuesAggregate[0]?.total || 0;
+    const customerDuesCount = customerDuesAggregate[0]?.count || 0;
+
     // ── EQUITY: auto-calculated ──────────────────────────────────
     // Equity = Total Assets − Total Liabilities
     // Positive = business is solvent
@@ -90,6 +99,10 @@ router.get('/', async (req, res) => {
       assets: {
         accounts: assetAccounts,                    // [{name, type, currentBalance, color}]
         total: totalAssets,
+      },
+      customerDues: {
+        total: Math.round(customerDuesTotal * 100) / 100,
+        count: customerDuesCount,
       },
       liabilities: {
         gst: gstLiability,                          // ₹ amount of accumulated GST
