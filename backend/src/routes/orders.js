@@ -9,6 +9,7 @@ const Customer = require('../models/Customer');
 const { auth, adminOnly, managerOrAdmin, staffOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
+const { ensureOrderBillNumber } = require('../utils/billingSequence');
 
 router.use(auth);
 
@@ -16,10 +17,36 @@ router.use(auth);
 const populateOrder = (query) => {
   return query
     .populate('table', 'tableNumber capacity status')
-    .populate('items.menuItem', 'name price isVeg isAvailable category')
+    .populate({
+      path: 'items.menuItem',
+      select: 'name price isVeg isAvailable category',
+      populate: { path: 'category', select: 'name' },
+    })
     .populate('customer', 'name phone totalDue')
     .populate('createdBy', 'name');
 };
+
+const BEVERAGE_CATEGORY_REGEX =
+  /\b(drink|drinks|beverage|beverages|coffee|coffees|tea|teas|chai|shake|shakes|juice|juices|mocktail|mocktails|cocktail|cocktails|soda|sodas|smoothie|smoothies|cooler|coolers|cold\s*drinks?|soft\s*drinks?)\b/i;
+
+const BEVERAGE_ITEM_REGEX =
+  /\b(thums\s*up|thumsup|coca\s*cola|coke|pepsi|sprite|fanta|limca|mirinda|mountain\s*dew|dew|7\s*up|seven\s*up|soda|sodas|mojito|mojitos|blue\s*lagoon|pina\s*colada|iced?\s*tea|tea|teas|chai|coffee|coffees|shake|shakes|juice|juices|smoothie|smoothies|mocktail|mocktails|cocktail|cocktails|lassi|water|beverage|beverages|drink|drinks|frappe|latte|cappuccino|espresso|lemonade|red\s*bull|sting|appy)\b/i;
+
+function isBeverageItem(item) {
+  if (!item) return false;
+  const cat = item.menuItem?.category || item.category;
+  const catName =
+    typeof cat === 'object' && cat !== null
+      ? String(cat.name || '')
+      : String(cat || '');
+
+  if (catName && BEVERAGE_CATEGORY_REGEX.test(catName)) {
+    return true;
+  }
+
+  const name = String(item.name || '').trim();
+  return BEVERAGE_ITEM_REGEX.test(name);
+}
 
 // ─────────────────────────────────────────────────────────────────
 // GET /api/orders — list orders
@@ -152,6 +179,9 @@ router.get('/pending-bills', async (req, res) => {
       return {
         orderId: order._id,
         orderNumber: order.orderNumber,
+        billNumber: order.billNumber,
+        fiscalQuarter: order.fiscalQuarter,
+        billedAt: order.billedAt,
         billPrintSeq: order.billPrintSeq || 1,
         tokenNo: order.orderNumber ? String(order.orderNumber).slice(-2) : String(order._id).slice(-2),
         tableNumber: order.table ? order.table.tableNumber : 'Takeaway',
@@ -237,46 +267,75 @@ router.get('/kds/active', async (req, res) => {
   try {
     const orders = await populateOrder(
       Order.find({
-        status: { $in: ['open', 'preparing', 'served', 'billed'] },
+        status: { $in: ['open', 'preparing', 'served'] },
+        billPrinted: { $ne: true },
       })
     );
 
-    // Filter out orders that have no active items left (all cancelled or already completed)
-    const activeOrders = orders.filter((o) => {
+    // Filter out orders that have no active items left (all cancelled)
+    // and exclude orders that have been billed, paid, or have billPrinted === true ("clear it after billed")
+    const unbilledOrders = orders.filter((o) => {
       if (!Array.isArray(o.items) || o.items.length === 0) return false;
+      if (['billed', 'paid', 'cancelled'].includes(o.status) || o.billPrinted) return false;
       return o.items.some((i) => i.status !== 'cancelled');
     });
 
-    // Compute effectiveActiveTime for each order and sort active orders
-    for (const order of activeOrders) {
-      const unserved = (order.items || []).filter(
+    // Ensure items are ordered: food items first, beverage section items after food items
+    for (const order of unbilledOrders) {
+      if (Array.isArray(order.items)) {
+        order.items.sort((a, b) => {
+          const aBev = isBeverageItem(a) ? 1 : 0;
+          const bBev = isBeverageItem(b) ? 1 : 0;
+          if (aBev !== bBev) return aBev - bBev;
+          return (a.roundNumber || 1) - (b.roundNumber || 1);
+        });
+      }
+    }
+
+    // Partition into:
+    // 1) activeOrders: orders that have items still needing preparation (pending or preparing)
+    // 2) fulfilledOrders: orders where all items are served, but table has not been billed yet
+    const activeOrders = [];
+    const fulfilledOrders = [];
+
+    for (const order of unbilledOrders) {
+      const activeItems = (order.items || []).filter((i) => i.status !== 'cancelled');
+      const hasUnserved = activeItems.some(
         (i) => i.status === 'pending' || i.status === 'preparing'
       );
-      if (unserved.length > 0) {
+
+      if (hasUnserved) {
+        const unserved = activeItems.filter(
+          (i) => i.status === 'pending' || i.status === 'preparing'
+        );
         const oldestActiveTime = unserved.reduce((min, it) => {
           const t = getItemEffectiveTime(order, it);
           return t < min ? t : min;
         }, getItemEffectiveTime(order, unserved[0]));
         order._doc.effectiveActiveTime = oldestActiveTime;
+        activeOrders.push(order);
       } else {
+        // All items served, awaiting billing
         order._doc.effectiveActiveTime = order.foodServedAt || order.createdAt;
+        fulfilledOrders.push(order);
       }
     }
 
-    // Sort activeOrders: orders with unserved items first (sorted by oldest active waiting time), then served orders
+    // Sort activeOrders: orders with oldest active waiting time first
     activeOrders.sort((a, b) => {
-      const aUnserved = (a.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
-      const bUnserved = (b.items || []).some((i) => i.status === 'pending' || i.status === 'preparing');
-
-      if (aUnserved && !bUnserved) return -1;
-      if (!aUnserved && bUnserved) return 1;
-
       const aTime = new Date(a._doc.effectiveActiveTime || a.createdAt).getTime();
       const bTime = new Date(b._doc.effectiveActiveTime || b.createdAt).getTime();
       return aTime - bTime;
     });
 
-    // Compute "Prep Next" (Smart Item-wise Aggregation)
+    // Sort fulfilledOrders: most recently served first
+    fulfilledOrders.sort((a, b) => {
+      const aTime = new Date(a.foodServedAt || a.updatedAt || a.createdAt).getTime();
+      const bTime = new Date(b.foodServedAt || b.updatedAt || b.createdAt).getTime();
+      return bTime - aTime;
+    });
+
+    // Compute "Prep Next" (Smart Item-wise Aggregation) from activeOrders
     const prepMap = new Map();
 
     for (const order of activeOrders) {
@@ -310,6 +369,7 @@ router.get('/kds/active', async (req, res) => {
           createdAt: itemPriorityTime,
           orderedAt: item.createdAt || order.createdAt,
           effectiveTime: itemPriorityTime,
+          roundNumber: item.roundNumber || 1,
         };
 
         const existing = prepMap.get(key);
@@ -357,7 +417,7 @@ router.get('/kds/active', async (req, res) => {
       })
       .sort((a, b) => new Date(a.oldestOrderAt).getTime() - new Date(b.oldestOrderAt).getTime());
 
-    res.json({ orders: activeOrders, prepNext });
+    res.json({ orders: activeOrders, fulfilled: fulfilledOrders, prepNext });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -488,6 +548,38 @@ router.post('/:id/kds-bump', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/kds-recall — Restore bumped order back to active kitchen queue
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/kds-recall', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (item.status === 'served') {
+          item.status = 'preparing';
+        }
+      });
+    }
+
+    order.foodServedAt = null;
+    if (order.status === 'served') {
+      order.status = 'preparing';
+    }
+    updateOrderActiveTimestamp(order);
+
+    await order.save();
+    const populated = await populateOrder(Order.findById(order._id));
+    res.json(populated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /api/orders/:id — get order by id
 // ─────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -587,6 +679,9 @@ router.post('/', staffOrAdmin, async (req, res) => {
       });
     }
 
+    // Sort items: food items first, beverage section items after food items
+    snapshottedItems.sort((a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0));
+
     // Calculate totals server-side
     const totals = Order.calcTotals(snapshottedItems, 0);
 
@@ -614,6 +709,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
 
     const order = await Order.create({
       table: table._id,
+      tableCategory: table.category || 'Indoor',
       orderNumber,
       kotCount: 1,
       items: snapshottedItems,
@@ -766,10 +862,13 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     }
 
     const isAutoPrint = shouldPrint !== false;
+    const sortedRoundItems = [...newRoundItems].sort(
+      (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
+    );
     order.kotRounds.push({
       roundNumber: nextKotCount,
       roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
-      items: newRoundItems.map((i) => ({
+      items: sortedRoundItems.map((i) => ({
         name: i.name,
         quantity: i.quantity,
         notes: i.notes || '',
@@ -991,6 +1090,9 @@ router.post('/:id/bill', staffOrAdmin, async (req, res) => {
     order.billPrintQueuedAt = new Date();
     order.billPrintSeq = (order.billPrintSeq || 0) + 1;
 
+    // Allocate official sequential quarterly bill number if not already assigned
+    await ensureOrderBillNumber(order);
+
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
       order.foodServedAt = new Date();
@@ -1009,7 +1111,7 @@ router.post('/:id/bill', staffOrAdmin, async (req, res) => {
       user: req.user,
       action: 'UPDATE',
       module: 'Orders',
-      description: `${req.user.name} generated bill for Order (Total: ₹${order.total})`,
+      description: `${req.user.name} generated bill #${order.billNumber || order.orderNumber} for Order (Total: ₹${order.total})`,
     });
 
     const populated = await populateOrder(Order.findById(order._id));
@@ -1209,6 +1311,9 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     order.settledAmount = finalSettled;
     order.waivedAmount = waivedAmount;
 
+    // Allocate official sequential quarterly bill number if settled directly without prior billing
+    await ensureOrderBillNumber(order);
+
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
       order.foodServedAt = new Date();
@@ -1237,8 +1342,8 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       user: req.user,
       action: 'UPDATE',
       module: 'Orders',
-      description: `${req.user.name} collected payment of ₹${finalSettled}${waivedAmount > 0 ? ` (Waived: ₹${waivedAmount})` : ''} via ${methodDesc} for Order on Table ${tableNum}`,
-      metadata: { orderId: order._id, paymentMethod, paymentBreakdown: orderPaymentBreakdown, settledAmount: finalSettled, waivedAmount },
+      description: `${req.user.name} settled bill #${order.billNumber || order.orderNumber} (₹${finalSettled}${waivedAmount > 0 ? `, Waived: ₹${waivedAmount}` : ''}) via ${methodDesc} on Table ${tableNum}`,
+      metadata: { orderId: order._id, paymentMethod, paymentBreakdown: orderPaymentBreakdown, settledAmount: finalSettled, waivedAmount, billNumber: order.billNumber },
     });
 
     const populated = await populateOrder(Order.findById(order._id));
@@ -1528,6 +1633,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
 
         const newTargetOrder = await Order.create({
           table: targetTable._id,
+          tableCategory: targetTable.category || 'Indoor',
           orderNumber,
           items: movedItems,
           kotRounds: roundsToMove.map((r, idx) => ({
@@ -1646,6 +1752,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
 
         const newTargetOrder = await Order.create({
           table: targetTable._id,
+          tableCategory: targetTable.category || 'Indoor',
           orderNumber,
           items: movedItems,
           kotRounds: [{
@@ -1839,6 +1946,9 @@ router.post('/:orderId/mark-bill-printed', async (req, res) => {
       order.status = 'billed';
     }
 
+    // Allocate official sequential quarterly bill number if not already assigned
+    await ensureOrderBillNumber(order);
+
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
       order.foodServedAt = new Date();
@@ -1853,7 +1963,7 @@ router.post('/:orderId/mark-bill-printed', async (req, res) => {
 
     await order.save();
 
-    res.json({ success: true, message: 'Customer bill marked as printed', orderId: order._id });
+    res.json({ success: true, message: 'Customer bill marked as printed', orderId: order._id, billNumber: order.billNumber });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -1879,6 +1989,9 @@ router.post('/:orderId/queue-bill-print', async (req, res) => {
       order.status = 'billed';
     }
 
+    // Allocate official sequential quarterly bill number if not already assigned
+    await ensureOrderBillNumber(order);
+
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
       order.foodServedAt = new Date();
@@ -1898,6 +2011,8 @@ router.post('/:orderId/queue-bill-print', async (req, res) => {
       message: 'Customer bill queued for printer',
       orderId: order._id,
       billPrintSeq: order.billPrintSeq,
+      billNumber: order.billNumber,
+      fiscalQuarter: order.fiscalQuarter,
     });
   } catch (err) {
     res.status(400).json({ message: err.message });

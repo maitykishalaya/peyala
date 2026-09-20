@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const router = require('express').Router();
 const Payment = require('../models/Payment');
 const Account = require('../models/Account');
@@ -26,7 +27,7 @@ router.use(auth);
 
 router.get('/', async (req, res) => {
   try {
-    const { startDate, endDate, category } = req.query;
+    const { startDate, endDate, category, supplier, search, sortBy = 'date', sortOrder = 'desc' } = req.query;
     const { page, limit } = normalizePagination(req.query);
     const filter = {};
 
@@ -44,13 +45,67 @@ router.get('/', async (req, res) => {
 
     if (category) filter.category = category;
 
+    // Supplier filter: supports Supplier ObjectId or supplier name regex match
+    if (supplier) {
+      if (mongoose.Types.ObjectId.isValid(supplier)) {
+        const supDoc = await Supplier.findById(supplier).select('name');
+        if (supDoc) {
+          const escaped = supDoc.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          filter.$or = [
+            { supplier: new mongoose.Types.ObjectId(supplier) },
+            { payee: new RegExp(`^${escaped}$`, 'i') },
+            { payee: new RegExp(escaped, 'i') },
+          ];
+        } else {
+          filter.supplier = new mongoose.Types.ObjectId(supplier);
+        }
+      } else {
+        const escaped = supplier.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        filter.$or = [
+          { payee: new RegExp(escaped, 'i') },
+          { subcategory: new RegExp(escaped, 'i') },
+        ];
+      }
+    }
+
+    // Optional text search across payee, description, referenceNumber, subcategory
+    if (search && search.trim()) {
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      const searchConditions = [
+        { payee: regex },
+        { description: regex },
+        { referenceNumber: regex },
+        { subcategory: regex },
+      ];
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchConditions }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchConditions;
+      }
+    }
+
+    // Sort order
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    let sortObj = { date: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: direction };
+    } else if (sortBy === 'amount') {
+      sortObj = { amount: direction, date: -1 };
+    } else if (sortBy === 'category') {
+      sortObj = { category: direction, date: -1 };
+    } else if (sortBy === 'payee' || sortBy === 'supplier') {
+      sortObj = { payee: direction, date: -1 };
+    }
+
     const total = await Payment.countDocuments(filter);
     const payments = await Payment.find(filter)
       .populate('paidFrom', 'name type')
       .populate('createdBy', 'name')
       .populate('supplier', 'name')
       .populate('staff', 'name position')
-      .sort('-date')
+      .sort(sortObj)
       .skip((page - 1) * limit)
       .limit(limit);
 

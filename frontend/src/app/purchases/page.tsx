@@ -186,7 +186,7 @@ export default function PurchasesPage() {
 
   const blankPurchaseForm = () => ({
     date: today(), supplier: '', paidFrom: '', paymentMode: 'cash',
-    isPaid: true, notes: '', referenceNumber: '',
+    isPaid: true, notes: '', description: '', referenceNumber: '',
     isGstBill: false,
     lines: [{ item: '', quantity: 0, unit: 'kg', pricePerUnit: 0, gstPercent: 0, gstAmount: 0, totalPrice: 0 }]
   });
@@ -361,7 +361,8 @@ export default function PurchasesPage() {
       paymentMode: purchase.paymentMode || 'cash',
       isPaid: purchase.isPaid,
       isGstBill: (purchase.items || []).some((it: any) => (it.gstPercent || 0) > 0),
-      notes: purchase.notes || '',
+      notes: purchase.notes || purchase.description || '',
+      description: purchase.description || purchase.notes || '',
       referenceNumber: purchase.referenceNumber || '',
       lines: purchase.items.map((item: any) => ({
         item: item.item?._id || item.item,
@@ -787,7 +788,16 @@ export default function PurchasesPage() {
             </div>
           </div>
 
-          <div><label className="label">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+          <div>
+            <label className="label">Notes / Description (shows on payment)</label>
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Optional notes or description for this purchase. If left blank, item names will appear on the payment."
+              value={form.notes}
+              onChange={e => setForm({...form, notes: e.target.value, description: e.target.value})}
+            />
+          </div>
 
           <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
             <button

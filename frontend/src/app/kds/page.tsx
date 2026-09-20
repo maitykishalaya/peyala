@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import { ordersApi, Order, KdsPrepNextItem, OrderItem, KdsPrepTableEntry } from '@/lib/pos-api';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency, cn, isBeverageItem } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { playTwoBlinkAlertSound, broadcastKdsReady } from '@/lib/audio-alerts';
 import Link from 'next/link';
@@ -116,6 +116,7 @@ export default function KitchenDisplayPage() {
       const res = await ordersApi.getKdsActive();
       const newOrders = res.data.orders || [];
       const newPrepNext = res.data.prepNext || [];
+      const newFulfilled = res.data.fulfilled || [];
 
       // Check if new orders arrived to trigger sound alert
       if (!isInitialLoadRef.current && soundEnabled) {
@@ -133,6 +134,7 @@ export default function KitchenDisplayPage() {
 
       setOrders(newOrders);
       setPrepNext(newPrepNext);
+      setFulfilledHistory(newFulfilled);
     } catch (err: any) {
       console.error('Failed to load KDS active feed:', err);
     } finally {
@@ -337,16 +339,13 @@ export default function KitchenDisplayPage() {
     }
   };
 
-  // Recall a ticket from fulfilled history
+  // Recall a ticket from fulfilled history back to active kitchen queue
   const handleRecallOrder = async (order: Order) => {
     try {
       setActionLoading(`recall-${order._id}`);
-      // Revert items to preparing
-      if (order.items && order.items.length > 0 && order.items[0]._id) {
-        await ordersApi.updateKdsItemStatus(order._id, order.items[0]._id, 'preparing');
-      }
-      setFulfilledHistory((prev) => prev.filter((o) => o._id !== order._id));
-      toast.info('Ticket recalled back to active queue ↩');
+      await ordersApi.recallKdsOrder(order._id);
+      const tableStr = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+      toast.info(`Ticket for Table ${tableStr} recalled back to active queue ↩`);
       await loadKdsData(true);
     } catch (err: any) {
       toast.error('Failed to recall ticket');
@@ -395,10 +394,7 @@ export default function KitchenDisplayPage() {
     if (stationFilter === 'veg') {
       items = items.filter((i) => i.isVeg);
     } else if (stationFilter === 'beverage') {
-      items = items.filter((i) => {
-        const catName = typeof i.category === 'object' && i.category !== null ? i.category.name : '';
-        return /drink|beverage|coffee|tea|shake|juice/i.test(catName || i.name);
-      });
+      items = items.filter((i) => isBeverageItem(i));
     }
 
     if (searchQuery.trim()) {
@@ -423,10 +419,7 @@ export default function KitchenDisplayPage() {
       list = list.filter((o) => (o.items || []).some((it) => (it.menuItem as any)?.isVeg));
     } else if (stationFilter === 'beverage') {
       list = list.filter((o) =>
-        (o.items || []).some((it) => {
-          const catName = (it.menuItem as any)?.category?.name || '';
-          return /drink|beverage|coffee|tea|shake|juice/i.test(catName || it.name);
-        })
+        (o.items || []).some((it) => isBeverageItem(it))
       );
     }
 
@@ -454,6 +447,30 @@ export default function KitchenDisplayPage() {
 
     return list;
   }, [orders, stationFilter, searchQuery]);
+
+  // Filtered fulfilled orders (served but unbilled)
+  const filteredFulfilled = useMemo(() => {
+    let list = [...fulfilledHistory];
+
+    if (stationFilter === 'veg') {
+      list = list.filter((o) => (o.items || []).some((it) => (it.menuItem as any)?.isVeg));
+    } else if (stationFilter === 'beverage') {
+      list = list.filter((o) =>
+        (o.items || []).some((it) => isBeverageItem(it))
+      );
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((o) => {
+        const tNum = typeof o.table === 'object' ? o.table.tableNumber : '';
+        const hasItem = (o.items || []).some((it) => it.name.toLowerCase().includes(q));
+        return tNum.toLowerCase().includes(q) || hasItem || String(o.orderNumber || '').includes(q);
+      });
+    }
+
+    return list;
+  }, [fulfilledHistory, stationFilter, searchQuery]);
 
   // Overall statistics
   const totalPendingDishes = useMemo(() => {
@@ -641,7 +658,7 @@ export default function KitchenDisplayPage() {
               )}
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Fulfilled ({fulfilledHistory.length})</span>
+              <span>Fulfilled ({filteredFulfilled.length})</span>
             </button>
           </div>
 
@@ -826,6 +843,11 @@ export default function KitchenDisplayPage() {
                                     <span className="text-[11px] font-black px-1.5 py-0.2 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
                                       ×{t.quantity}
                                     </span>
+                                    {t.roundNumber && t.roundNumber > 1 && (
+                                      <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded-md bg-amber-500 text-white shadow-2xs">
+                                        Round {t.roundNumber}
+                                      </span>
+                                    )}
                                     <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
                                       {getElapsedMinutes(t.createdAt)}m
                                     </span>
@@ -932,6 +954,13 @@ export default function KitchenDisplayPage() {
                     : null;
                   const roundTag = latestRound?.roundTag || (order.kotRounds && order.kotRounds.length > 1 ? `Round ${order.kotRounds.length}` : 'Round 1');
                   const activeItems = (order.items || []).filter((i) => i.status !== 'cancelled');
+                  // Food items first, beverage section items appear after food items
+                  const sortedActiveItems = [...activeItems].sort((a, b) => {
+                    const aBev = isBeverageItem(a) ? 1 : 0;
+                    const bBev = isBeverageItem(b) ? 1 : 0;
+                    if (aBev !== bBev) return aBev - bBev;
+                    return (a.roundNumber || 1) - (b.roundNumber || 1);
+                  });
                   const allServed = activeItems.length > 0 && activeItems.every((i) => i.status === 'served');
                   const anyPending = activeItems.some((i) => i.status === 'pending');
 
@@ -952,9 +981,16 @@ export default function KitchenDisplayPage() {
                             <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                               Token #{order.orderNumber || order._id.slice(-4)}
                             </span>
-                            <h3 className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight">
-                              Table {tableNumber}
-                            </h3>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <h3 className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight">
+                                Table {tableNumber}
+                              </h3>
+                              {order.kotRounds && order.kotRounds.length > 1 && (
+                                <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded-lg bg-amber-500 text-white shadow-2xs animate-pulse">
+                                  Round {order.kotRounds.length}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <div className="text-right">
@@ -966,7 +1002,7 @@ export default function KitchenDisplayPage() {
                             >
                               {elapsedMins} mins
                             </span>
-                            <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                            <p className="text-[11px] font-black text-amber-600 dark:text-amber-400 mt-0.5 uppercase tracking-wide">
                               {roundTag}
                             </p>
                           </div>
@@ -980,9 +1016,10 @@ export default function KitchenDisplayPage() {
 
                         {/* Items Checklist */}
                         <div className="divide-y divide-gray-100 dark:divide-gray-800 my-2 max-h-[260px] overflow-y-auto pr-0.5">
-                          {activeItems.map((item, idx) => {
+                          {sortedActiveItems.map((item, idx) => {
                             const isItemDone = item.status === 'served';
                             const isItemCooking = item.status === 'preparing';
+                            const isBev = isBeverageItem(item);
 
                             return (
                               <div
@@ -1023,6 +1060,18 @@ export default function KitchenDisplayPage() {
                                         Note: {item.notes}
                                       </p>
                                     )}
+                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                      {item.roundNumber && item.roundNumber > 1 && (
+                                        <span className="text-[10px] font-black uppercase text-amber-900 dark:text-amber-100 bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 inline-block shadow-2xs">
+                                          Round {item.roundNumber}
+                                        </span>
+                                      )}
+                                      {isBev && (
+                                        <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded inline-block border border-blue-200 dark:border-blue-900">
+                                          Beverage
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
@@ -1077,46 +1126,70 @@ export default function KitchenDisplayPage() {
         )}
 
         {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* TAB 3: FULFILLED HISTORY (RECENT COMPLETED TICKETS & RECALL) */}
+        {/* TAB 3: FULFILLED (SERVED UNBILLED KOTS & RECALL) */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'history' && (
           <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 shadow-xs">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800 mb-3">
               <div>
-                <h3 className="font-black text-base text-gray-900 dark:text-white">
-                  Recently Fulfilled Tickets
+                <h3 className="font-black text-base text-gray-900 dark:text-white flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-emerald-600" />
+                  <span>Served KOTs (Unbilled Tables)</span>
                 </h3>
-                <p className="text-xs text-gray-500 font-medium">
-                  Tickets completed from this KDS screen. If a ticket was bumped by accident, tap &quot;Recall&quot; to restore it.
+                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                  Orders that have been served to dining customers and are awaiting billing. Automatically cleared once billed.
                 </p>
               </div>
             </div>
 
-            {fulfilledHistory.length === 0 ? (
+            {filteredFulfilled.length === 0 ? (
               <div className="py-16 text-center text-gray-400 text-sm">
-                No tickets have been bumped during this session yet.
+                No served unbilled orders at the moment. When orders are served, they appear here until billed.
               </div>
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {fulfilledHistory.map((order) => {
+                {filteredFulfilled.map((order) => {
                   const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+                  const servedAtTime = order.foodServedAt || order.effectiveActiveTime || order.createdAt;
 
                   return (
-                    <div key={order._id} className="py-3 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-sm text-gray-900 dark:text-white">
+                    <div key={order._id} className="py-3.5 flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-sm sm:text-base text-gray-900 dark:text-white">
                             Table {tableNumber}
                           </span>
                           <span className="text-xs font-bold text-gray-400">
                             Token #{order.orderNumber || order._id.slice(-4)}
                           </span>
-                          <span className="text-[10px] font-black uppercase px-2 py-0.2 rounded bg-emerald-100 text-emerald-800">
-                            Fulfilled
+                          {order.kotRounds && order.kotRounds.length > 1 && (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                              Round {order.kotRounds.length}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                            Served (Unbilled)
                           </span>
+                          <span className="text-[11px] font-medium text-gray-400">
+                            Server: {order.createdBy?.name || 'Staff'}
+                          </span>
+                          {servedAtTime && (
+                            <span className="text-[11px] font-medium text-gray-400">
+                              • {new Date(servedAtTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {(order.items || []).filter((i) => i.status !== 'cancelled').map((i) => `${i.quantity}x ${i.name}`).join(', ')}
+                        <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mt-1.5 leading-relaxed">
+                          {(order.items || [])
+                            .filter((i) => i.status !== 'cancelled')
+                            .sort((a, b) => {
+                              const aBev = isBeverageItem(a) ? 1 : 0;
+                              const bBev = isBeverageItem(b) ? 1 : 0;
+                              if (aBev !== bBev) return aBev - bBev;
+                              return (a.roundNumber || 1) - (b.roundNumber || 1);
+                            })
+                            .map((i) => `${i.quantity}x ${i.name}${i.variant?.name ? ` (${i.variant.name})` : ''}`)
+                            .join(' • ')}
                         </p>
                       </div>
 
@@ -1124,7 +1197,8 @@ export default function KitchenDisplayPage() {
                         type="button"
                         onClick={() => handleRecallOrder(order)}
                         disabled={actionLoading === `recall-${order._id}`}
-                        className="px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-xs font-bold hover:bg-amber-100 flex items-center gap-1 cursor-pointer transition-colors"
+                        className="px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-xs font-bold hover:bg-amber-100 flex items-center gap-1.5 cursor-pointer transition-colors shrink-0 shadow-2xs"
+                        title="Recall order back to active cooking queue"
                       >
                         <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
                         <span>Recall</span>

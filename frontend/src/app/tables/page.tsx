@@ -9,6 +9,7 @@ import {
   ordersApi,
   menuApi,
   addonsApi,
+  tableCategoriesApi,
   Table,
   Order,
   MenuItem,
@@ -16,6 +17,7 @@ import {
   Addon,
   MenuItemVariant,
   OrderInputItem,
+  TableCategory,
 } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
@@ -83,10 +85,9 @@ export interface CartItemConfig {
   unitPrice: number;
 }
 
-export type TableSection = 'Indoor' | 'Outdoor' | 'Pick Up' | 'Other';
+export type TableSection = string;
 
-// Group table into Indoor, Outdoor, Pick Up, Other sections (matching Petpooja layout)
-function getTableSection(tableNumber: string): TableSection {
+function inferTableSection(tableNumber: string): string {
   const lower = (tableNumber || '').toLowerCase().trim();
   if (
     lower.startsWith('in ') ||
@@ -131,6 +132,17 @@ function getTableSection(tableNumber: string): TableSection {
   return 'Other';
 }
 
+// Group table into Indoor, Outdoor, Pick Up, Other or custom categories
+function getTableSection(table: Table | string): string {
+  if (typeof table === 'object' && table !== null) {
+    if (table.category && table.category.trim()) {
+      return table.category.trim();
+    }
+    return inferTableSection(table.tableNumber);
+  }
+  return inferTableSection(String(table || ''));
+}
+
 export default function TablesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -140,6 +152,7 @@ export default function TablesPage() {
   const [activeView, setActiveView] = useState<'table_view' | 'pos_order'>('table_view');
 
   const [tables, setTables] = useState<Table[]>([]);
+  const [tableCategories, setTableCategories] = useState<TableCategory[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
@@ -299,16 +312,18 @@ export default function TablesPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [tableRes, itemRes, catRes, addonRes] = await Promise.all([
+      const [tableRes, itemRes, catRes, addonRes, tableCatRes] = await Promise.all([
         tablesApi.list(),
         menuApi.listItems({ availableOnly: true }),
         menuApi.listCategories(),
         addonsApi.list(),
+        tableCategoriesApi.list().catch(() => ({ data: [] })),
       ]);
       setTables(tableRes.data);
       setMenuItems(itemRes.data);
       setCategories(catRes.data);
       setAddons(addonRes.data);
+      setTableCategories(tableCatRes.data || []);
 
       // Check for orders that were marked served by KDS to notify the cashier
       const newlyServedTables = (tableRes.data || []).filter((t) => {
@@ -461,6 +476,7 @@ export default function TablesPage() {
 
           try {
             printCustomerBill({
+              billNumber: bJob.billNumber,
               orderNumber: bJob.orderNumber,
               tokenNo: bJob.tokenNo,
               tableNumber: bJob.tableNumber,
@@ -542,6 +558,28 @@ export default function TablesPage() {
     return { total, available, occupied, reserved, billed };
   }, [tables]);
 
+  // Dynamic list of active sections sorted according to TableCategory configuration
+  const activeSections = useMemo(() => {
+    const defaultOrder = ['Indoor', 'Outdoor', 'Pick Up', 'Other'];
+    const set = new Set<string>();
+    tableCategories.forEach((c) => set.add(c.name));
+    tables.forEach((t) => set.add(getTableSection(t)));
+    defaultOrder.forEach((sec) => set.add(sec));
+
+    const orderMap = new Map<string, number>();
+    tableCategories.forEach((c, idx) => {
+      const val = typeof c.order === 'number' && c.order > 0 ? c.order : (idx + 1);
+      orderMap.set(c.name, val);
+    });
+
+    return Array.from(set).sort((a, b) => {
+      const orderA = orderMap.has(a) ? orderMap.get(a)! : 999;
+      const orderB = orderMap.has(b) ? orderMap.get(b)! : 999;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.localeCompare(b);
+    });
+  }, [tables, tableCategories]);
+
   // Grouped tables by section
   const sectionGroupedTables = useMemo(() => {
     const filtered = tables.filter((t) => {
@@ -552,20 +590,19 @@ export default function TablesPage() {
       return true;
     });
 
-    const groups: Record<TableSection, Table[]> = {
-      Indoor: [],
-      Outdoor: [],
-      'Pick Up': [],
-      Other: [],
-    };
+    const groups: Record<string, Table[]> = {};
+    activeSections.forEach((sec) => {
+      groups[sec] = [];
+    });
 
     filtered.forEach((table) => {
-      const sec = getTableSection(table.tableNumber);
+      const sec = getTableSection(table);
+      if (!groups[sec]) groups[sec] = [];
       groups[sec].push(table);
     });
 
     return groups;
-  }, [tables, statusFilter, tableSearch]);
+  }, [tables, statusFilter, tableSearch, activeSections]);
 
   // Helper to compute composite cart key for variants/addons
   const getCartKey = (itemId: string, variantName?: string, addonsList?: Array<{ name: string }>) => {
@@ -1206,6 +1243,7 @@ export default function TablesPage() {
     const isPaid = isPaidStatus || targetOrder.status === 'paid';
 
     printCustomerBill({
+      billNumber: targetOrder.billNumber,
       orderNumber: targetOrder.orderNumber,
       tokenNo: targetOrder.orderNumber ? String(targetOrder.orderNumber).slice(-2) : targetOrder._id.slice(-2),
       tableNumber: selectedTable?.tableNumber || (targetOrder.table as any)?.tableNumber || 'Takeaway',
@@ -1738,7 +1776,7 @@ export default function TablesPage() {
             {/* Filter Section Tabs & Search Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
               <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-                {(['all', 'Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sec) => {
+                {(['all', ...activeSections]).map((sec) => {
                   if (sec !== 'all' && (!sectionGroupedTables[sec] || sectionGroupedTables[sec].length === 0)) {
                     return null;
                   }
@@ -1794,7 +1832,7 @@ export default function TablesPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                {activeSections.map((sectionName) => {
                   if (sectionFilter !== 'all' && sectionFilter !== sectionName) return null;
                   const secTables = sectionGroupedTables[sectionName];
                   if (!secTables || secTables.length === 0) return null;
@@ -3979,10 +4017,10 @@ export default function TablesPage() {
           {/* 1. TABLE WISE TAB */}
           {moveTab === 'table' && (
             <div className="space-y-4 pt-1 max-h-[55vh] overflow-y-auto pr-1">
-              {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+              {activeSections.map((sectionName) => {
                 const sectionTables = tables.filter((t) => {
                   if (t._id === moveModal.sourceTable?._id) return false;
-                  return getTableSection(t.tableNumber) === sectionName;
+                  return getTableSection(t) === sectionName;
                 });
                 if (sectionTables.length === 0) return null;
 
@@ -4088,10 +4126,10 @@ export default function TablesPage() {
                 <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
                   Select Destination Table
                 </h4>
-                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                {activeSections.map((sectionName) => {
                   const sectionTables = tables.filter((t) => {
                     if (t._id === moveModal.sourceTable?._id) return false;
-                    return getTableSection(t.tableNumber) === sectionName;
+                    return getTableSection(t) === sectionName;
                   });
                   if (sectionTables.length === 0) return null;
 
@@ -4207,10 +4245,10 @@ export default function TablesPage() {
                 <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
                   Select Destination Table
                 </h4>
-                {(['Indoor', 'Outdoor', 'Pick Up', 'Other'] as const).map((sectionName) => {
+                {activeSections.map((sectionName) => {
                   const sectionTables = tables.filter((t) => {
                     if (t._id === moveModal.sourceTable?._id) return false;
-                    return getTableSection(t.tableNumber) === sectionName;
+                    return getTableSection(t) === sectionName;
                   });
                   if (sectionTables.length === 0) return null;
 

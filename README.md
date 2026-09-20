@@ -29,6 +29,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Expense Leak Detector** | `/expense-leak-detector` | Autonomous financial & operational leak detection engine, statistical price/usage spike alerts, sales-adjusted spending anomalies, anti-double-counting clustering, and 30-day dismissal feedback. |
 | **Staff & Attendance** | `/staff`, `/attendance` | Employee directory, monthly attendance calendar with leave cap enforcement, 2-shift duty time tracking (entry/exit), pro-rata salary deductions, advances, bonuses, and salary disbursals. |
 | **Balance Sheet** | `/balancesheet` | Dynamic statement of Assets (bank/cash accounts), Liabilities (GST liability, supplier dues, loans), and Net Equity. |
+| **Outlet Design & Floor Zones** | `/settings/outlet-design` | Floor category management (Indoor, Outdoor, Other), table reassignment, section reordering, and revenue analytics per zone. |
 | **Settings & Security** | `/settings` | Role-based user administration, audit logging, payment categories, database backup/restore, and dark/light mode. |
 | **Features Showcase & Login** | `/login` | 12-slide interactive scrollable feature showcase paired with right-hand business authentication portal and 1-tap demo credentials. |
 
@@ -79,7 +80,9 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - **View C: Kitchen Display System (KDS) (`/kds`)**:
     - **Smart "Prep Next" Station (Item-Wise Aggregator)**: Consolidates identical pending dishes across all open tables into high-efficiency prep cards (e.g. *5x Momo, 3x Coffee*), sorted by oldest wait time (FIFO) or highest quantity. Cooks can batch-prepare identical dishes in one go!
     - **"KOT Tickets" Live Queue**: FIFO order cards with table number, token #, elapsed timer (Green $\le$ 10m, Amber 10-20m, Red $>$ 20m), round tag, checklist of items, and 1-tap `[ Start Prep ]` / `[ Order Ready ]` buttons.
-    - **"Fulfilled History" & Recall**: Allows viewing recently completed tickets with a `[ ↩ Recall ]` button to restore any order bumped by mistake.
+    - **Beverage Ordering Behind Food**: Dishes categorized under `beverage` automatically display **after** food items on kitchen tickets, allowing cooks to focus on hot stove prep while beverages queue below.
+    - **Multi-Round Identification**: Tickets for Round 2, Round 3, Round 4... display distinct badges (`Round 2`, `Round 3`...) on card headers to distinguish re-orders from initial meals.
+    - **"Fulfilled History" & Active Dining Retention**: Fulfilled tab maintains served KOT lists until the table is finalized and settled/paid, clearing automatically upon billing. Includes a `[ ↩ Recall ]` button to restore any order bumped by mistake.
     - **Web Audio API Kitchen Chime**: Synthesizes a dual-tone kitchen bell chime (`880Hz` $\rightarrow$ `1320Hz`) automatically whenever a new KOT arrives from the floor or mobile device.
     - **Station & Diet Filters**: Instant filters for `All`, `Veg Only`, and `Bar / Beverages`.
   - **View D: Add-on & Variant Customization Modal**:
@@ -431,6 +434,39 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
     - `/sales`: Daily sales ledger table columns (Outlet Sales, Cash, UPI/Card, Zomato, Fatafat, Other, Total) display `••••••`.
     - `/payments`: Staff expense payments display `••••••` for transaction amounts.
   - **Safe Caching Isolation**: Client-side localStorage caches for dashboard, sales, reports, staff, attendance, and payments are strictly partitioned by user role (`_viewer` vs `_admin`) preventing stale cache bleed across different account sessions.
+
+### 22. Quarterly GST-Compliant Bill Numbering System (IST)
+- **Indian Fiscal Quarter Auto-Reset**:
+  - Bill numbers strictly restart from **1** at `00:00:00 IST` on the first day of every quarter:
+    - **Q1**: April 1st – June 30th (Resets to 1 on April 1 at 00:00 IST)
+    - **Q2**: July 1st – September 30th (Resets to 1 on July 1 at 00:00 IST)
+    - **Q3**: October 1st – December 31st (Resets to 1 on October 1 at 00:00 IST)
+    - **Q4**: January 1st – March 31st (Resets to 1 on January 1 at 00:00 IST)
+- **Plain Sequential Numbering Without Suffixes**:
+  - Increments by 1 with each finalized bill (e.g. `1`, `2`, `3`... `9877`), providing clean sequential auditing for quarterly GST filings and tax compliance.
+- **Universal Bill Number Allocation Guarantee**:
+  - Implemented via `BillSequence` collection in MongoDB (`backend/src/utils/billingSequence.js`).
+  - Bill numbers are assigned immediately when a bill is generated/printed or when an order is settled directly without printing (via Cash, Due, Card, UPI, or Part Payment), ensuring complete transparency and un-gapped accounting records.
+- **Thermal Slip & Report Integration**:
+  - 80mm receipts render `Bill No: {order.billNumber}`.
+  - The Detailed Sales Report (`/reports`) displays the quarterly bill number for all historical transactions.
+
+### 23. Outlet Design, Floor Categories & Dynamic Section Sorting (`/settings/outlet-design`)
+- **Custom Dining Zones & Floor Categories (`TableCategory`)**:
+  - Configure custom floor categories (e.g., *Indoor*, *Outdoor*, *Rooftop*, *Patio*, *Pick Up*, *Other*) with dedicated colors and emoji icons.
+- **1-Click Table Moving & Category Reassignment**:
+  - Instantly move any table to another zone (e.g., reassigning table `ratnadeep` to `Other`) using the table card dropdown, with zero downtime.
+- **Real-Time Revenue Analytics Per Zone**:
+  - Track how much revenue each floor zone generates: Total Settled Sales, percentage of outlet revenue (`% of total`), order counts, table counts, and Average Order Value (AOV) across filters: Today, This Week, This Month, This Quarter, and All Time.
+- **Configurable Floor Section Sorting & Reordering**:
+  - **One-Click Arrow Reorder**: Category cards in Outlet Design feature **`←`** (Move Left) and **`→`** (Move Right) buttons with a sequence badge (`#1`, `#2`, etc.) to easily adjust layout sequence.
+  - **Numeric Display Sequence**: Add/Edit Category modal includes an explicit `Display Sequence / Order` field.
+  - **POS Tables Screen Integration (`/tables`)**: The POS floor plan dynamically orders section filter pills, dining floor layout grids, and table transfer modal dialogs strictly by this configured sequence.
+
+### 24. Due Purchases & Supplier Ledger Consistency
+- **Accurate Vendor Dues**:
+  - Purchases marked on due (`isPaid: false`) accurately post to raw material stock while recording the outstanding payable in the Supplier Ledger and Balance Sheet liabilities (`supplierDues`).
+  - When paid through payment vouchers (`/payments`), funds are debited from the chosen account and supplier dues are reduced, maintaining double-entry balance sheet accuracy.
 
 ---
 

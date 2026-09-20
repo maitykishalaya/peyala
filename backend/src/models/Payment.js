@@ -60,5 +60,7 @@ paymentSchema.index({ date: -1, category: 1 });
 paymentSchema.index({ paidFrom: 1 });
 paymentSchema.index({ category: 1, subcategory: 1 });
 paymentSchema.index({ staff: 1 });
+paymentSchema.index({ supplier: 1, date: -1 });
+paymentSchema.index({ payee: 1, date: -1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

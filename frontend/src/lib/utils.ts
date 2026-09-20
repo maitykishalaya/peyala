@@ -43,3 +43,25 @@ export const PAYMENT_CATEGORIES = [
 ];
 
 export const UNITS = ['kg', 'gram', 'litre', 'ml', 'piece', 'packet', 'box', 'dozen', 'bottle'];
+
+export const BEVERAGE_CATEGORY_REGEX =
+  /\b(drink|drinks|beverage|beverages|coffee|coffees|tea|teas|chai|shake|shakes|juice|juices|mocktail|mocktails|cocktail|cocktails|soda|sodas|smoothie|smoothies|cooler|coolers|cold\s*drinks?|soft\s*drinks?)\b/i;
+
+export const BEVERAGE_ITEM_REGEX =
+  /\b(thums\s*up|thumsup|coca\s*cola|coke|pepsi|sprite|fanta|limca|mirinda|mountain\s*dew|dew|7\s*up|seven\s*up|soda|sodas|mojito|mojitos|blue\s*lagoon|pina\s*colada|iced?\s*tea|tea|teas|chai|coffee|coffees|shake|shakes|juice|juices|smoothie|smoothies|mocktail|mocktails|cocktail|cocktails|lassi|water|beverage|beverages|drink|drinks|frappe|latte|cappuccino|espresso|lemonade|red\s*bull|sting|appy)\b/i;
+
+export function isBeverageItem(item: any): boolean {
+  if (!item) return false;
+  const cat = (item.menuItem as any)?.category || (item as any)?.category;
+  const catName =
+    typeof cat === 'object' && cat !== null
+      ? String(cat.name || '')
+      : String(cat || '');
+
+  if (catName && BEVERAGE_CATEGORY_REGEX.test(catName)) {
+    return true;
+  }
+
+  const name = String(item.name || '').trim();
+  return BEVERAGE_ITEM_REGEX.test(name);
+}

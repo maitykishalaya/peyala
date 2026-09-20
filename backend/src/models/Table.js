@@ -8,9 +8,11 @@ const tableSchema = new mongoose.Schema({
     enum: ['available', 'occupied', 'reserved'],
     default: 'available',
   },
+  category: { type: String, trim: true, default: 'Indoor', index: true },
   activeOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
 }, { timestamps: true });
 
 tableSchema.index({ status: 1 });
+tableSchema.index({ category: 1 });
 
 module.exports = mongoose.model('Table', tableSchema);

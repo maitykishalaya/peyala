@@ -51,6 +51,10 @@ const orderSchema = new mongoose.Schema({
     default: 'open',
   },
   orderNumber: { type: Number },
+  billNumber: { type: Number, index: true, default: null },
+  fiscalQuarter: { type: String, index: true, default: null },
+  billedAt: { type: Date, default: null },
+  tableCategory: { type: String, trim: true, default: 'Indoor', index: true },
   kotCount: { type: Number, default: 1 },
   subtotal: { type: Number, default: 0 },
   taxAmount: { type: Number, default: 0 },
@@ -98,6 +102,7 @@ orderSchema.index({ billPrintQueued: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
 orderSchema.index({ customer: 1, dueSettled: 1 });
 orderSchema.index({ paymentMethod: 1, dueSettled: 1 });
+orderSchema.index({ fiscalQuarter: 1, billNumber: 1 });
 
 // Static helper to calculate order financial totals excluding cancelled items
 orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discountType = 'flat') {

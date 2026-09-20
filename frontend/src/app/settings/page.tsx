@@ -5,7 +5,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/lib/auth';
 import { authApi, ownerNoteApi } from '@/lib/api';
 import { toast } from '@/lib/toast';
-import { Settings, User, Shield, Database, Users, Activity, Tag, RefreshCw } from 'lucide-react';
+import { Settings, User, Shield, Database, Users, Activity, Tag, RefreshCw, LayoutGrid } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -145,6 +145,15 @@ export default function SettingsPage() {
               <div>
                 <p className="font-medium text-gray-900 dark:text-white text-sm group-hover:text-brand-600 transition-colors">Payment Categories</p>
                 <p className="text-xs text-gray-400">Edit categories & subcategories</p>
+              </div>
+            </Link>
+            <Link href="/settings/outlet-design" className="card p-4 flex items-center gap-3 hover:shadow-md transition-shadow group">
+              <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center">
+                <LayoutGrid className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white text-sm group-hover:text-brand-600 transition-colors">Outlet Design</p>
+                <p className="text-xs text-gray-400">Floor sections & zone sales tracking</p>
               </div>
             </Link>
             <Link href="/settings/backup" className="card p-4 flex items-center gap-3 hover:shadow-md transition-shadow group">

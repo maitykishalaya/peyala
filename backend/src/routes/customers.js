@@ -152,6 +152,7 @@ router.get('/due-report', async (req, res) => {
       ];
       if (isNum) {
         orConditions.push({ orderNumber: Number(q) });
+        orConditions.push({ billNumber: Number(q) });
       }
       billFilter.$or = orConditions;
     }
@@ -170,6 +171,8 @@ router.get('/due-report', async (req, res) => {
       return {
         _id: o._id,
         orderNumber: o.orderNumber,
+        billNumber: o.billNumber,
+        fiscalQuarter: o.fiscalQuarter,
         tableNumber: o.table?.tableNumber || 'N/A',
         createdAt: o.createdAt,
         customerName: o.customerName || 'Walk-in',
@@ -305,6 +308,7 @@ router.post('/:id/collect-due', async (req, res) => {
       billsAffected.push({
         orderId: ord._id,
         orderNumber: ord.orderNumber,
+        billNumber: ord.billNumber,
         amountApplied: applyAmount,
       });
 

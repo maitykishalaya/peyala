@@ -306,6 +306,7 @@ export default function CustomerDuesPage() {
       const fullOrder = res.data;
       const tableNum = (typeof fullOrder.table === 'object' ? (fullOrder.table as any)?.tableNumber : fullOrder.table) || 'N/A';
       const billData = {
+        billNumber: fullOrder.billNumber,
         orderNumber: fullOrder.orderNumber,
         tableNumber: tableNum,
         billerName: (fullOrder.createdBy as any)?.name || 'Staff',
@@ -335,9 +336,9 @@ export default function CustomerDuesPage() {
       const html = generateBillHtml(billData);
       dispatchSlipPreview({
         type: 'bill',
-        title: `Bill #${fullOrder.orderNumber} (Reprint)`,
+        title: `Bill #${fullOrder.billNumber || fullOrder.orderNumber} (Reprint)`,
         html,
-        orderNumber: fullOrder.orderNumber,
+        orderNumber: fullOrder.billNumber || fullOrder.orderNumber,
         tableNumber: tableNum,
       });
     } catch (err: any) {
@@ -822,7 +823,7 @@ export default function CustomerDuesPage() {
                         >
                           {/* Bill # */}
                           <td className="py-3 px-4 font-mono font-bold text-gray-900 dark:text-white">
-                            #{bill.orderNumber}
+                            #{bill.billNumber || bill.orderNumber}
                           </td>
 
                           {/* Date & Time */}
@@ -1257,7 +1258,7 @@ export default function CustomerDuesPage() {
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800 font-medium">
                       {ledgerBills.map((b) => (
                         <tr key={b._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                          <td className="py-2.5 px-3 font-mono font-bold">#{b.orderNumber}</td>
+                          <td className="py-2.5 px-3 font-mono font-bold">#{b.billNumber || b.orderNumber}</td>
                           <td className="py-2.5 px-3 text-gray-500">{formatDate(b.createdAt)}</td>
                           <td className="py-2.5 px-3">{b.table?.tableNumber || 'N/A'}</td>
                           <td className="py-2.5 px-3 text-right">{formatCurrency(b.total)}</td>

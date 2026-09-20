@@ -20,7 +20,7 @@ import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/pa
 import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from 'lucide-react';
 
 const getPaymentsCacheKey = (role = 'default') => `peyala_payments_cache_v2_${role}`;
 
@@ -57,7 +57,9 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [filters, setFilters] = useState({ startDate: '', endDate: '', category: '' });
+  const [filters, setFilters] = useState({ startDate: '', endDate: '', category: '', supplier: '', search: '' });
+  const [sortBy, setSortBy] = useState<'date' | 'category' | 'payee' | 'amount'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // ── Modal state ─────────────────────────────────────────────────
   const [modal, setModal] = useState<'create' | 'edit' | null>(null);
@@ -79,14 +81,27 @@ export default function PaymentsPage() {
   });
   const [form, setForm] = useState<any>(blank());
 
+  // ── Sort handler ────────────────────────────────────────────────
+  const handleSort = (field: 'date' | 'category' | 'payee' | 'amount') => {
+    if (sortBy === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder(field === 'date' || field === 'amount' ? 'desc' : 'asc');
+    }
+    setPage(1);
+  };
+
   // ── Load payments list ──────────────────────────────────────────
   const load = async (isManual = false) => {
     if (isManual) setRefreshing(true);
-    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
-    const params: any = { page, limit: 20 };
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category && !filters.supplier && !filters.search && sortBy === 'date' && sortOrder === 'desc';
+    const params: any = { page, limit: 20, sortBy, sortOrder };
     if (filters.startDate) params.startDate = filters.startDate;
     if (filters.endDate) params.endDate = filters.endDate;
     if (filters.category) params.category = filters.category;
+    if (filters.supplier) params.supplier = filters.supplier;
+    if (filters.search) params.search = filters.search.trim();
 
     try {
       const [p, a, s, c] = await Promise.all([
@@ -116,7 +131,7 @@ export default function PaymentsPage() {
   };
 
   useEffect(() => {
-    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category;
+    const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category && !filters.supplier && !filters.search && sortBy === 'date' && sortOrder === 'desc';
     if (isDefaultView) {
       const cached = readCache(getPaymentsCacheKey(userRole));
       if (cached?.payments) {
@@ -133,7 +148,7 @@ export default function PaymentsPage() {
       }
     }
     load();
-  }, [page, filters, userRole]);
+  }, [page, filters, sortBy, sortOrder, userRole]);
 
   // ── When category changes, update subcategory list ───────────────
   const handleCategoryChange = (catName: string) => {
@@ -278,15 +293,42 @@ export default function PaymentsPage() {
 
         {/* Filters */}
         <div className="card p-4 flex gap-3 flex-wrap items-end">
-          <div><label className="label">From</label><input type="date" className="input" value={filters.startDate} onChange={e => setFilters({...filters, startDate: e.target.value})} /></div>
-          <div><label className="label">To</label><input type="date" className="input" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})} /></div>
+          <div><label className="label">From</label><input type="date" className="input" value={filters.startDate} onChange={e => { setFilters({...filters, startDate: e.target.value}); setPage(1); }} /></div>
+          <div><label className="label">To</label><input type="date" className="input" value={filters.endDate} onChange={e => { setFilters({...filters, endDate: e.target.value}); setPage(1); }} /></div>
           <div><label className="label">Category</label>
-            <select className="input" value={filters.category} onChange={e => setFilters({...filters, category: e.target.value})}>
+            <select className="input" value={filters.category} onChange={e => { setFilters({...filters, category: e.target.value}); setPage(1); }}>
               <option value="">All Categories</option>
               {categories.map(c => <option key={c._id} value={c.name}>{c.icon} {c.name}</option>)}
             </select>
           </div>
-          <button onClick={() => setFilters({ startDate: '', endDate: '', category: '' })} className="btn-secondary">Clear</button>
+          <div><label className="label">Supplier</label>
+            <select className="input" value={filters.supplier} onChange={e => { setFilters({...filters, supplier: e.target.value}); setPage(1); }}>
+              <option value="">All Suppliers</option>
+              {suppliers.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[200px]"><label className="label">Search</label>
+            <div className="relative">
+              <input
+                type="text"
+                className="input pl-8 pr-7 w-full text-sm"
+                placeholder="Search payee, description..."
+                value={filters.search}
+                onChange={e => { setFilters({...filters, search: e.target.value}); setPage(1); }}
+              />
+              <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              {filters.search && (
+                <button
+                  type="button"
+                  onClick={() => { setFilters({...filters, search: ''}); setPage(1); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          <button onClick={() => { setFilters({ startDate: '', endDate: '', category: '', supplier: '', search: '' }); setPage(1); }} className="btn-secondary">Clear</button>
         </div>
 
         {/* Table */}
@@ -295,15 +337,67 @@ export default function PaymentsPage() {
             <table className="w-full min-w-max">
               <thead className="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th className="table-th">Date</th>
-                <th className="table-th">Payee</th>
-                <th className="table-th">Category</th>
+                <th
+                  className="table-th cursor-pointer select-none hover:text-brand-600 transition-colors"
+                  onClick={() => handleSort('date')}
+                  title="Click to sort by date"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Date</span>
+                    {sortBy === 'date' ? (
+                      sortOrder === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" /> : <ArrowDown className="w-3.5 h-3.5 text-brand-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  className="table-th cursor-pointer select-none hover:text-brand-600 transition-colors"
+                  onClick={() => handleSort('payee')}
+                  title="Click to sort by payee/supplier"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Payee / Supplier</span>
+                    {sortBy === 'payee' ? (
+                      sortOrder === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" /> : <ArrowDown className="w-3.5 h-3.5 text-brand-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  className="table-th cursor-pointer select-none hover:text-brand-600 transition-colors"
+                  onClick={() => handleSort('category')}
+                  title="Click to sort by category"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Category</span>
+                    {sortBy === 'category' ? (
+                      sortOrder === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" /> : <ArrowDown className="w-3.5 h-3.5 text-brand-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
                 <th className="table-th">Subcategory</th>
                 <th className="table-th">Description</th>
                 <th className="table-th">Paid From</th>
                 <th className="table-th">Mode</th>
                 <th className="table-th">By</th>
-                <th className="table-th">Amount</th>
+                <th
+                  className="table-th cursor-pointer select-none hover:text-brand-600 transition-colors"
+                  onClick={() => handleSort('amount')}
+                  title="Click to sort by amount"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Amount</span>
+                    {sortBy === 'amount' ? (
+                      sortOrder === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-brand-600" /> : <ArrowDown className="w-3.5 h-3.5 text-brand-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-60" />
+                    )}
+                  </div>
+                </th>
                 <th className="table-th"></th>
               </tr>
             </thead>

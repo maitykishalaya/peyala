@@ -332,10 +332,11 @@ router.get('/sales', async (req, res) => {
       const q = search.trim().toLowerCase();
       filteredOrders = allMatchingOrders.filter(o => {
         const orderNo = String(o.orderNumber || '').toLowerCase();
+        const billNo = String(o.billNumber || '').toLowerCase();
         const tableNo = String(o.table?.tableNumber || '').toLowerCase();
         const staff = String(o.createdBy?.name || '').toLowerCase();
         const itemMatch = o.items?.some(it => String(it.name || '').toLowerCase().includes(q));
-        return orderNo.includes(q) || tableNo.includes(q) || staff.includes(q) || itemMatch;
+        return billNo.includes(q) || orderNo.includes(q) || tableNo.includes(q) || staff.includes(q) || itemMatch;
       });
     }
 

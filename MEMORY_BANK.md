@@ -463,14 +463,64 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Interactive live feature mockup widgets for every slide.
   - Bottom slide indicator dots bar with mobile switch tabs (`Features` vs `Sign In`).
 
+### 3.23 Quarterly GST-Compliant Bill Numbering Architecture (IST)
+- **Indian Fiscal Quarter Cycle**:
+  - Starts strictly at 1 at `00:00:00 IST` on the first day of each quarter according to the Indian Financial Calendar:
+    - **Q1**: April 1st to June 30th (Resets to 1 on April 1 at 00:00 IST)
+    - **Q2**: July 1st to September 30th (Resets to 1 on July 1 at 00:00 IST)
+    - **Q3**: October 1st to December 31st (Resets to 1 on October 1 at 00:00 IST)
+    - **Q4**: January 1st to March 31st (Resets to 1 on January 1 at 00:00 IST)
+- **Plain Sequential Numbering**:
+  - Clean numeric sequence without quarter suffixes (`1`, `2`, `3`... `9877`) for clean auditing, quarterly GST filing, and invoice reconciliation.
+- **Universal Bill Number Allocation Guarantee**:
+  - Implemented in `backend/src/utils/billingSequence.js` with atomic MongoDB sequences (`BillSequence` collection).
+  - Bill numbers are assigned immediately upon either:
+    1. **Bill Finalization / Printing**: Triggered when staff taps `[ Print Bill ]`, `[ Bill ]`, or `[ Save & Print ]`.
+    2. **Direct Payment Settlement**: If an operator settles a table directly without prior bill printing (as Cash, UPI, Card, Due, or Part Payment), the system automatically allocates the next sequential bill number atomically before committing payment and marking the table paid.
+- **Auditing & Transparency**:
+  - Printed receipts and thermal slips display `Bill No: {order.billNumber}`.
+  - Granular sales reports (`/reports`) log the exact quarterly sequential bill number for all historical orders.
+
+### 3.24 KDS Operations: Beverage Ordering, Multi-Round Badges & Fulfilled Retention
+- **Beverage Ordering Behind Food Items**:
+  - In KDS ticket item lists, items classified under the `beverage` category (or tagged with drink keywords) are automatically sorted to appear **after** food dishes.
+  - Kitchen cooks prioritize hot preparation and stove dishes first; drink preparation is neatly queued at the bottom of the ticket.
+- **Multi-Round Identification**:
+  - Active orders on Round 2, Round 3, Round 4, etc. display prominent badges (`Round 2`, `Round 3`...) on KDS ticket headers, distinguishing fresh initial orders from re-orders and follow-up dishes.
+- **Fulfilled Tab Retention & Auto-Clearing**:
+  - Served KOT tickets remain visible in the KDS **Fulfilled** tab while tables are actively dining.
+  - Once the table bill is settled or marked paid, fulfilled tickets automatically clear from the queue.
+
+### 3.25 Outlet Design, Custom Floor Zones & Configurable Section Sorting (`/settings/outlet-design`)
+- **Custom Floor Categories (`TableCategory`)**:
+  - Administrators can define custom dining zones (e.g. *Indoor*, *Outdoor*, *Rooftop*, *Patio*, *Pick Up*, *Other*) with custom colors and emojis.
+  - `TableCategory` schema: `name`, `order` (Number), `color`, `icon`, `description`, `isActive`.
+- **1-Click Table Moving**:
+  - Any table can be instantly reassigned to any category via `PATCH /api/tables/:id/category` (e.g., reassigning table `ratnadeep` from `Outdoor` to `Other`).
+- **Real-Time Zone Sales Performance**:
+  - Analyzes settled revenue, percentage share of total outlet sales, order counts, table count, and Average Order Value (AOV) per zone across multiple timeframes (Today, This Week, This Month, This Quarter, All Time).
+- **Floor Section Sorting & Display Ordering**:
+  - **Reorder Controls**: Each category card in Outlet Design features `←` (Move Left) and `→` (Move Right) sequence buttons and an `#Order` badge. Clicking performs an optimistic swap and persists the sequence via `PUT /api/tables/categories/reorder`.
+  - **Manual Sequence Input**: The Add/Edit Category modal includes an explicit `Display Sequence / Order` number field.
+  - **POS Tables Screen Integration (`/tables`)**: The POS floor plan fetches category ordering dynamically, guaranteeing that section filter pills, dining floor layout grids, and table transfer modal dialogs follow the exact sequence configured by management.
+
+### 3.26 Due Purchases, Customer Dues & Balance Sheet Consistency
+- **Purchases on Due**:
+  - Unpaid purchases (`isPaid: false`) accurately credit raw materials to inventory and debit the supplier's balance in the Supplier Ledger and Balance Sheet liabilities (`supplierDues`).
+  - When settled via payment vouchers (`POST /api/payments` or `/api/purchases/:id/pay`), funds are deducted from the selected account and supplier outstanding is reduced, preserving double-entry accounting integrity.
+- **Customer Dues**:
+  - Orders settled as `due` record customer contact details, tracking receivables without inflating liquid cash balances until received.
+
 ---
 
 ## 4) Database Models & Schemas
 
 | Model | File | Key Fields |
 |-------|------|------------|
-| **`Table`** | `backend/src/models/Table.js` | `tableNumber`, `capacity`, `status` (`available`, `occupied`, `reserved`), `activeOrder` (ref: Order). |
-| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `table` (ref: Table), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `kotCount`, `billPrinted`, `billPrintedAt`, `billPrintQueued`, `billPrintQueuedAt`, `billPrintSeq`, `createdBy`. |
+| **`Table`** | `backend/src/models/Table.js` | `tableNumber`, `capacity`, `category` (String, default: 'Indoor'), `status` (`available`, `occupied`, `reserved`), `activeOrder` (ref: Order). |
+| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `billNumber` (Number, quarterly IST reset), `table` (ref: Table), `tableCategory` (String), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `due`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `kotCount`, `billPrinted`, `billPrintedAt`, `billPrintQueued`, `billPrintQueuedAt`, `billPrintSeq`, `effectiveActiveTime`, `createdBy`. |
+| **`BillSequence`** | `backend/src/models/BillSequence.js` | `quarterKey` (e.g. `2026-Q1`), `lastNumber` (Number, default: 0), `updatedAt`. |
+| **`TableCategory`** | `backend/src/models/TableCategory.js` | `name`, `order` (Number), `color`, `icon`, `description`, `isActive`. |
 | **`MenuItem`** | `backend/src/models/MenuItem.js` | `name`, `category` (ref: MenuCategory), `price`, `taxPercent`, `isVeg`, `isAvailable`, `description`. |
 | **`MenuCategory`** | `backend/src/models/MenuCategory.js` | `name`, `description`, `sortOrder`, `isActive`. |
 | **`Addon`** | `backend/src/models/Addon.js` | `name`, `price`, `isVeg`, `isActive`, `sortOrder`. |

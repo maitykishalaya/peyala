@@ -31,6 +31,49 @@ const { log } = require('../utils/audit');
 
 router.use(auth);
 
+// ── Helper: Resolve Payment Description for Purchases ─────────────
+// If the purchase has a description/note recorded, use it directly.
+// If no description was recorded, list all item names separated by comma.
+const buildPurchasePaymentDescription = async (notes, description, items, fallbackSupplierName) => {
+  const customDesc = (description || notes || '').trim();
+  if (customDesc) {
+    return customDesc;
+  }
+
+  if (Array.isArray(items) && items.length > 0) {
+    const itemIds = items
+      .map(i => (typeof i.item === 'object' && i.item?._id ? i.item._id : i.item))
+      .filter(Boolean);
+
+    let invDocs = [];
+    if (itemIds.length > 0) {
+      invDocs = await InventoryItem.find({ _id: { $in: itemIds } }).select('name').lean();
+    }
+    const invMap = new Map(invDocs.map(d => [String(d._id), d.name]));
+
+    const names = [];
+    for (const line of items) {
+      let name = '';
+      if (typeof line.item === 'object' && line.item?.name) {
+        name = line.item.name;
+      } else if (line.item && invMap.has(String(line.item))) {
+        name = invMap.get(String(line.item));
+      } else if (line.name) {
+        name = line.name;
+      }
+      if (name && !names.includes(name)) {
+        names.push(name);
+      }
+    }
+
+    if (names.length > 0) {
+      return names.join(', ');
+    }
+  }
+
+  return fallbackSupplierName ? `Purchase from ${fallbackSupplierName}` : 'Purchase';
+};
+
 // ── GET /api/purchases ────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -135,13 +178,17 @@ router.post('/', async (req, res) => {
     // Is this a credit/due purchase?
     const isDue = paymentMode === 'due';
 
+    const purchaseDesc = (req.body.description || notes || '').trim();
+
     // Create the purchase entry
     const purchase = await PurchaseEntry.create({
       date, supplier, items, totalAmount,
       paidFrom: isDue ? null : paidFrom,
       paymentMode,
       isPaid: !isDue,
-      notes, referenceNumber,
+      notes: purchaseDesc,
+      description: purchaseDesc,
+      referenceNumber,
       createdBy: req.user._id,
     });
 
@@ -163,6 +210,7 @@ router.post('/', async (req, res) => {
     // Get supplier name for payment description
     const supplierDoc = await Supplier.findById(supplier);
     const supplierName = supplierDoc?.name || 'Supplier';
+    const paymentDescription = await buildPurchasePaymentDescription(notes, req.body.description, items, supplierName);
 
     if (isDue) {
       // DUE: don't deduct account, create pending payment record
@@ -171,11 +219,11 @@ router.post('/', async (req, res) => {
       await Payment.create({
         date, paidFrom: null, payee: supplierName,
         category: 'Raw Materials', subcategory: 'Due Purchase',
-        description: `Due purchase from ${supplierName} — ₹${totalAmount}`,
+        description: paymentDescription,
         amount: totalAmount, paymentMode: 'due',
         isPending: true, relatedPurchase: purchase._id,
         supplier,
-        notes, createdBy: req.user._id,
+        notes: purchaseDesc, createdBy: req.user._id,
       });
     } else {
       // PAID: deduct account, update supplier paid, create payment record
@@ -190,11 +238,11 @@ router.post('/', async (req, res) => {
       await Payment.create({
         date, paidFrom, payee: supplierName,
         category: 'Raw Materials', subcategory: supplierName,
-        description: `Purchase from ${supplierName} — ${items.length} item(s)`,
+        description: paymentDescription,
         amount: totalAmount, paymentMode,
         isPending: false, relatedPurchase: purchase._id,
         supplier,
-        notes, createdBy: req.user._id,
+        notes: purchaseDesc, createdBy: req.user._id,
       });
     }
 
@@ -332,6 +380,9 @@ router.put('/:id', async (req, res) => {
       await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -totalAmount } }, { session });
     }
 
+    const purchaseDesc = (req.body.description || notes || '').trim();
+    const paymentDescription = await buildPurchasePaymentDescription(notes, req.body.description, items, supplierName);
+
     const payment = await Payment.findOne({ relatedPurchase: purchase._id }).session(session);
     const paymentPayload = {
       date,
@@ -339,14 +390,12 @@ router.put('/:id', async (req, res) => {
       payee: supplierName,
       category: 'Raw Materials',
       subcategory: isDue ? 'Due Purchase' : supplierName,
-      description: isDue
-        ? `Due purchase from ${supplierName} — ₹${totalAmount}`
-        : `Purchase from ${supplierName} — ${items.length} item(s)`,
+      description: paymentDescription,
       amount: totalAmount,
       paymentMode: isDue ? 'due' : paymentMode,
       isPending: isDue,
       supplier,
-      notes,
+      notes: purchaseDesc,
       relatedPurchase: purchase._id,
       createdBy: purchase.createdBy,
     };
@@ -365,7 +414,8 @@ router.put('/:id', async (req, res) => {
       paidFrom: newIsPaid ? paidFrom : null,
       paymentMode,
       isPaid: newIsPaid,
-      notes,
+      notes: purchaseDesc,
+      description: purchaseDesc,
       referenceNumber,
     }, { new: true, runValidators: true, session })
       .populate('supplier', 'name')
@@ -427,7 +477,14 @@ router.post('/:id/clear-due', async (req, res) => {
       $inc: { totalPaid: purchase.totalAmount }
     });
 
-    // Update the pending Payment record to mark it cleared
+    // Update the pending Payment record to mark it cleared with consistent purchase description
+    const paymentDescription = await buildPurchasePaymentDescription(
+      purchase.notes,
+      purchase.description,
+      purchase.items,
+      purchase.supplier?.name
+    );
+
     await Payment.findOneAndUpdate(
       { relatedPurchase: purchase._id, isPending: true },
       {
@@ -435,7 +492,7 @@ router.post('/:id/clear-due', async (req, res) => {
         paymentMode,
         isPending: false,
         supplier: purchase.supplier._id,
-        description: `Due cleared — ${purchase.supplier?.name} (₹${purchase.totalAmount})`,
+        description: paymentDescription,
         date: date ? new Date(date) : new Date(),
       }
     );

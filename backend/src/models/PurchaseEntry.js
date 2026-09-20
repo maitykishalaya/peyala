@@ -19,6 +19,7 @@ const purchaseEntrySchema = new mongoose.Schema({
   paymentMode: { type: String, enum: ['cash', 'upi', 'card', 'bank_transfer', 'cheque', 'due'], default: 'cash' },
   isPaid: { type: Boolean, default: true },
   notes: { type: String },
+  description: { type: String },
   attachments: [{ type: String }],
   referenceNumber: { type: String },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

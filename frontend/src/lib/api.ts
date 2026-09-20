@@ -231,6 +231,8 @@ export interface Customer {
 export interface DueReportBillItem {
   _id: string;
   orderNumber: number;
+  billNumber?: number;
+  fiscalQuarter?: string;
   tableNumber: string;
   createdAt: string;
   customerName: string;

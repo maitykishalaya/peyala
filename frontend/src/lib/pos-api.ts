@@ -89,6 +89,10 @@ export interface Order {
   items: OrderItem[];
   status: 'open' | 'preparing' | 'served' | 'billed' | 'paid' | 'cancelled';
   orderNumber?: number;
+  billNumber?: number;
+  fiscalQuarter?: string;
+  billedAt?: string | null;
+  tableCategory?: string;
   kotCount?: number;
   kotRounds?: KotRound[];
   subtotal: number;
@@ -131,6 +135,7 @@ export interface Table {
   tableNumber: string;
   capacity: number;
   status: 'available' | 'occupied' | 'reserved';
+  category?: string;
   activeOrder?: Order | null;
   createdAt?: string;
   updatedAt?: string;
@@ -187,12 +192,75 @@ export const tablesApi = {
     api.get<Table[]>('/tables'),
   get: (id: string) =>
     api.get<Table>(`/tables/${id}`),
-  create: (data: { tableNumber: string; capacity: number; status?: string }) =>
+  create: (data: { tableNumber: string; capacity: number; status?: string; category?: string }) =>
     api.post<Table>('/tables', data),
   update: (id: string, data: Partial<Table>) =>
     api.put<Table>(`/tables/${id}`, data),
+  reassignCategory: (id: string, category: string) =>
+    api.patch<Table>(`/tables/${id}/category`, { category }),
   delete: (id: string) =>
     api.delete<{ message: string }>(`/tables/${id}`),
+};
+
+export interface TableCategory {
+  _id: string;
+  name: string;
+  order?: number;
+  color?: string;
+  icon?: string;
+  description?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const tableCategoriesApi = {
+  list: () =>
+    api.get<TableCategory[]>('/tables/categories'),
+  create: (data: Partial<TableCategory>) =>
+    api.post<TableCategory>('/tables/categories', data),
+  update: (id: string, data: Partial<TableCategory>) =>
+    api.put<TableCategory>(`/tables/categories/${id}`, data),
+  reorder: (categoryIds: string[]) =>
+    api.put<TableCategory[]>('/tables/categories/reorder', { categoryIds }),
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/tables/categories/${id}`),
+};
+
+export interface OutletCategoryTableStat {
+  tableId: string;
+  tableNumber: string;
+  capacity: number;
+  status: string;
+  totalSales: number;
+  orderCount: number;
+}
+
+export interface OutletCategoryStat {
+  name: string;
+  color: string;
+  icon: string;
+  description?: string;
+  totalSales: number;
+  orderCount: number;
+  tablesCount: number;
+  percentage: number;
+  avgOrderValue: number;
+  tables: OutletCategoryTableStat[];
+}
+
+export interface OutletSalesAnalyticsResponse {
+  summary: {
+    totalSales: number;
+    totalOrders: number;
+    period: string;
+  };
+  categories: OutletCategoryStat[];
+}
+
+export const outletSalesApi = {
+  getAnalytics: (params?: { period?: string; startDate?: string; endDate?: string }) =>
+    api.get<OutletSalesAnalyticsResponse>('/tables/analytics/outlet-sales', { params }),
 };
 
 export interface PendingKotJob {
@@ -217,6 +285,9 @@ export interface PendingKotJob {
 export interface PendingBillJob {
   orderId: string;
   orderNumber?: number;
+  billNumber?: number;
+  fiscalQuarter?: string;
+  billedAt?: string;
   billPrintSeq?: number;
   tokenNo?: string | number;
   tableNumber: string;
@@ -339,6 +410,8 @@ export const ordersApi = {
     api.patch<Order>(`/orders/${orderId}/items/${itemId}/kds-status`, { status }),
   bumpKdsOrder: (orderId: string) =>
     api.post<Order>(`/orders/${orderId}/kds-bump`),
+  recallKdsOrder: (orderId: string) =>
+    api.post<Order>(`/orders/${orderId}/kds-recall`),
   batchBumpKdsItem: (menuItemId: string, variantName?: string) =>
     api.post<{ success: boolean; message: string }>('/orders/kds/batch-bump', { menuItemId, variantName }),
 };
@@ -354,6 +427,7 @@ export interface KdsPrepTableEntry {
   createdAt: string;
   orderedAt?: string;
   effectiveTime?: string;
+  roundNumber?: number;
 }
 
 export interface KdsPrepNextItem {
@@ -373,5 +447,6 @@ export interface KdsPrepNextItem {
 
 export interface KdsActiveResponse {
   orders: Order[];
+  fulfilled?: Order[];
   prepNext: KdsPrepNextItem[];
 }

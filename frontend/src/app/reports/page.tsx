@@ -478,7 +478,7 @@ export default function ReportsPage() {
       return [
         `"${dateStr}"`,
         `"${timeStr}"`,
-        `"${o.orderNumber || o._id.slice(-6)}"`,
+        `"${o.billNumber || o.orderNumber || o._id.slice(-6)}"`,
         `"${o.table?.tableNumber || 'Takeaway'}"`,
         `"${o.status}"`,
         `"${o.createdBy?.name || 'Staff'}"`,
@@ -1287,7 +1287,7 @@ export default function ReportsPage() {
                                   {/* Bill / Order # */}
                                   <td className="py-3 px-3 whitespace-nowrap">
                                     <span className="font-bold text-brand-600 font-mono">
-                                      #{o.orderNumber || o._id.slice(-6)}
+                                      #{o.billNumber || o.orderNumber || o._id.slice(-6)}
                                     </span>
                                     <div className="text-[10px] text-gray-400">By {o.createdBy?.name || 'Staff'}</div>
                                   </td>
@@ -1460,7 +1460,7 @@ export default function ReportsPage() {
                                         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
                                           <div className="flex items-center gap-3">
                                             <span className="font-bold text-sm text-gray-900 dark:text-white font-mono">
-                                              Order #{o.orderNumber || o._id}
+                                              {o.billNumber ? `Bill #${o.billNumber} (Order #${o.orderNumber || o._id.slice(-6)})` : `Order #${o.orderNumber || o._id}`}
                                             </span>
                                             <span className="text-xs text-gray-500">
                                               Table: <strong>{o.table?.tableNumber || 'Takeaway'}</strong>
@@ -1653,7 +1653,7 @@ export default function ReportsPage() {
                     <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                       Edit Settled Bill
                       <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40 text-blue-600 border border-blue-200 dark:border-blue-800">
-                        #{editOrder.orderNumber || editOrder._id.slice(-6)}
+                        #{editOrder.billNumber || editOrder.orderNumber || editOrder._id.slice(-6)}
                       </span>
                     </h3>
                     <p className="text-xs text-gray-500">
@@ -2208,7 +2208,7 @@ export default function ReportsPage() {
                       Delete Settled Bill & Reverse Financials
                     </h3>
                     <p className="text-xs text-gray-500">
-                      Order #{deleteOrder.orderNumber || deleteOrder._id.slice(-6)} • Table {deleteOrder.table?.tableNumber || 'Takeaway'}
+                      Bill #{deleteOrder.billNumber || deleteOrder.orderNumber || deleteOrder._id.slice(-6)} • Table {deleteOrder.table?.tableNumber || 'Takeaway'}
                     </p>
                   </div>
                 </div>

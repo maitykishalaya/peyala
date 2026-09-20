@@ -3,6 +3,7 @@
 // Supports "Test Mode" (on-screen preview & PDF dialog) and "Production Mode" (silent printing)
 // Matches Peyala's official customer bill & kitchen ticket formats
 // ─────────────────────────────────────────────────────────────────
+import { isBeverageItem } from './utils';
 
 export const STORE_INFO = {
   name: 'PEYALA',
@@ -69,6 +70,7 @@ export interface BillItem {
 }
 
 export interface BillPrintData {
+  billNumber?: string | number;
   orderNumber?: string | number;
   tableNumber: string;
   billerName?: string;
@@ -155,7 +157,14 @@ export function generateKOTHtml(data: KOTPrintData): string {
     ? String(data.kotNumber)
     : data.tokenNo || (data.orderNumber ? String(data.orderNumber).slice(-4) : '1');
 
-  const rows = data.items
+  // Food items first, beverage section items appear after food items
+  const sortedItems = [...(data.items || [])].sort((a, b) => {
+    const aBev = isBeverageItem(a) ? 1 : 0;
+    const bBev = isBeverageItem(b) ? 1 : 0;
+    return aBev - bBev;
+  });
+
+  const rows = sortedItems
     .map((item, idx) => {
       const rawVariant =
         item.variantName ||
@@ -394,7 +403,7 @@ export function generateBillHtml(data: BillPrintData): string {
     <html>
       <head>
         <meta charset="utf-8">
-        <title>Bill - ${data.orderNumber || data.tableNumber}</title>
+        <title>Bill - ${data.billNumber || data.orderNumber || data.tableNumber}</title>
         <style>
           * {
             box-sizing: border-box;
@@ -457,8 +466,8 @@ export function generateBillHtml(data: BillPrintData): string {
         <table class="meta-table" style="margin-top: 6px;">
           <tr>
             <td style="width: 50%;">
-              <div style="color: #666; font-size: 9.5px;">Order Number</div>
-              <div style="font-weight: 600;">${data.orderNumber ? String(data.orderNumber).slice(-4) : '—'}</div>
+              <div style="color: #666; font-size: 9.5px;">Bill Number</div>
+              <div style="font-weight: 700;">${data.billNumber ? String(data.billNumber) : (data.orderNumber ? String(data.orderNumber).slice(-4) : '—')}</div>
             </td>
             <td style="width: 50%;">
               <div style="color: #666; font-size: 9.5px;">Date</div>
@@ -631,7 +640,7 @@ export function printCustomerBill(data: BillPrintData, forceMode?: PrintMode) {
       type: 'bill',
       title: `Customer Bill - Table ${data.tableNumber}`,
       tableNumber: data.tableNumber,
-      orderNumber: data.orderNumber,
+      orderNumber: data.billNumber || data.orderNumber,
       html,
     });
   } else {
