@@ -271,3 +271,16 @@ export const customersApi = {
   create: (data: { name: string; phone: string; notes?: string }) => api.post<Customer>('/customers', data),
 };
 
+export const analyticsApi = {
+  getOverview: (params?: any) => api.get<any>('/analytics/overview', { params }),
+  getItems: (params?: any) => api.get<any>('/analytics/items', { params }),
+  getItemDetail: (id: string, params?: any) => api.get<any>(`/analytics/item/${encodeURIComponent(id)}`, { params }),
+  getGstReport: (params?: any) => api.get<any>('/analytics/gst', { params }),
+  getDataQuality: () => api.get<any>('/analytics/data-quality'),
+  getConfig: () => api.get<any>('/analytics/config'),
+  updateConfig: (data: any) => api.put<any>('/analytics/config', data),
+  suggestionAction: (id: string, data: { action: 'complete' | 'dismiss' | 'snooze'; snoozeDays?: number }) =>
+    api.post<any>(`/analytics/suggestions/${encodeURIComponent(id)}/action`, data),
+};
+
+

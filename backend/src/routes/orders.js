@@ -474,6 +474,83 @@ router.post('/kds/batch-bump', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// In-Memory KDS Food Ready Alerts Buffer (Cross-Device Real-Time Sync)
+// Keeps recent food-ready events in memory so that physical devices on local network
+// (e.g. tablet in kitchen <-> laptop/cashier POS) can notify floor staff immediately.
+// ─────────────────────────────────────────────────────────────────
+const kdsReadyAlerts = [];
+const MAX_KDS_ALERTS = 50;
+const KDS_ALERT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function addKdsReadyAlert(alert) {
+  if (!alert) return null;
+  const now = Date.now();
+  const alertId = alert.id || `${now}-${Math.random().toString(36).substring(2, 7)}`;
+
+  // Deduplicate if identical alert ID already exists in buffer
+  const existing = kdsReadyAlerts.find((a) => a.id === alertId);
+  if (existing) return existing;
+
+  const entry = {
+    id: alertId,
+    name: alert.name || 'Food Ready',
+    variantName: alert.variantName || '',
+    tables: Array.isArray(alert.tables)
+      ? alert.tables
+      : alert.tableNumber
+      ? [String(alert.tableNumber)]
+      : [],
+    tableNumber: alert.tableNumber
+      ? String(alert.tableNumber)
+      : Array.isArray(alert.tables) && alert.tables.length > 0
+      ? String(alert.tables[0])
+      : undefined,
+    timestamp: alert.timestamp ? Number(alert.timestamp) : now,
+    createdAt: now,
+  };
+
+  kdsReadyAlerts.push(entry);
+
+  // Prune entries older than 5 minutes or beyond buffer capacity
+  const cutoff = now - KDS_ALERT_TTL_MS;
+  while (kdsReadyAlerts.length > 0 && (kdsReadyAlerts[0].createdAt < cutoff || kdsReadyAlerts.length > MAX_KDS_ALERTS)) {
+    kdsReadyAlerts.shift();
+  }
+
+  return entry;
+}
+
+// GET /api/orders/kds/alerts — Retrieve recent KDS ready alerts (polled by Cashier / Tables page)
+router.get('/kds/alerts', (req, res) => {
+  try {
+    const now = Date.now();
+    const cutoff = now - KDS_ALERT_TTL_MS;
+    while (kdsReadyAlerts.length > 0 && (kdsReadyAlerts[0].createdAt < cutoff || kdsReadyAlerts.length > MAX_KDS_ALERTS)) {
+      kdsReadyAlerts.shift();
+    }
+
+    const since = req.query.since ? Number(req.query.since) : 0;
+    const filtered = since > 0
+      ? kdsReadyAlerts.filter((a) => a.timestamp > since)
+      : kdsReadyAlerts.filter((a) => a.timestamp > now - 15000);
+
+    res.json({ alerts: filtered });
+  } catch (err) {
+    res.status(500).json({ message: err.message, alerts: [] });
+  }
+});
+
+// POST /api/orders/kds/alert — Broadcast a KDS ready alert across devices
+router.post('/kds/alert', (req, res) => {
+  try {
+    const entry = addKdsReadyAlert(req.body);
+    res.json({ success: true, alert: entry });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // PATCH /api/orders/:id/items/:itemId/kds-status — Update prep status from KDS
 // ─────────────────────────────────────────────────────────────────
 router.patch('/:id/items/:itemId/kds-status', async (req, res) => {
@@ -541,6 +618,22 @@ router.post('/:id/kds-bump', async (req, res) => {
 
     await order.save();
     const populated = await populateOrder(Order.findById(order._id));
+
+    // Register cross-device KDS ready alert
+    try {
+      const tableVal = populated.table ? (typeof populated.table === 'object' ? populated.table.tableNumber : populated.table) : '';
+      const tableLabel = tableVal ? `Table ${tableVal}` : 'Takeaway';
+      addKdsReadyAlert({
+        id: `bump-${order._id}-${Date.now()}`,
+        name: `Order #${populated.orderNumber || String(order._id).slice(-4)} (${tableLabel})`,
+        tables: tableVal ? [String(tableVal)] : [],
+        tableNumber: tableVal ? String(tableVal) : undefined,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.warn('Failed to record KDS bump alert in buffer:', e);
+    }
+
     res.json(populated);
   } catch (err) {
     res.status(400).json({ message: err.message });

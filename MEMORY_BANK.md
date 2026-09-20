@@ -19,6 +19,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 7. **Staff & Payroll** (employee directory, monthly attendance calendar with leave cap enforcement, advances, bonuses, and salary disbursal).
 8. **Expense Leak Detection & Operational Waste Auditing** (autonomous statistical detection of price spikes, expense spikes, usage surges, sales-adjusted anomalies, duplicate payments, and supplier price variance with anti-double-counting clustering and 30-day review persistence).
 9. **Wastage Tracking & Operational Loss Auditing** (logging spoiled, expired, or discarded food and ingredients via 3 core fields: item name, quantity, and approximate value, with real-time period aggregation on the P&L statement).
+10. **Customer Dues & Khata Ledger System** (credit orders tracking, customer profiles, instant autocomplete, due collections, thermal receipts, and double-entry Balance Sheet asset reconciliation).
+11. **Sales Analytics & Statutory Tax Auditing** (executive business cockpit, daily pace monitoring, autonomous heuristic suggestions, delivery margin leakage auditing, and GSTR-1/3B compliant GST registers with invoice range tracking).
 
 ---
 
@@ -80,6 +82,9 @@ Peyala v8 is a production-grade restaurant operations and management system buil
      - **KOT Tickets Queue**: FIFO ticket cards with timers, checklist, and individual/order bump actions.
      - **Fulfilled History**: Recent completed tickets with 1-tap recall.
      - **Web Audio Chime**: Dual-tone synthesized chime on incoming KOTs.
+     - **Full Screen Tablet Mode for Kitchen Operations**: Dedicated `[ Full Screen ]` toggle requesting native browser fullscreen while instantly hiding all shell chrome (desktop sidebar drawer, top header bar, mobile bottom navigation bar, and parent padding) via `fixed inset-0 z-[100]` and `body.kds-fullscreen-active`. Tailored for kitchen wall mounts and tablet stations, with a high-contrast `[ Exit Full Screen ]` button and `Escape` key support to immediately restore drawer and navigation.
+     - **Cross-Device Food Ready Alerts & Cashier Notification System**: Whenever food is marked ready from KDS (via "Order Ready" ticket bump, "Batch Ready" in Prep Next, single table bump in Prep Next, or clicking an item checklist status to `served`), a notification is broadcast across devices via an in-memory backend ring buffer (`POST /api/orders/kds/alert`, `GET /api/orders/kds/alerts?since=...`, 5-minute TTL, 50-item cap) alongside instant local `BroadcastChannel` and `localStorage`. Cashier and floor staff on the Tables POS page (`/tables`) receive a high-visibility floating "Kitchen Ready" popup banner (`top-5 z-[9999]`), a 2-blink urgent audio alert chime (`1046.5Hz C6` $\rightarrow$ `1318.5Hz E6` $\rightarrow$ `1760.0Hz A6`), toast notifications, and silent real-time table status refresh every 3 seconds across physical devices (kitchen tablet $\leftrightarrow$ cashier laptop/counter).
+     - **1-Click Bill Reprinting from Detailed Sales Report (`/reports`)**: Direct `<Printer />` button beside every bill number in the Detailed Sales Report table, immediately launching the thermal bill modal or silent ESC/POS hardware print.
    - **View D: Add-on & Variant Customization Modal**:
      - Modal title with item name and unit price + close `(X)`.
      - Real-time `Search addon item` input.
@@ -150,6 +155,9 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - Live search across Bill #, Table #, Staff name, and Item names.
 - Displays summary KPI cards: **Net Settled**, **Gross Sales**, **Tax / GST**, **Discounts**, **Waived Off**, and payment collection breakdown strip.
 - Expandable rows show complete itemized timelines, kitchen notes, soft-cancelled items, and KOT ranges (`KOT-xxx-1 to -x`).
+- **1-Click Thermal Bill Printing & Reprints**:
+  - Each order row features a dedicated `<Printer />` print button directly beside the Bill Number (`#{billNumber}`), in the table Actions column, and in the expanded order details header.
+  - Clicking prints or previews an authentic 80mm customer receipt (`printCustomerBill`) displaying the quarterly bill number, itemized portions, addons, GST, and payment breakdown, marked with `(REPRINT)` to prevent accounting confusion.
 - **CSV Export**: Generates UTF-8 BOM formatted spreadsheets for Excel and Google Sheets.
 
 ### 3.6 Multi-Device Distributed Thermal Printing Engine & Chrome Silent Auto-Print
@@ -490,6 +498,10 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Fulfilled Tab Retention & Auto-Clearing**:
   - Served KOT tickets remain visible in the KDS **Fulfilled** tab while tables are actively dining.
   - Once the table bill is settled or marked paid, fulfilled tickets automatically clear from the queue.
+- **Full Screen Tablet Mode for Kitchen Operations (`/kds`)**:
+  - Tapping **`[ Full Screen ]`** triggers the browser's native Fullscreen API (`requestFullscreen()`) while simultaneously applying `body.kds-fullscreen-active` and elevating the KDS container to `fixed inset-0 z-[100] bg-gray-100 dark:bg-gray-950 p-2 sm:p-3 overflow-y-auto h-screen h-[100dvh] max-h-screen`.
+  - Hides all layout shell chrome (desktop sidebar drawer, top header bar, mobile bottom navigation bar, and parent padding) to give 100% of the tablet display to kitchen tickets and prep batches.
+  - Tapping the prominent red **`[ Exit Full Screen ]`** button or pressing the `Escape` key immediately exits fullscreen mode, restoring the sidebar drawer and navigation chrome without page reloads. Navigating back to Tables POS via the topbar link also performs automatic fullscreen cleanup.
 
 ### 3.25 Outlet Design, Custom Floor Zones & Configurable Section Sorting (`/settings/outlet-design`)
 - **Custom Floor Categories (`TableCategory`)**:
@@ -511,6 +523,27 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Customer Dues**:
   - Orders settled as `due` record customer contact details, tracking receivables without inflating liquid cash balances until received.
 
+### 3.27 Customer Dues & Khata Ledger System (`/dues`)
+- **Core Purpose & Operational Need**:
+  - Regular café patrons and corporate accounts frequently request credit ("khata") settlements. The system provides a frictionless ledger tracking credit orders, customer dues, repayments, and statement timelines.
+- **Fast Customer Autocomplete & Search (`GET /api/customers/search`)**:
+  - Compound indexed regex search across customer name and phone digits with regex special character escaping.
+  - POS payment collection dialog offers 1-tap customer selection or on-the-fly registration.
+- **POS Settlement Workflow (`/tables`)**:
+  - When payment mode is `due`, selecting an existing or new customer links `order.customer = customer._id`, sets `paymentMethod: 'due'`, `dueAmount = grandTotal`, and `dueSettled = false`.
+  - Atomically increments customer's `totalDue` and `totalOrders`.
+- **Double-Entry Balance Sheet Integration (`/balancesheet`)**:
+  - Outstanding customer dues are recognized under Current Assets (`totalCustomerDues`), preserving double-entry accounting integrity without artificially inflating cash or bank vaults.
+- **Due Payment Collection & Receipts (`/dues`)**:
+  - Cashier logs repayments from the Customer Profile modal (supporting partial or lump-sum settlements).
+  - Selects receiving account (`Cash Counter` or `Current Account / Bank`), automatically crediting the real account vault.
+  - Generates an audited `CustomerDuePayment` document with sequential receipt numbering (`RCP-YYYY-XXXX`).
+  - Supports 1-tap 80mm thermal receipt printing via `printThermalSlip`.
+- **Chronological Customer Statement Timeline**:
+  - Full audit trail merging historical credit orders and payment receipts with live running balance tracking.
+- **Role Permissions & Viewer Masking**:
+  - Viewer role nullifies customer monetary figures (`••••••`) and disables collection mutations.
+
 ---
 
 ## 4) Database Models & Schemas
@@ -518,13 +551,16 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 | Model | File | Key Fields |
 |-------|------|------------|
 | **`Table`** | `backend/src/models/Table.js` | `tableNumber`, `capacity`, `category` (String, default: 'Indoor'), `status` (`available`, `occupied`, `reserved`), `activeOrder` (ref: Order). |
-| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `billNumber` (Number, quarterly IST reset), `table` (ref: Table), `tableCategory` (String), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `due`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `kotCount`, `billPrinted`, `billPrintedAt`, `billPrintQueued`, `billPrintQueuedAt`, `billPrintSeq`, `effectiveActiveTime`, `createdBy`. |
+| **`Order`** | `backend/src/models/Order.js` | `orderNumber`, `billNumber` (Number, quarterly IST reset), `table` (ref: Table), `tableCategory` (String), `type` (`dine_in`, `takeaway`), `status` (`open`, `billed`, `paid`, `cancelled`), `items` (array of `menuItem`, `name`, `quantity`, `price`, `taxPercent`, `status`, `notes`, `round`, `cancelledAt`, `cancelReason`), `kotRounds` (array of `roundNumber`, `roundTag`, `items`, `printed: Boolean`, `printedAt`, `createdAt`), `subtotal`, `taxAmount`, `discount`, `discountType`, `discountValue`, `total`, `settledAmount`, `waivedAmount`, `paymentMethod` (`cash`, `card`, `upi`, `other`, `due`, `part`), `paymentBreakdown` (`cash`, `upi`, `card`, `other`), `customer` (ref: Customer), `dueAmount`, `dueSettled`, `kotCount`, `billPrinted`, `billPrintedAt`, `billPrintQueued`, `billPrintQueuedAt`, `billPrintSeq`, `effectiveActiveTime`, `createdBy`. |
 | **`BillSequence`** | `backend/src/models/BillSequence.js` | `quarterKey` (e.g. `2026-Q1`), `lastNumber` (Number, default: 0), `updatedAt`. |
 | **`TableCategory`** | `backend/src/models/TableCategory.js` | `name`, `order` (Number), `color`, `icon`, `description`, `isActive`. |
 | **`MenuItem`** | `backend/src/models/MenuItem.js` | `name`, `category` (ref: MenuCategory), `price`, `taxPercent`, `isVeg`, `isAvailable`, `description`. |
 | **`MenuCategory`** | `backend/src/models/MenuCategory.js` | `name`, `description`, `sortOrder`, `isActive`. |
 | **`Addon`** | `backend/src/models/Addon.js` | `name`, `price`, `isVeg`, `isActive`, `sortOrder`. |
 | **`SalesEntry`** | `backend/src/models/SalesEntry.js` | `date`, `outletSales`, `paymentBreakdown` (`cash`, `upi`, `card`, `bankTransfer`), `zomato` (gross, deductions, net, settled), `fatafat`, `otherSales`, `totalSales`, `gstTotal`. |
+| **`Customer`** | `backend/src/models/Customer.js` | `name`, `phone`, `email`, `address`, `notes`, `totalDue`, `totalOrders`, `totalPaid`, `lastVisit`, `isActive`. |
+| **`CustomerDuePayment`** | `backend/src/models/CustomerDuePayment.js` | `customer` (ref: Customer), `amount`, `paymentMethod` (`cash`, `upi`, `card`, `bank_transfer`), `receivedIntoAccount` (ref: Account), `date`, `receiptNumber`, `notes`, `receivedBy` (ref: User). |
+| **`SalesAnalyticsConfig`** | `backend/src/models/SalesAnalyticsConfig.js` | `dailyTarget`, `weekdayTargets`, `weekendTarget`, `suggestedGrowthPct`, `targetAov`, `weakDayThresholdPct`, `deliveryDeductionThresholdPct`, `lowItemSalesThresholdQty`, `suggestionActions` (`actionId`, `status`, `snoozedUntil`). |
 | **`PurchaseEntry`** | `backend/src/models/PurchaseEntry.js` | `date`, `supplier` (ref: Supplier), `items` (`item`, `quantity`, `unit`, `pricePerUnit`, `gstPercent`, `totalPrice`), `totalAmount`, `paidFrom` (ref: Account), `paymentMode`, `isPaid`. |
 | **`Account`** | `backend/src/models/Account.js` | `name`, `type` (`cash`, `bank`, `digital`), `currentBalance`, `color`, `isActive`. |
 | **`Supplier`** | `backend/src/models/Supplier.js` | `name`, `phone`, `address`, `category`, `totalPurchased`, `totalPaid`, `outstanding`. |
@@ -604,6 +640,30 @@ Peyala v8 is a production-grade restaurant operations and management system buil
     - `/payments`: Staff expense transactions mask amount as `••••••`.
     - Caching keys for dashboard, sales, reports, staff, attendance, and payments are strictly partitioned by `userRole` (`_viewer` vs `_admin`) to eliminate cross-session data leaks.
 
+### 5.9 Sales Analytics & Decision Engine (`/analytics`)
+- **Core Purpose**: Transforms live restaurant transactions and daily sales entries into an executive business intelligence cockpit. Calculates real database metrics (never mock data), monitors daily pace against dynamic or configured targets, surfaces 🔥 **Top 3 Actions Today**, isolates delivery channel commission leakage, breaks down hourly/day-of-week demand patterns, reports item-level popularity, and produces audit-proof statutory GST filing registers.
+- **Backend Architecture**:
+  - `backend/src/models/SalesAnalyticsConfig.js`: Singleton configuration document tracking daily sales targets, weekday targets, weekend targets, target AOV, suggested target growth rate %, weak day threshold %, delivery deduction alert %, and user interaction states on recommendations (`completed`, `dismissed`, `snoozedUntil`).
+  - `backend/src/utils/salesSuggestionEngine.js`: Rule evaluation engine executing heuristics across daily target deficits (`LOW_DAILY_SALES`), revenue trends (`SALES_DECLINE`, `SALES_GROWTH`), ticket size (`LOW_AOV`, `AOV_DECLINE`), day-of-week softness (`LOW_WEEKDAY_SALES`), delivery platform margin leakage (`DELIVERY_LEAKAGE`), hourly lulls (`HOURLY_OPPORTUNITY`), and item volume movement (`LOW_ITEM_SALES`, `ITEM_GROWTH`). Automatically prioritizes and extracts the 🔥 **Top 3 Actions Today**.
+  - `backend/src/routes/analytics.js`:
+    - `GET /api/analytics/overview`: Aggregated KPIs, today's business status, trend trajectories, day-of-week patterns, hourly distributions (00:00–23:00 IST), sales channels mix, delivery platform margin deductions, top & slow items, and suggestions.
+    - `GET /api/analytics/items`: Searchable, filterable, and sortable item-wise sales report.
+    - `GET /api/analytics/item/:id`: Granular single-item deep dive with daily trend, DOW, hourly volume, and variant shares.
+    - `GET /api/analytics/gst`: Statutory GST report supporting both custom selected date ranges and monthly filing periods, with split CGST (2.5%) and SGST (2.5%), rate breakdown, daily GST table, item GST table, reconciliation auditor, and **Invoice Number Range Tracking** (`startInvoice`, `endInvoice`, `invoiceRange`, e.g. `#4555 – #4575`) bridging quarterly bill numbers and historical order numbers.
+    - `GET /api/analytics/data-quality`: Automated data audit identifying untaxed orders, missing tax rates, and tax calculation discrepancies.
+    - `GET` & `PUT /api/analytics/config`: Retrieve and update target configurations and thresholds.
+    - `POST /api/analytics/suggestions/:id/action`: Manage recommendation states (`complete`, `snooze`, `dismiss`).
+- **Export Capabilities**:
+  - `frontend/src/lib/export-utils.ts`: Standardized export suite providing UTF-8 BOM CSV (`exportToCsv`), formatted Excel XML SpreadsheetML (`exportToExcel`), and branded print / PDF layouts (`printReport`) across all report tables. GST exports include dedicated `Invoice Range (From - To)` column and summary metadata.
+- **Frontend Dashboard**:
+  - `frontend/src/app/analytics/page.tsx`: Full interactive dashboard with tabs for Overview & Trends, Item-Wise Sales, GST & Tax Filing, Action Recommendations, and Data Health. The GST tab features an **Invoice Range (From – To)** KPI summary card and an **Invoice No. (From – To)** column in the Daily GST Sales Register table.
+- **Accounting & Sales Metric Definitions**:
+  - `Gross Sales`: Total customer invoice value including applicable taxes.
+  - `GST Collected`: Total GST collected (5%, standard CGST 2.5% + SGST 2.5%).
+  - `Net Sales`: Mathematically defined and enforced across all reports and tables as:
+    $$\text{Net Sales} = \text{Gross Sales} - \text{GST Collected}$$
+  - `Invoice Range`: Period-level and day-level minimum and maximum bill numbers (`#start – #end`) formatted for statutory outward supplies reporting (GSTR-1 and GSTR-3B).
+
 ---
 
 ## 6) Verification & Quality Checklist
@@ -618,15 +678,13 @@ Whenever changes are made, run this validation suite before concluding:
 
 2. **Backend Syntax Verification**:
    ```bash
-   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js && node --check src/routes/expenseLeak.js && node --check src/utils/expenseLeakEngine.js && node --check src/models/ExpenseLeakReview.js && node --check src/routes/wastage.js && node --check src/models/Wastage.js
+   cd backend && node --check src/server.js && node --check src/middleware/auth.js && node --check src/routes/auth.js && node --check src/routes/orders.js && node --check src/routes/tables.js && node --check src/routes/menu.js && node --check src/routes/sales.js && node --check src/routes/reports.js && node --check src/routes/expenseLeak.js && node --check src/utils/expenseLeakEngine.js && node --check src/models/ExpenseLeakReview.js && node --check src/routes/wastage.js && node --check src/models/Wastage.js && node --check src/routes/customers.js && node --check src/routes/analytics.js && node --check src/utils/salesSuggestionEngine.js && node --check src/models/SalesAnalyticsConfig.js
    ```
    *Must exit with code 0.*
 
-3. **Automated Unit Tests**:
+3. **Automated Test Suite**:
    ```bash
-   node scratch/test_expense_leak_engine.js
-   node scratch/test_wastage_and_pnl.js
-   node scratch/test_viewer_role.js
+   cd backend && node scripts/test_net_sales.js && node scripts/test_sales_analytics.js && node scripts/test_kds_beverage_sort.js && node scripts/test_kds_fulfilled_unbilled.js && node scripts/test_outlet_design.js && node scripts/test_quarterly_bill_numbers.js
    ```
    *All tests must pass.*
 

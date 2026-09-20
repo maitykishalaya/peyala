@@ -414,6 +414,26 @@ export const ordersApi = {
     api.post<Order>(`/orders/${orderId}/kds-recall`),
   batchBumpKdsItem: (menuItemId: string, variantName?: string) =>
     api.post<{ success: boolean; message: string }>('/orders/kds/batch-bump', { menuItemId, variantName }),
+  broadcastKdsAlert: (data: {
+    id?: string;
+    name: string;
+    variantName?: string;
+    tables?: string[];
+    tableNumber?: string;
+    timestamp?: number;
+  }) =>
+    api.post<{ success: boolean; alert: any }>('/orders/kds/alert', data),
+  getKdsAlerts: (since?: number) =>
+    api.get<{
+      alerts: Array<{
+        id: string;
+        name: string;
+        variantName?: string;
+        tables?: string[];
+        tableNumber?: string;
+        timestamp: number;
+      }>;
+    }>('/orders/kds/alerts', { params: since ? { since } : {} }),
 };
 
 export interface KdsPrepTableEntry {

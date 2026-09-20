@@ -238,6 +238,8 @@ export default function TablesPage() {
   const [kdsReadyAlert, setKdsReadyAlert] = useState<KdsReadyEvent | null>(null);
   const prevServedOrderIdsRef = useRef<Set<string>>(new Set());
   const isFirstTableLoadRef = useRef<boolean>(true);
+  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+  const lastAlertTimestampRef = useRef<number>(Date.now() - 5000);
 
   // Table Management Modal (create/edit)
   const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
@@ -309,9 +311,10 @@ export default function TablesPage() {
   };
 
   // Load all tables, menu, and addons
-  const loadData = async () => {
+  const loadData = async (silent: boolean = false) => {
+    const isSilent = typeof silent === 'boolean' ? silent : false;
     try {
-      setLoading(true);
+      if (!isSilent) setLoading(true);
       const [tableRes, itemRes, catRes, addonRes, tableCatRes] = await Promise.all([
         tablesApi.list(),
         menuApi.listItems({ availableOnly: true }),
@@ -334,8 +337,11 @@ export default function TablesPage() {
 
       if (!isFirstTableLoadRef.current && newlyServedTables.length > 0) {
         for (const t of newlyServedTables) {
+          const ordId = (t.activeOrder as any)._id;
+          if (seenAlertIdsRef.current.has(ordId)) continue;
+          seenAlertIdsRef.current.add(ordId);
           setKdsReadyAlert({
-            id: (t.activeOrder as any)._id,
+            id: ordId,
             name: `Table ${t.tableNumber}`,
             tables: [String(t.tableNumber)],
             timestamp: Date.now(),
@@ -357,7 +363,7 @@ export default function TablesPage() {
     } catch (err: any) {
       console.error('Failed to load POS data:', err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
@@ -368,15 +374,63 @@ export default function TablesPage() {
     return () => clearTimeout(timer);
   }, [kdsReadyAlert]);
 
-  // Real-time listener for KDS ready broadcasts to alert the Cashier with 2-blink sound
+  // Real-time listener & cross-device poller for KDS ready broadcasts to alert the Cashier with 2-blink sound
   useEffect(() => {
-    const unsubscribe = listenToKdsReady((event) => {
+    const triggerKdsAlert = (event: KdsReadyEvent) => {
+      if (!event.id || seenAlertIdsRef.current.has(event.id)) return;
+      seenAlertIdsRef.current.add(event.id);
+      if (seenAlertIdsRef.current.size > 200) {
+        const arr = Array.from(seenAlertIdsRef.current);
+        seenAlertIdsRef.current = new Set(arr.slice(-100));
+      }
+
       setKdsReadyAlert(event);
       playTwoBlinkAlertSound();
       const vStr = event.variantName ? ` (${event.variantName})` : '';
       toast.success(`${event.name}${vStr} is ready for pickup! 🍽️`);
+    };
+
+    // 1. Same-device tab broadcast listener (instant sub-millisecond)
+    const unsubscribe = listenToKdsReady((event) => {
+      triggerKdsAlert(event);
+      loadData(true);
     });
-    return () => unsubscribe();
+
+    // 2. Cross-device network poller (e.g. Kitchen tablet <-> Cashier POS laptop)
+    let isPolling = false;
+    const pollInterval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const since = lastAlertTimestampRef.current;
+        const res = await ordersApi.getKdsAlerts(since);
+        if (res.data?.alerts && res.data.alerts.length > 0) {
+          let hasNew = false;
+          for (const alert of res.data.alerts) {
+            triggerKdsAlert(alert);
+            hasNew = true;
+            if (alert.timestamp && alert.timestamp > lastAlertTimestampRef.current) {
+              lastAlertTimestampRef.current = alert.timestamp;
+            }
+          }
+          if (hasNew) {
+            loadData(true);
+          }
+        }
+      } catch (err) {
+        // Silent failure for background polling
+      } finally {
+        isPolling = false;
+      }
+    }, 3000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(pollInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -539,7 +593,7 @@ export default function TablesPage() {
         !moveModal.open &&
         !orderModalLoading
       ) {
-        loadData();
+        loadData(true);
       }
     }, 60000);
     return () => clearInterval(tablePoller);
@@ -1731,7 +1785,7 @@ export default function TablesPage() {
                 </button>
 
                 <button
-                  onClick={loadData}
+                  onClick={() => loadData()}
                   className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
                   title="Refresh Tables"
                 >

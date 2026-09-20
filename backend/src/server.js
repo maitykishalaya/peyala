@@ -43,6 +43,7 @@ app.use('/api/orders', require('./routes/orders'));
 app.use('/api/expense-leaks', require('./routes/expenseLeak'));
 app.use('/api/wastage', require('./routes/wastage'));
 app.use('/api/customers', require('./routes/customers'));
+app.use('/api/analytics', require('./routes/analytics'));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Peyala Business Admin' }));

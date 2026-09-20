@@ -26,6 +26,8 @@ import {
   Search,
   BellRing,
   X,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 // Web Audio API dual-frequency chime synthesizer (880Hz -> 1320Hz bell)
@@ -105,6 +107,115 @@ export default function KitchenDisplayPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // Fullscreen Mode for Kitchen Tablet
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Sync fullscreen state with document body class to hide shell chrome
+  useEffect(() => {
+    if (isFullscreen) {
+      document.body.classList.add('kds-fullscreen-active');
+    } else {
+      document.body.classList.remove('kds-fullscreen-active');
+    }
+    return () => {
+      document.body.classList.remove('kds-fullscreen-active');
+    };
+  }, [isFullscreen]);
+
+  const enterFullscreen = async () => {
+    const el = document.documentElement as any;
+    try {
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
+      } else if (el.mozRequestFullScreen) {
+        await el.mozRequestFullScreen();
+      } else if (el.msRequestFullscreen) {
+        await el.msRequestFullscreen();
+      }
+    } catch (err) {
+      console.info('Native browser fullscreen request skipped or blocked, engaging in-app fullscreen:', err);
+    }
+    setIsFullscreen(true);
+  };
+
+  const exitFullscreen = async () => {
+    const doc = document as any;
+    try {
+      if (document.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          await doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          await doc.msExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.info('Error exiting browser fullscreen:', err);
+    }
+    setIsFullscreen(false);
+  };
+
+  const toggleFullscreen = () => {
+    if (isFullscreen) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  };
+
+  // Handle native browser fullscreen change events (e.g. user presses Esc or tablet gesture)
+  useEffect(() => {
+    const handleFsChange = () => {
+      const doc = document as any;
+      const isFs = Boolean(
+        document.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      if (!isFs && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        exitFullscreen();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFsChange);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    document.addEventListener('mozfullscreenchange', handleFsChange);
+    document.addEventListener('MSFullscreenChange', handleFsChange);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+      document.removeEventListener('mozfullscreenchange', handleFsChange);
+      document.removeEventListener('MSFullscreenChange', handleFsChange);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullscreen]);
+
+  // Cleanup on unmount (e.g. navigating to Tables POS while in fullscreen)
+  useEffect(() => {
+    return () => {
+      if (typeof document !== 'undefined' && document.fullscreenElement) {
+        document.exitFullscreen?.().catch(() => {});
+      }
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('kds-fullscreen-active');
+      }
+    };
+  }, []);
+
   // Track known order IDs to play chime when a new KOT arrives
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitialLoadRef = useRef(true);
@@ -164,6 +275,43 @@ export default function KitchenDisplayPage() {
 
       setActionLoading(`${orderId}-${itemId}`);
       await ordersApi.updateKdsItemStatus(orderId, itemId, nextStatus);
+
+      if (nextStatus === 'served') {
+        const targetOrder = orders.find((o) => o._id === orderId);
+        const targetItem = targetOrder?.items?.find((i) => i._id === itemId);
+        const tableNum = targetOrder
+          ? typeof targetOrder.table === 'object'
+            ? targetOrder.table?.tableNumber
+            : targetOrder.table
+          : '';
+        const tableLabel = tableNum ? `Table ${tableNum}` : 'Order';
+        const itemName = targetItem?.name || 'Dish';
+        const itemVariant = targetItem?.variant?.name;
+        const variantPart = itemVariant ? ` (${itemVariant})` : '';
+        const itemDisplayName = `${itemName}${variantPart}`;
+
+        toast.success(`${itemDisplayName} for ${tableLabel} is ready! 🍽️`);
+
+        setReadyPopup({
+          id: String(Date.now()),
+          title: 'Item Ready',
+          name: `${itemDisplayName} (${tableLabel})`,
+          tables: tableNum ? [String(tableNum)] : [],
+        });
+
+        if (soundEnabled) {
+          playTwoBlinkAlertSound();
+        }
+
+        broadcastKdsReady({
+          id: String(Date.now()),
+          name: `${itemDisplayName} (${tableLabel})`,
+          tables: tableNum ? [String(tableNum)] : [],
+          tableNumber: tableNum ? String(tableNum) : undefined,
+          timestamp: Date.now(),
+        });
+      }
+
       await loadKdsData(true);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update item status');
@@ -523,7 +671,12 @@ export default function KitchenDisplayPage() {
         </div>
       )}
 
-      <div className="space-y-3 p-1 sm:p-2">
+      <div
+        className={cn(
+          "space-y-3 p-1 sm:p-2 transition-all",
+          isFullscreen && "fixed inset-0 z-[100] bg-gray-100 dark:bg-gray-950 p-2 sm:p-3 overflow-y-auto h-screen h-[100dvh] max-h-screen"
+        )}
+      >
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* TOP BAR: KDS BRANDING, CLOCK, CHIME, REFRESH & NAVIGATION */}
         {/* ═══════════════════════════════════════════════════════════════ */}
@@ -532,6 +685,11 @@ export default function KitchenDisplayPage() {
           <div className="flex items-center gap-3">
             <Link
               href="/tables"
+              onClick={() => {
+                if (isFullscreen) {
+                  exitFullscreen();
+                }
+              }}
               className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-1.5 text-xs font-bold transition-colors"
               title="Return to Table View"
             >
@@ -557,7 +715,7 @@ export default function KitchenDisplayPage() {
             </div>
           </div>
 
-          {/* Right: Digital Clock, Sound Toggle, Polling Badge & Manual Refresh */}
+          {/* Right: Digital Clock, Sound Toggle, Polling Badge, Full Screen & Manual Refresh */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* Live Clock */}
             <div className="bg-gray-100 dark:bg-gray-800 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 text-xs font-black text-gray-800 dark:text-gray-100">
@@ -592,6 +750,31 @@ export default function KitchenDisplayPage() {
               title="Test 2-Blink Cashier Alert Sound"
             >
               <BellRing className="w-4 h-4 text-amber-500" />
+            </button>
+
+            {/* Fullscreen Mode Toggle for Kitchen Tablet */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className={cn(
+                'px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border shadow-2xs',
+                isFullscreen
+                  ? 'bg-red-600 hover:bg-red-700 text-white border-red-700 ring-2 ring-red-400/40'
+                  : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
+              )}
+              title={isFullscreen ? 'Exit Full Screen Mode (Show navigation and drawer)' : 'Enter Full Screen Mode for Kitchen Tablet'}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5 text-white" />
+                  <span>Exit Full Screen</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5 text-red-600" />
+                  <span>Full Screen</span>
+                </>
+              )}
             </button>
 
             {/* Live Sync Badge & Refresh Button */}

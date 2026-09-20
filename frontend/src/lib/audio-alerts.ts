@@ -3,6 +3,8 @@
 // Provides synthesized 2-blink audio alerts and cross-tab sync for Cashier & KDS
 // ─────────────────────────────────────────────────────────────────
 
+import api from './api';
+
 export interface KdsReadyEvent {
   id: string;
   name: string;
@@ -90,7 +92,14 @@ export function broadcastKdsReady(event: KdsReadyEvent): void {
       JSON.stringify({ ...event, _pingTime: Date.now() })
     );
   } catch (err) {
-    console.warn('Failed to broadcast KDS ready event:', err);
+    console.warn('Failed to broadcast KDS ready event locally:', err);
+  }
+
+  // Cross-device network broadcast to backend alert buffer (e.g. tablet in kitchen -> cashier PC)
+  try {
+    api.post('/orders/kds/alert', event).catch(() => {});
+  } catch (err) {
+    // Non-blocking network alert dispatch
   }
 }
 

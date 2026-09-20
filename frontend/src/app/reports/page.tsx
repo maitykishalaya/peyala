@@ -7,12 +7,14 @@ import { ordersApi, menuApi, MenuItem } from '@/lib/pos-api';
 import { useAuth } from '@/lib/auth';
 import { formatCurrency, monthStart, today, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
+import { printCustomerBill, BillItem } from '@/lib/thermal-print';
 import {
   BarChart3, TrendingUp, TrendingDown, FileText, Calendar,
   Download, Search, Filter, ChevronDown, ChevronUp, Clock,
   Receipt, CheckCircle, AlertTriangle, Wallet, Smartphone,
   CreditCard, Building2, UtensilsCrossed, RefreshCw,
-  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers, EyeOff, BookOpen
+  Pencil, Trash2, Plus, X, AlertCircle, Check, ArrowRight, Layers, EyeOff, BookOpen,
+  Printer
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell
@@ -101,6 +103,55 @@ export default function ReportsPage() {
       keys.forEach((k) => localStorage.removeItem(k));
     } catch (e) {
       console.error('Failed to invalidate financial caches:', e);
+    }
+  };
+
+  // Print Customer Bill from Detailed Sales Report
+  const handlePrintOrderBill = (orderToPrint: any) => {
+    if (!orderToPrint) return;
+
+    const printableBillItems: BillItem[] = (orderToPrint.items || [])
+      .filter((it: any) => it.status !== 'cancelled')
+      .map((it: any) => ({
+        name: it.name || 'Item',
+        quantity: it.quantity || 1,
+        price: it.price || 0,
+        taxPercent: it.taxPercent,
+        variantName: it.variant?.name || it.variantName,
+        addons: it.selectedAddons?.map((a: any) => ({ name: a.name, price: a.price || 0 })),
+      }));
+
+    const billerDisplayName = orderToPrint.createdBy?.name || user?.name || 'Staff';
+    const isPaid = orderToPrint.status === 'paid';
+    const billOrOrderNum = orderToPrint.billNumber || orderToPrint.orderNumber || orderToPrint._id?.slice(-6) || '—';
+
+    try {
+      printCustomerBill({
+        billNumber: orderToPrint.billNumber,
+        orderNumber: orderToPrint.orderNumber,
+        tokenNo: orderToPrint.orderNumber ? String(orderToPrint.orderNumber).slice(-2) : orderToPrint._id?.slice(-2),
+        tableNumber: orderToPrint.table?.tableNumber ? String(orderToPrint.table.tableNumber) : 'Takeaway',
+        billerName: billerDisplayName,
+        createdAt: new Date(orderToPrint.createdAt || Date.now()),
+        items: printableBillItems,
+        subtotal: orderToPrint.subtotal || 0,
+        taxAmount: orderToPrint.taxAmount || 0,
+        discount: orderToPrint.discount || 0,
+        discountType: orderToPrint.discountType,
+        discountValue: orderToPrint.discountValue,
+        total: orderToPrint.total || 0,
+        settledAmount: orderToPrint.settledAmount ?? undefined,
+        waivedAmount: orderToPrint.waivedAmount,
+        paymentMethod: orderToPrint.paymentMethod || undefined,
+        paymentBreakdown: orderToPrint.paymentBreakdown,
+        isPaid,
+        isReprint: true,
+      });
+
+      toast.success(`Printing Bill #${billOrOrderNum}...`);
+    } catch (err: any) {
+      console.error('Error printing bill:', err);
+      toast.error('Failed to print bill slip');
     }
   };
 
@@ -1286,9 +1337,22 @@ export default function ReportsPage() {
 
                                   {/* Bill / Order # */}
                                   <td className="py-3 px-3 whitespace-nowrap">
-                                    <span className="font-bold text-brand-600 font-mono">
-                                      #{o.billNumber || o.orderNumber || o._id.slice(-6)}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-brand-600 font-mono">
+                                        #{o.billNumber || o.orderNumber || o._id.slice(-6)}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePrintOrderBill(o);
+                                        }}
+                                        title={`Print Bill #${o.billNumber || o.orderNumber || o._id.slice(-6)}`}
+                                        className="p-1 rounded-md text-gray-500 hover:text-brand-600 hover:bg-brand-50 dark:text-gray-400 dark:hover:text-brand-400 dark:hover:bg-brand-950/50 border border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-700 transition-all cursor-pointer shadow-2xs"
+                                      >
+                                        <Printer className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                     <div className="text-[10px] text-gray-400">By {o.createdBy?.name || 'Staff'}</div>
                                   </td>
 
@@ -1419,6 +1483,14 @@ export default function ReportsPage() {
                                   {/* Actions & Expand Chevron */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
                                     <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePrintOrderBill(o)}
+                                        title={`Print Bill #${o.billNumber || o.orderNumber || o._id.slice(-6)}`}
+                                        className="p-1.5 text-gray-500 hover:text-brand-600 hover:bg-brand-50 dark:text-gray-400 dark:hover:text-brand-400 dark:hover:bg-brand-950/50 rounded-md transition-colors cursor-pointer"
+                                      >
+                                        <Printer className="w-3.5 h-3.5" />
+                                      </button>
                                       {isAdmin && o.status === 'paid' && (
                                         <>
                                           <button
@@ -1462,6 +1534,15 @@ export default function ReportsPage() {
                                             <span className="font-bold text-sm text-gray-900 dark:text-white font-mono">
                                               {o.billNumber ? `Bill #${o.billNumber} (Order #${o.orderNumber || o._id.slice(-6)})` : `Order #${o.orderNumber || o._id}`}
                                             </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handlePrintOrderBill(o)}
+                                              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-300 dark:hover:bg-brand-950/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+                                              title="Print 80mm Bill Receipt"
+                                            >
+                                              <Printer className="w-3.5 h-3.5 text-brand-600" />
+                                              <span>Print Bill</span>
+                                            </button>
                                             <span className="text-xs text-gray-500">
                                               Table: <strong>{o.table?.tableNumber || 'Takeaway'}</strong>
                                             </span>

@@ -42,3 +42,16 @@
 @layer utilities {
   .safe-bottom { padding-bottom: max(2rem, env(safe-area-inset-bottom)); }
 }
+
+/* KDS Full Screen mode - hide all app shell chrome for kitchen tablet */
+body.kds-fullscreen-active header,
+body.kds-fullscreen-active aside,
+body.kds-fullscreen-active footer {
+  display: none !important;
+}
+
+body.kds-fullscreen-active main {
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}

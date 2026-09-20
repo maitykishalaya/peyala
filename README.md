@@ -17,8 +17,10 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 |--------|-------|-------------|
 | **Dine-In POS & Tables** | `/tables` | Live visual table floor plan, guest seating, order creation, multi-round KOT dispatch, item status tracking, bill finalization, and payment settlement. |
 | **Menu Management** | `/menu` | Veg/Non-Veg menu item catalog with pricing, GST percentages, active/inactive toggles, and sortable menu categories. |
-| **Detailed Sales Report** | `/reports` | Comprehensive audit trail of individual customer orders, KOT history, bill numbers, payment modes, waived off tracking, and one-click Excel CSV export. |
+| **Detailed Sales Report** | `/reports` | Comprehensive audit trail of individual customer orders, KOT history, bill numbers, payment modes, waived off tracking, 1-click thermal bill reprinting, and one-click Excel CSV export. |
 | **Sales Register** | `/sales` | Consolidated daily sales entries (Counter cash/UPI + Zomato/Swiggy net settlements after commission and platform deductions). |
+| **Sales Analytics** | `/analytics` | Business intelligence cockpit, daily revenue targets vs pace, Top 3 actions, delivery platform margin leakage, hourly/day demand patterns, and statutory GST filing registers. |
+| **Customer Dues** | `/dues` | Customer khata ledger, credit orders tracking, balance sheet asset reconciliation, payment receipts, and customer statement timeline. |
 | **Dashboard** | `/dashboard` | Executive KPI overview (Revenue, Gross/Net Profit), yesterday's operational summary, live account balances, and low stock warnings. |
 | **Accounts** | `/accounts` | Multi-account tracking (Cash Counter, Current Account, Petty Cash, UPI) with internal fund transfers. |
 | **Inventory** | `/inventory` | Stock tracking with minimum thresholds, unit conversions, and automated weighted-average unit cost (WAC) recalculation. |
@@ -85,6 +87,9 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
     - **"Fulfilled History" & Active Dining Retention**: Fulfilled tab maintains served KOT lists until the table is finalized and settled/paid, clearing automatically upon billing. Includes a `[ ↩ Recall ]` button to restore any order bumped by mistake.
     - **Web Audio API Kitchen Chime**: Synthesizes a dual-tone kitchen bell chime (`880Hz` $\rightarrow$ `1320Hz`) automatically whenever a new KOT arrives from the floor or mobile device.
     - **Station & Diet Filters**: Instant filters for `All`, `Veg Only`, and `Bar / Beverages`.
+    - **Full Screen Tablet Mode for Kitchen Operations**: Dedicated `[ Full Screen ]` toggle requesting native browser fullscreen while instantly hiding all app chrome (desktop sidebar drawer, top header bar, mobile bottom navigation bar, and parent padding) via `fixed inset-0 z-[100]` and `body.kds-fullscreen-active`. Provides 100% viewport visibility tailored for kitchen wall mounts and tablet stations, with a high-contrast `[ Exit Full Screen ]` button and `Escape` key support to immediately restore drawer and navigation.
+    - **Cross-Device Food Ready Alerts & Cashier Notification System**: Whenever food is marked ready from KDS (via "Order Ready" ticket bump, "Batch Ready" in Prep Next, single table bump in Prep Next, or clicking an item checklist status to `served`), a notification is broadcast across devices via an in-memory backend ring buffer (`POST /api/orders/kds/alert`, `GET /api/orders/kds/alerts?since=...`, 5-minute TTL, 50-item cap) alongside instant local `BroadcastChannel` and `localStorage`. Cashier and floor staff on the Tables POS page (`/tables`) receive a high-visibility floating "Kitchen Ready" popup banner (`top-5 z-[9999]`), a 2-blink urgent audio alert chime (`1046.5Hz C6` $\rightarrow$ `1318.5Hz E6` $\rightarrow$ `1760.0Hz A6`), toast notifications, and silent real-time table status refresh every 3 seconds across physical devices (kitchen tablet $\leftrightarrow$ cashier laptop/counter).
+    - **1-Click Bill Reprinting from Detailed Sales Report (`/reports`)**: Every order row in the Detailed Sales Report includes a dedicated direct `<Printer />` button alongside the bill number badge (`#1`, `#2`...). Clicking this button immediately fetches order items, discounts, customer khata info, and bill metadata to render the thermal bill preview modal or dispatch silent ESC/POS printing on counter printers.
   - **View D: Add-on & Variant Customization Modal**:
     - Item title + unit price header with close `(X)`.
     - Search addon item input.
@@ -449,7 +454,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Bill numbers are assigned immediately when a bill is generated/printed or when an order is settled directly without printing (via Cash, Due, Card, UPI, or Part Payment), ensuring complete transparency and un-gapped accounting records.
 - **Thermal Slip & Report Integration**:
   - 80mm receipts render `Bill No: {order.billNumber}`.
-  - The Detailed Sales Report (`/reports`) displays the quarterly bill number for all historical transactions.
+  - The Detailed Sales Report (`/reports`) displays the quarterly bill number for all historical transactions with a 1-click **Printer icon button** directly beside every bill number (and in the row actions and expanded details header) to reprint 80mm thermal receipts on the spot.
 
 ### 23. Outlet Design, Floor Categories & Dynamic Section Sorting (`/settings/outlet-design`)
 - **Custom Dining Zones & Floor Categories (`TableCategory`)**:
@@ -467,6 +472,32 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **Accurate Vendor Dues**:
   - Purchases marked on due (`isPaid: false`) accurately post to raw material stock while recording the outstanding payable in the Supplier Ledger and Balance Sheet liabilities (`supplierDues`).
   - When paid through payment vouchers (`/payments`), funds are debited from the chosen account and supplier dues are reduced, maintaining double-entry balance sheet accuracy.
+
+### 25. Customer Dues & Khata Ledger System (`/dues`)
+- **Customer Khata Management**:
+  - Full-featured credit account system allowing regular customers to dine on credit (`paymentMethod: 'due'`) with automated customer ledger accounting.
+  - POS settlement allows instant customer search (autocomplete matching name or phone digits with regex escaping) or 1-tap on-the-fly registration.
+  - Orders settled as due atomically increment the customer's `totalDue` and order counter while recording `dueAmount` and `dueSettled: false`.
+- **Double-Entry Balance Sheet Integration**:
+  - Outstanding customer dues are recognized under Current Assets (`totalCustomerDues`), balancing double-entry accounts without prematurely inflating liquid cash or bank till balances.
+- **Due Payment Collection & Receipts**:
+  - Staff can record partial or full due collections from the Customer Profile modal, selecting destination accounts (Cash Counter or Current Bank Account).
+  - Automatically generates an audited `CustomerDuePayment` record with dedicated receipt sequence (`RCP-YYYY-XXXX`), prints 80mm thermal collection receipts, and decrements customer outstanding dues.
+- **Audit Timeline & Customer Statement**:
+  - Detailed customer statement view itemizing all historical credit meals, bill numbers, dates, payment vouchers, and real-time running balance.
+
+### 26. Sales Analytics & Decision Engine (`/analytics`)
+- **Executive Business Cockpit**:
+  - Dynamic pace monitoring comparing real-time daily revenue against configured daily targets, weekday targets, and weekend targets.
+  - **🔥 Top 3 Actions Today**: Autonomous heuristic suggestion engine evaluating target deficits, revenue trend dips, low AOV, day-of-week softness, delivery margin leakage, and slow-moving items with actionable remedies and impact tags.
+- **Delivery Platform Margin Leakage Analysis**:
+  - Isolates gross vs net payouts on Zomato, Swiggy, and Fatafat, alerting operators when commissions and promotional discounts exceed safe margin thresholds (e.g. > 35%).
+- **Statutory GST Filing Register (GSTR-1 & GSTR-3B Compliant)**:
+  - Exact 5% GST split into CGST (2.5%) and SGST (2.5%) with item-level and rate-level tax reconciliations.
+  - **Invoice Number Range Tracking**: Logs start and end invoice numbers (`#start – #end`) across selected filing months and daily registers for statutory outward supplies reporting.
+  - Mathematical integrity strictly enforced across all views: $\text{Net Sales} = \text{Gross Sales} - \text{GST Collected}$.
+- **Export Suite (UTF-8 BOM CSV, Excel XML SpreadsheetML, Branded PDF)**:
+  - 1-click export of GST registers, item sales reports, and daily audits compatible with Microsoft Excel, Apple Numbers, and Google Sheets.
 
 ---
 
