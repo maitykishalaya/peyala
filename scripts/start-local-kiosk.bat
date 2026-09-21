@@ -31,16 +31,43 @@ shift
 goto PARSE_ARGS
 :ARGS_DONE
 
-:: 1. Check for Portable Node.js in pendrive folder
+:: 1. Check for Node.js in portable directory, PATH, and standard Windows install locations
+set "NODE_EXE="
+
 if exist "%PORTABLE_NODE_DIR%\node.exe" (
-    echo [*] Using portable Node.js runtime from %PORTABLE_NODE_DIR%
+    set "NODE_EXE=%PORTABLE_NODE_DIR%\node.exe"
     set "PATH=%PORTABLE_NODE_DIR%;%PATH%"
+    echo [*] Using portable Node.js runtime from %PORTABLE_NODE_DIR%
 )
 
-:: 2. Check if Node.js is installed / available in PATH
-where node >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Node.js was not found in PATH or portable-node folder.
+if "%NODE_EXE%"=="" (
+    where node >nul 2>&1
+    if not errorlevel 1 set "NODE_EXE=node"
+)
+
+if "%NODE_EXE%"=="" (
+    if exist "C:\Program Files\nodejs\node.exe" (
+        set "NODE_EXE=C:\Program Files\nodejs\node.exe"
+        set "PATH=C:\Program Files\nodejs;%PATH%"
+    )
+)
+
+if "%NODE_EXE%"=="" (
+    if exist "C:\Program Files (x86)\nodejs\node.exe" (
+        set "NODE_EXE=C:\Program Files (x86)\nodejs\node.exe"
+        set "PATH=C:\Program Files (x86)\nodejs;%PATH%"
+    )
+)
+
+if "%NODE_EXE%"=="" (
+    if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+        set "NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
+        set "PATH=%LOCALAPPDATA%\Programs\nodejs;%PATH%"
+    )
+)
+
+if "%NODE_EXE%"=="" (
+    echo [ERROR] Node.js was not found in PATH or standard installation folders.
     echo.
     echo To run the local server directly on this Windows laptop:
     echo   1. Run "setup-windows.bat" in this folder to automatically
