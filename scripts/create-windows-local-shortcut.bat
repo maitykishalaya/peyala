@@ -21,20 +21,18 @@ if exist "%SCRIPT_DIR%PeyalaPOS.exe" (
 
 set "VBS_FILE=%TEMP%\create_pos_local_shortcut_%RANDOM%.vbs"
 
-(
-    echo Set oWS = WScript.CreateObject^("WScript.Shell"^)
-    echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\Peyala POS Station.lnk"
-    echo Set oLink = oWS.CreateShortcut^(sLinkFile^)
-    echo oLink.TargetPath = "%TARGET_FILE%"
-    echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
-    echo oLink.Description = "Launch Peyala POS in Kiosk Mode (Local Server)"
-    echo oLink.IconLocation = "shell32.dll,13"
-    echo oLink.WindowStyle = 1
-    echo oLink.Save
-) > "%VBS_FILE%"
+> "%VBS_FILE%" echo Set oWS = WScript.CreateObject("WScript.Shell")
+>> "%VBS_FILE%" echo sLinkFile = oWS.SpecialFolders("Desktop") ^& "\Peyala POS Station.lnk"
+>> "%VBS_FILE%" echo Set oLink = oWS.CreateShortcut(sLinkFile)
+>> "%VBS_FILE%" echo oLink.TargetPath = "%TARGET_FILE%"
+>> "%VBS_FILE%" echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
+>> "%VBS_FILE%" echo oLink.Description = "Launch Peyala POS Local Station"
+>> "%VBS_FILE%" echo oLink.IconLocation = "shell32.dll,13"
+>> "%VBS_FILE%" echo oLink.WindowStyle = 1
+>> "%VBS_FILE%" echo oLink.Save
 
-cscript //nologo "%VBS_FILE%"
-if exist "%VBS_FILE%" del "%VBS_FILE%"
+cscript //nologo "%VBS_FILE%" >nul 2>&1
+if exist "%VBS_FILE%" del "%VBS_FILE%" >nul 2>&1
 
 if "%QUIET%"=="0" (
     echo [SUCCESS] "Peyala POS Station" shortcut created on your Desktop!
