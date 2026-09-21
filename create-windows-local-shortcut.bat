@@ -19,20 +19,22 @@ if exist "%SCRIPT_DIR%PeyalaPOS.exe" (
     set "TARGET_FILE=%SCRIPT_DIR%PeyalaPOS.exe"
 )
 
-set "VBS_FILE=%TEMP%\create_pos_local_shortcut_%RANDOM%.vbs"
+:: Create Desktop Shortcut (.lnk) using PowerShell (safe and direct)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $shortcut = $ws.CreateShortcut((Join-Path $desktop 'Peyala POS Station.lnk')); $shortcut.TargetPath = '%TARGET_FILE%'; $shortcut.WorkingDirectory = '%SCRIPT_DIR%'; $shortcut.Description = 'Launch Peyala POS Local Station'; $shortcut.IconLocation = 'shell32.dll,13'; $shortcut.Save()" >nul 2>&1
 
-> "%VBS_FILE%" echo Set oWS = WScript.CreateObject("WScript.Shell")
->> "%VBS_FILE%" echo sLinkFile = oWS.SpecialFolders("Desktop") ^& "\Peyala POS Station.lnk"
->> "%VBS_FILE%" echo Set oLink = oWS.CreateShortcut(sLinkFile)
->> "%VBS_FILE%" echo oLink.TargetPath = "%TARGET_FILE%"
->> "%VBS_FILE%" echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
->> "%VBS_FILE%" echo oLink.Description = "Launch Peyala POS Local Station"
->> "%VBS_FILE%" echo oLink.IconLocation = "shell32.dll,13"
->> "%VBS_FILE%" echo oLink.WindowStyle = 1
->> "%VBS_FILE%" echo oLink.Save
-
-cscript //nologo "%VBS_FILE%" >nul 2>&1
-if exist "%VBS_FILE%" del "%VBS_FILE%" >nul 2>&1
+:: Fallback if PowerShell was restricted
+if not exist "%USERPROFILE%\Desktop\Peyala POS Station.lnk" (
+    set "VBS_FILE=%TEMP%\pos_local_sc_%RANDOM%.vbs"
+    > "!VBS_FILE!" echo Set WshShell = CreateObject("WScript.Shell")
+    >> "!VBS_FILE!" echo Set Shortcut = WshShell.CreateShortcut(WshShell.SpecialFolders("Desktop") + "\Peyala POS Station.lnk")
+    >> "!VBS_FILE!" echo Shortcut.TargetPath = "%TARGET_FILE%"
+    >> "!VBS_FILE!" echo Shortcut.WorkingDirectory = "%SCRIPT_DIR%"
+    >> "!VBS_FILE!" echo Shortcut.Description = "Launch Peyala POS Local Station"
+    >> "!VBS_FILE!" echo Shortcut.IconLocation = "shell32.dll,13"
+    >> "!VBS_FILE!" echo Shortcut.Save
+    cscript //nologo "!VBS_FILE!" >nul 2>&1
+    if exist "!VBS_FILE!" del "!VBS_FILE!" >nul 2>&1
+)
 
 if "%QUIET%"=="0" (
     echo [SUCCESS] "Peyala POS Station" shortcut created on your Desktop!

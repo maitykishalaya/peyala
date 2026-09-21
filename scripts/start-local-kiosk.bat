@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Peyala POS - Local Server & Dedicated Windows Kiosk Station
+title Peyala POS - Local Server and Dedicated Windows Kiosk Station
 
 echo ====================================================================
-echo   🍵 Peyala POS - Local Server & Dedicated Windows Kiosk Station
+echo   🍵 Peyala POS - Local Server and Dedicated Windows Kiosk Station
 echo ====================================================================
 echo.
 
@@ -72,7 +72,7 @@ if "%NODE_EXE%"=="" (
     echo To run the local server directly on this Windows laptop:
     echo   1. Run "setup-windows.bat" in this folder to automatically
     echo      download portable Node.js (no install required!), OR
-    echo   2. Download & install Node.js (LTS) from https://nodejs.org/
+    echo   2. Download and install Node.js (LTS) from https://nodejs.org/
     echo.
     set /p "RUN_SETUP=Would you like to run setup-windows.bat now? (Y/N): "
     if /i "!RUN_SETUP!"=="Y" (
@@ -137,7 +137,7 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
     set "BROWSER_NAME=Google Chrome"
 )
 
-:: Fallback to Microsoft Edge (built-in on all Windows 10 & 11 laptops)
+:: Fallback to Microsoft Edge (built-in on all Windows 10 and 11 laptops)
 if "%BROWSER_BIN%"=="" (
     if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
         set "BROWSER_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -156,7 +156,7 @@ if "%BROWSER_BIN%"=="" (
     echo Local servers will still start, and default browser will open.
 )
 
-:: 5. Free stale ports 3000 & 4000 if occupied
+:: 5. Free stale ports 3000 and 4000 if occupied
 echo [*] Freeing ports 3000 and 4000...
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":3000 " ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a >nul 2>&1
@@ -167,11 +167,11 @@ for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":4000 " ^| findstr "L
 
 :: 6. Launch Backend API (Port 4000)
 echo [*] Starting Backend API on port 4000...
-start "Peyala_Backend_API" /min cmd /c "cd /d "%BACKEND_DIR%" && npm run dev"
+start "Peyala_Backend_API" /d "%BACKEND_DIR%" /min cmd /c "npm run dev"
 
 :: 7. Launch Frontend Next.js (Port 3000)
 echo [*] Starting Frontend Next.js on port 3000...
-start "Peyala_Frontend_Next" /min cmd /c "cd /d "%FRONTEND_DIR%" && npm run dev"
+start "Peyala_Frontend_Next" /d "%FRONTEND_DIR%" /min cmd /c "npm run dev"
 
 :: 8. Wait for local server to be responsive
 echo [*] Waiting for local server to become ready (http://localhost:3000)...
@@ -192,7 +192,7 @@ if not exist "%USER_DATA_DIR%" mkdir "%USER_DATA_DIR%"
 
 echo.
 echo ====================================================================
-echo   Station Status: Active & Serving
+echo   Station Status: Active and Serving
 echo   Local Portal:   %DEFAULT_URL%
 echo   Print Engine:   Silent Auto-Print (--kiosk-printing)
 echo   Browser Engine: %BROWSER_NAME%

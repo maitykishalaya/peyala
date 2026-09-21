@@ -178,8 +178,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
     - `start-local-kiosk.bat`: Dedicated launcher for standalone local server. Starts backend (Express on port 4000) and frontend (Next.js on port 3000), verifies dependencies, auto-clears ports 3000/4000, socket-polls `localhost:3000` until responsive, auto-detects Chrome or Edge, and launches full kiosk mode (`--kiosk --kiosk-printing`) targeting `http://localhost:3000/login`. On exit (`Alt + F4`), cleanly terminates local Node server processes.
     - `setup-windows.bat`: 1-click pendrive wizard for Windows laptops. Detects/downloads portable Node.js v20 LTS (if missing), installs dependencies, creates desktop shortcuts, and builds `PeyalaPOS.exe`.
     - `build-exe.bat` + `PeyalaLauncher.cs`: Generates `PeyalaPOS.exe` using built-in Windows C# compiler (`csc.exe`). Runs silently as a GUI application with Windows System Tray icon (Kiosk/Windowed toggle, server restart, exit).
-    - `create-windows-local-shortcut.bat`: VBScript-powered utility placing a 1-click "Peyala POS Station" shortcut on the Windows desktop for local server.
-    - `stop-local-server.bat`: 1-click utility to immediately stop all background servers and release ports 3000 & 4000.
+    - `create-windows-local-shortcut.bat`: PowerShell-powered utility with safe fallback placing a 1-click "Peyala POS Station" shortcut on the Windows desktop for local server.
+    - `stop-local-server.bat`: 1-click utility to immediately stop all background servers and release ports 3000 and 4000.
     - `start-kiosk.bat`: Lightweight kiosk launcher for cloud deployment (`https://peyala.vercel.app/login`).
     - Press `Alt + F4` or `F11` to close or toggle fullscreen.
   - **macOS**: `start-kiosk.sh` / `start-kiosk.command` launches Chrome targeting `https://peyala.vercel.app/login` with:

@@ -18,21 +18,22 @@ if not exist "%TARGET_BAT%" (
     exit /b 1
 )
 
-:: Generate VBScript to create Desktop Shortcut (.lnk)
-(
-    echo Set oWS = WScript.CreateObject^("WScript.Shell"^)
-    echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\Peyala POS Station.lnk"
-    echo Set oLink = oWS.CreateShortcut^(sLinkFile^)
-    echo oLink.TargetPath = "%TARGET_BAT%"
-    echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
-    echo oLink.Description = "Launch Peyala POS in Kiosk Mode with Silent Auto-Printing"
-    echo oLink.IconLocation = "shell32.dll,13"
-    echo oLink.WindowStyle = 1
-    echo oLink.Save
-) > "%VBS_FILE%"
+:: Create Desktop Shortcut (.lnk) using PowerShell (safe and direct)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $shortcut = $ws.CreateShortcut((Join-Path $desktop 'Peyala POS Station.lnk')); $shortcut.TargetPath = '%TARGET_BAT%'; $shortcut.WorkingDirectory = '%SCRIPT_DIR%'; $shortcut.Description = 'Launch Peyala POS in Kiosk Mode with Silent Auto-Printing'; $shortcut.IconLocation = 'shell32.dll,13'; $shortcut.Save()" >nul 2>&1
 
-cscript //nologo "%VBS_FILE%"
-if exist "%VBS_FILE%" del "%VBS_FILE%"
+:: Fallback if PowerShell was restricted
+if not exist "%USERPROFILE%\Desktop\Peyala POS Station.lnk" (
+    set "VBS_FILE=%TEMP%\pos_cloud_sc_%RANDOM%.vbs"
+    > "!VBS_FILE!" echo Set WshShell = CreateObject("WScript.Shell")
+    >> "!VBS_FILE!" echo Set Shortcut = WshShell.CreateShortcut(WshShell.SpecialFolders("Desktop") + "\Peyala POS Station.lnk")
+    >> "!VBS_FILE!" echo Shortcut.TargetPath = "%TARGET_BAT%"
+    >> "!VBS_FILE!" echo Shortcut.WorkingDirectory = "%SCRIPT_DIR%"
+    >> "!VBS_FILE!" echo Shortcut.Description = "Launch Peyala POS in Kiosk Mode with Silent Auto-Printing"
+    >> "!VBS_FILE!" echo Shortcut.IconLocation = "shell32.dll,13"
+    >> "!VBS_FILE!" echo Shortcut.Save
+    cscript //nologo "!VBS_FILE!" >nul 2>&1
+    if exist "!VBS_FILE!" del "!VBS_FILE!" >nul 2>&1
+)
 
 echo [SUCCESS] "Peyala POS Station" shortcut created on your Desktop!
 echo.

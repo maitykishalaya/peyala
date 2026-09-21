@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 title Peyala POS - Windows Kiosk Print Station
 
 echo ====================================================================
-echo   🍵 Peyala POS - Dedicated Windows Kiosk & Silent Auto-Print Hub
+echo   🍵 Peyala POS - Dedicated Windows Kiosk and Silent Auto-Print Hub
 echo ====================================================================
 echo.
 

@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Peyala POS - Windows Setup & Preparation
+title Peyala POS - Windows Setup and Preparation
 
 echo ====================================================================
 echo   🍵 Peyala POS - Windows Pendrive Initial Setup Wizard

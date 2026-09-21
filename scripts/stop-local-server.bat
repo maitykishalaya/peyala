@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 title Stop Peyala POS Local Servers
 
 echo ======================================================
-echo   🍵 Stopping Peyala Local Servers (Ports 3000 & 4000)
+echo   🍵 Stopping Peyala Local Servers (Ports 3000 and 4000)
 echo ======================================================
 echo.
 
