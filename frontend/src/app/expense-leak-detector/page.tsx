@@ -11,7 +11,7 @@ import {
   ThumbsUp, ThumbsDown, X, Layers, ArrowUpRight, Check, Sparkles, HelpCircle
 } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend
 } from 'recharts';
 
 export default function ExpenseLeakDetectorPage() {
@@ -31,6 +31,7 @@ export default function ExpenseLeakDetectorPage() {
 
   // Interactive Modals
   const [selectedAnomaly, setSelectedAnomaly] = useState<any>(null);
+  const [trendTab, setTrendTab] = useState<'comparison' | 'timeline'>('comparison');
   const [feedbackAnomaly, setFeedbackAnomaly] = useState<any>(null);
   const [feedbackReason, setFeedbackReason] = useState<string>('actual_issue');
   const [feedbackNotes, setFeedbackNotes] = useState<string>('');
@@ -609,7 +610,10 @@ export default function ExpenseLeakDetectorPage() {
                     <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setSelectedAnomaly(a)}
+                          onClick={() => {
+                            setSelectedAnomaly(a);
+                            setTrendTab('comparison');
+                          }}
                           className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
                         >
                           <span>View Details</span>
@@ -694,23 +698,180 @@ export default function ExpenseLeakDetectorPage() {
                 </span>
               </div>
 
-              {/* Historical Trend Chart */}
-              {selectedAnomaly.historicalTrend?.length > 0 && (
-                <div className="card p-4">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
-                    Historical Trend
-                  </h3>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={selectedAnomaly.historicalTrend}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip formatter={(v: any) => [`₹${v}`, 'Value']} />
-                      <Bar dataKey="price" fill="#e26411" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              {/* Historical Trend & Rate Comparison Chart */}
+              {((selectedAnomaly.historicalTrend && selectedAnomaly.historicalTrend.length > 0) ||
+                (selectedAnomaly.purchaseTimeline && selectedAnomaly.purchaseTimeline.length > 0)) && (() => {
+                const hasTimeline = selectedAnomaly.purchaseTimeline && selectedAnomaly.purchaseTimeline.length > 0;
+                const activeData = (trendTab === 'timeline' && hasTimeline)
+                  ? selectedAnomaly.purchaseTimeline
+                  : selectedAnomaly.historicalTrend || [];
+
+                const isConsumption = selectedAnomaly.detector === 'usage_spike' ||
+                  activeData.some((d: any) => d.qty !== undefined && d.price === undefined) ||
+                  (trendTab === 'comparison' && selectedAnomaly.detector === 'usage_spike');
+
+                const isPrice = selectedAnomaly.detector === 'price_spike' ||
+                  selectedAnomaly.detector === 'supplier_price_anomaly' ||
+                  (activeData.some((d: any) => d.price !== undefined && d.expense === undefined) && !isConsumption);
+
+                const isExpenseVsSales = activeData.some((d: any) => d.expense !== undefined && d.sales !== undefined);
+
+                // Prepare normalized chart data
+                const chartData = activeData.map((d: any) => ({
+                  ...d,
+                  chartLabel: d.label || d.name || d.date || 'Period',
+                  chartQty: d.qty !== undefined ? d.qty : (d.value ?? 0),
+                  chartPrice: d.price !== undefined ? d.price : (d.value ?? 0),
+                  chartExpense: d.expense !== undefined ? d.expense : (d.value ?? 0),
+                  chartSales: d.sales !== undefined ? d.sales : 0,
+                  chartValue: d.value ?? d.qty ?? d.price ?? d.expense ?? 0,
+                }));
+
+                const getConsumptionColor = (entry: any) => {
+                  if (entry.type === 'baseline' || entry.chartLabel?.toLowerCase().includes('base')) return '#94a3b8'; // Slate
+                  if (entry.type === 'expected' || entry.chartLabel?.toLowerCase().includes('expect')) return '#10b981'; // Green
+                  if (entry.type === 'actual' || entry.chartLabel?.toLowerCase().includes('act') || entry.chartLabel?.toLowerCase().includes('curr')) return '#ef4444'; // Red
+                  return '#e26411';
+                };
+
+                return (
+                  <div className="card p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                          {isConsumption
+                            ? (trendTab === 'timeline'
+                                ? `Purchase Quantities Timeline (${selectedAnomaly.unit || 'units'})`
+                                : `Monthly Consumption Rate (${selectedAnomaly.unit || 'units'}/month)`)
+                            : isPrice
+                            ? `Price History & Comparison (₹ / ${selectedAnomaly.unit || 'unit'})`
+                            : isExpenseVsSales
+                            ? `Category Spending vs Total Sales (₹ / month)`
+                            : `Historical Expense Rate (₹ / month)`}
+                        </h3>
+                        <p className="text-[11px] text-gray-500">
+                          {isConsumption
+                            ? (trendTab === 'timeline'
+                                ? 'Individual purchase quantities recorded across baseline and current periods.'
+                                : 'Baseline usage vs expected usage (scaled with sales growth) vs actual consumption.')
+                            : isPrice
+                            ? 'Recent unit price points recorded in purchase invoices.'
+                            : 'Comparing historical baseline period against current monthly spending rate.'}
+                        </p>
+                      </div>
+
+                      {/* Tab Switcher if Purchase Timeline exists */}
+                      {hasTimeline && (
+                        <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 p-0.5 rounded-lg text-xs self-start shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setTrendTab('comparison')}
+                            className={cn(
+                              'px-2.5 py-1 rounded-md font-medium transition',
+                              trendTab === 'comparison'
+                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-xs'
+                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                            )}
+                          >
+                            Monthly Rate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTrendTab('timeline')}
+                            className={cn(
+                              'px-2.5 py-1 rounded-md font-medium transition',
+                              trendTab === 'timeline'
+                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-xs'
+                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                            )}
+                          >
+                            Purchase Timeline
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Chart Container */}
+                    <div className="w-full min-w-0 h-[200px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" className="dark:stroke-gray-800" />
+                          <XAxis
+                            dataKey="chartLabel"
+                            tick={{ fontSize: 10, fill: '#888' }}
+                            interval={0}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: '#888' }}
+                            tickFormatter={(v: any) => (isConsumption ? `${v}` : `₹${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`)}
+                          />
+                          <Tooltip
+                            formatter={(v: any, name: any) => {
+                              if (isConsumption) {
+                                return [`${v} ${selectedAnomaly.unit || 'units'}`, name === 'chartQty' ? 'Consumption' : name];
+                              }
+                              if (isPrice) {
+                                return [`₹${v} / ${selectedAnomaly.unit || 'unit'}`, name === 'chartPrice' ? 'Unit Price' : name];
+                              }
+                              return [`₹${Number(v).toLocaleString('en-IN')}`, name];
+                            }}
+                            contentStyle={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                              borderRadius: '8px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '11px',
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                            }}
+                          />
+
+                          {isConsumption ? (
+                            <Bar dataKey="chartQty" name="Consumption" radius={[4, 4, 0, 0]}>
+                              {chartData.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={getConsumptionColor(entry)} />
+                              ))}
+                            </Bar>
+                          ) : isExpenseVsSales ? (
+                            <>
+                              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                              <Bar dataKey="chartExpense" name="Expense Rate" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="chartSales" name="Sales Baseline" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            </>
+                          ) : isPrice ? (
+                            <Bar dataKey="chartPrice" name="Unit Price" fill="#e26411" radius={[4, 4, 0, 0]}>
+                              {chartData.map((entry: any, index: number) => (
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={entry.isHighest || entry.period === 'Current' ? '#e26411' : '#94a3b8'}
+                                />
+                              ))}
+                            </Bar>
+                          ) : (
+                            <Bar dataKey="chartValue" name="Value" fill="#e26411" radius={[4, 4, 0, 0]} />
+                          )}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Consumption Legend Pills */}
+                    {isConsumption && trendTab === 'comparison' && (
+                      <div className="flex flex-wrap items-center justify-center gap-3 pt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
+                          <span>Historical Baseline</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                          <span>Expected Pace (from Sales)</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+                          <span>Actual Usage (Leak)</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Multi-Supplier Comparison Table (if applicable) */}
               {selectedAnomaly.supplierComparison?.length > 0 && (

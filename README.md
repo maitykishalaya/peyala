@@ -151,7 +151,18 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 - **🚀 Production Mode (Default)**: Automatically sends KOTs and Bills straight to the default thermal printer via a hidden print iframe without opening preview dialogs.
 - **Bypassing Chrome Print Dialog & True Kiosk Mode on Windows**:
   - By default, standard Chrome security displays a print dialog and browser chrome (tabs, search bar).
-  - **On Windows Counter Laptop**:
+  - **Option A: Running on a Standalone Windows Laptop (Local Server / Pendrive)**:
+    1. Copy the folder to your USB pendrive and plug into the Windows laptop.
+    2. Run [`setup-windows.bat`](file:///Users/kishalaya/Downloads/peyala_v8/setup-windows.bat) once: Automatically configures portable Node.js (if missing), installs dependencies, creates desktop shortcuts, and builds [`PeyalaPOS.exe`](file:///Users/kishalaya/Downloads/peyala_v8/build-exe.bat).
+    3. Double-click [`start-local-kiosk.bat`](file:///Users/kishalaya/Downloads/peyala_v8/start-local-kiosk.bat) or the **"Peyala POS Station"** Desktop shortcut:
+       - Frees ports 3000 & 4000.
+       - Starts the local Express Backend (port 4000) and Next.js Frontend (port 3000).
+       - Waits for `http://localhost:3000` to be online via socket ping.
+       - Launches Chrome (or built-in Microsoft Edge) in **True Full-Screen Kiosk Mode** (`--kiosk --kiosk-printing`) targeting `http://localhost:3000/login`.
+       - When the kiosk browser is closed (`Alt + F4`), it automatically terminates both local servers cleanly.
+    4. To stop servers manually at any time: Double-click [`stop-local-server.bat`](file:///Users/kishalaya/Downloads/peyala_v8/stop-local-server.bat).
+    5. Native `.exe` Launcher: Run [`build-exe.bat`](file:///Users/kishalaya/Downloads/peyala_v8/build-exe.bat) to produce `PeyalaPOS.exe` with System Tray controls.
+  - **Option B: Running as Cloud Print Station (Vercel)**:
     1. Double-click [`start-kiosk.bat`](file:///Users/kishalaya/Downloads/peyala_v8/start-kiosk.bat):
        Hardcoded by default to **`https://peyala.vercel.app/login`**.
     2. It launches Chrome in **True Full-Screen Kiosk Mode** (`--kiosk`) with **Silent Auto-Printing** (`--kiosk-printing`) targeting `https://peyala.vercel.app/login`.
@@ -353,7 +364,10 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Users can mark anomalies as normal (30-day mute stored in `ExpenseLeakReview` with audit log), preventing alert fatigue.
   - Captures 👍 / 👎 learning feedback with structured reason tags to refine future alert prioritization.
 - **Investigation Modal & Recharts Visualizations**:
-  - Displays historical trend charts, multi-supplier comparison tables, raw transaction audit logs, and operational action checklists.
+  - Displays adaptive multi-metric charts, multi-supplier comparison tables, raw transaction audit logs, and operational action checklists.
+  - **Usage Spike (Consumption Increase) Chart**: Displays monthly consumption run-rate comparing **Historical Baseline** (slate), **Expected Pace scaled from sales growth** (emerald), and **Actual Usage Rate** (red leak alert) in appropriate units (`kg`, `litres`, `units`), with a 1-tap toggle to inspect the chronological **Purchase Quantities Timeline**.
+  - **Price Spike & Supplier Variance Charts**: Displays chronological unit price points and cross-vendor comparisons in `₹/unit`.
+  - **Expense vs Sales Charts**: Renders side-by-side categorical expense bars against total revenue baselines.
 
 ### 17. Wastage Entry Module, 10 PM Prompt Banner & P&L Integration (`/wastage`)
 - **Frictionless Wastage Recording**:
@@ -576,9 +590,16 @@ peyala_v8/
 ├── MEMORY_BANK.md          # Architectural context & design decisions for AI/dev handoffs
 ├── docker-compose.yml      # Container orchestration
 ├── install.sh              # One-step dependency installer & DB seeder
-├── start.sh                # Concurrent background runner
-├── start-kiosk.bat         # Windows Chrome kiosk launcher for silent auto-printing
-├── create-windows-shortcut.bat # Windows Desktop 1-click shortcut generator
+├── start.sh                # Concurrent background runner (macOS/Linux)
+├── start-local-kiosk.bat   # Windows Local Server & Kiosk Launcher (1-click run)
+├── setup-windows.bat       # Windows Pendrive setup wizard (portable Node & dependencies)
+├── build-exe.bat           # Native PeyalaPOS.exe compiler using built-in Windows csc.exe
+├── PeyalaLauncher.cs       # Native Windows GUI C# source with System Tray controls
+├── create-windows-local-shortcut.bat # Windows Desktop 1-click shortcut generator (Local Station)
+├── stop-local-server.bat   # 1-click script to safely terminate local servers (ports 3000 & 4000)
+├── PENDRIVE_INSTRUCTIONS.txt # Quick start instructions for Windows laptop users
+├── start-kiosk.bat         # Windows Chrome kiosk launcher for cloud (Vercel)
+├── create-windows-shortcut.bat # Windows Desktop shortcut for cloud portal
 ├── start-kiosk.sh          # macOS/Linux Chrome kiosk launcher
 ├── start-kiosk.command     # macOS Desktop double-clickable kiosk launcher
 │

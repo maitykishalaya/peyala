@@ -246,8 +246,24 @@ function analyzeExpenseLeaks({
           'Review if item recipe portion or packaging size has changed.',
         ],
         historicalTrend: [
-          ...itemData.baselineEntries.slice(-4).map(e => ({ date: e.date.toISOString().slice(5, 10), price: e.pricePerUnit, qty: e.quantity })),
-          ...itemData.currentEntries.map(e => ({ date: e.date.toISOString().slice(5, 10), price: e.pricePerUnit, qty: e.quantity })),
+          ...itemData.baselineEntries.slice(-4).map(e => ({
+            date: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+            name: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+            label: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+            price: e.pricePerUnit,
+            qty: e.quantity,
+            value: e.pricePerUnit,
+            period: 'Baseline',
+          })),
+          ...itemData.currentEntries.map(e => ({
+            date: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+            name: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+            label: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+            price: e.pricePerUnit,
+            qty: e.quantity,
+            value: e.pricePerUnit,
+            period: 'Current',
+          })),
         ],
       }));
     }
@@ -330,8 +346,22 @@ function analyzeExpenseLeaks({
           'Check if sales discounts or free items have expanded without expense controls.',
         ],
         historicalTrend: [
-          { name: 'Previous Period', expense: Math.round(baselineMonthlyRate), sales: Math.round(baselineDailySales * 30) },
-          { name: 'Current Period', expense: Math.round(currentMonthlyRate), sales: Math.round(currentDailySales * 30) },
+          {
+            name: 'Previous Period',
+            label: 'Previous Period',
+            date: 'Previous',
+            expense: Math.round(baselineMonthlyRate),
+            sales: Math.round(baselineDailySales * 30),
+            value: Math.round(baselineMonthlyRate),
+          },
+          {
+            name: 'Current Period',
+            label: 'Current Period',
+            date: 'Current',
+            expense: Math.round(currentMonthlyRate),
+            sales: Math.round(currentDailySales * 30),
+            value: Math.round(currentMonthlyRate),
+          },
         ],
       }));
     }
@@ -367,8 +397,20 @@ function analyzeExpenseLeaks({
           'Verify whether this represents a temporary seasonal cost or an ongoing commitment.',
         ],
         historicalTrend: [
-          { name: 'Baseline', expense: Math.round(baselineMonthlyRate) },
-          { name: 'Current', expense: Math.round(currentMonthlyRate) },
+          {
+            name: 'Baseline',
+            label: 'Baseline Normal',
+            date: 'Baseline',
+            expense: Math.round(baselineMonthlyRate),
+            value: Math.round(baselineMonthlyRate),
+          },
+          {
+            name: 'Current',
+            label: 'Current Rate',
+            date: 'Current',
+            expense: Math.round(currentMonthlyRate),
+            value: Math.round(currentMonthlyRate),
+          },
         ],
       }));
     }
@@ -433,8 +475,50 @@ function analyzeExpenseLeaks({
             'Verify standard recipe portion weights with kitchen staff.',
           ],
           historicalTrend: [
-            { name: 'Baseline Qty', qty: Math.round((baseDailyQty) * 30) },
-            { name: 'Current Qty', qty: Math.round((currDailyQty) * 30) },
+            {
+              name: 'Baseline Rate',
+              label: 'Baseline Rate',
+              date: 'Baseline',
+              qty: Math.round(baseDailyQty * 30),
+              value: Math.round(baseDailyQty * 30),
+              type: 'baseline',
+            },
+            {
+              name: 'Expected (Sales Pace)',
+              label: 'Expected Pace',
+              date: 'Expected',
+              qty: Math.round((baseDailyQty * (1 + activityGrowth)) * 30),
+              value: Math.round((baseDailyQty * (1 + activityGrowth)) * 30),
+              type: 'expected',
+            },
+            {
+              name: 'Actual Current Rate',
+              label: 'Actual Rate',
+              date: 'Actual',
+              qty: Math.round(currDailyQty * 30),
+              value: Math.round(currDailyQty * 30),
+              type: 'actual',
+            },
+          ],
+          purchaseTimeline: [
+            ...itemData.baselineEntries.slice(-4).map(e => ({
+              date: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+              name: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+              label: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Base',
+              qty: Math.round(e.quantity * 10) / 10,
+              price: e.pricePerUnit,
+              value: Math.round(e.quantity * 10) / 10,
+              period: 'Baseline',
+            })),
+            ...itemData.currentEntries.map(e => ({
+              date: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+              name: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+              label: e.date ? new Date(e.date).toISOString().slice(5, 10) : 'Current',
+              qty: Math.round(e.quantity * 10) / 10,
+              price: e.pricePerUnit,
+              value: Math.round(e.quantity * 10) / 10,
+              period: 'Current',
+            })),
           ],
         }));
       }
@@ -649,6 +733,15 @@ function analyzeExpenseLeaks({
               supplier: s.supplier,
               price: Math.round(s.recentPrice * 100) / 100,
               avgPrice: Math.round(s.avgPrice * 100) / 100,
+              isHighest: s.supplier === highest.supplier,
+            })),
+            historicalTrend: supplierAvgs.map(s => ({
+              name: s.supplier,
+              label: s.supplier,
+              date: s.supplier,
+              price: Math.round(s.recentPrice * 100) / 100,
+              avgPrice: Math.round(s.avgPrice * 100) / 100,
+              value: Math.round(s.recentPrice * 100) / 100,
               isHighest: s.supplier === highest.supplier,
             })),
           }));

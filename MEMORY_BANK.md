@@ -173,10 +173,14 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - **Remote KOT Reprint & Bill Queuing**: Waiters can tap "Send KOT to Printer" or tap the printer icon on any occupied table card to queue an immediate print on the counter printer (`POST /api/orders/:orderId/reprint` or `POST /api/orders/:orderId/queue-bill-print`).
 - **Auto-Print Default (`'production'`)**: In Production Mode, KOTs and Bills bypass preview modals and immediately invoke `printThermalSlip(html)` via a hidden iframe.
 - **Bypassing Chrome Print Dialog (Zero-Click Kiosk Printing)**:
-  - Chrome requires `--kiosk-printing` to bypass its native print preview dialog.
-  - **Windows Kiosk Architecture**:
-    - `start-kiosk.bat`: Hardcoded by default to `https://peyala.vercel.app/login`. Automatically detects Chrome, creates dedicated profile (`%LOCALAPPDATA%\PeyalaPOSChrome`), and launches in true fullscreen kiosk mode (`--kiosk --kiosk-printing`). Supports `--windowed` flag for app-window mode.
-    - `create-windows-shortcut.bat`: VBScript-powered utility placing a 1-click "Peyala POS Station" shortcut on the Windows desktop.
+  - Chrome and Edge require `--kiosk-printing` to bypass their native print preview dialogs.
+  - **Windows Kiosk Architecture (Local Server / Standalone Pendrive vs Cloud)**:
+    - `start-local-kiosk.bat`: Dedicated launcher for standalone local server. Starts backend (Express on port 4000) and frontend (Next.js on port 3000), verifies dependencies, auto-clears ports 3000/4000, socket-polls `localhost:3000` until responsive, auto-detects Chrome or Edge, and launches full kiosk mode (`--kiosk --kiosk-printing`) targeting `http://localhost:3000/login`. On exit (`Alt + F4`), cleanly terminates local Node server processes.
+    - `setup-windows.bat`: 1-click pendrive wizard for Windows laptops. Detects/downloads portable Node.js v20 LTS (if missing), installs dependencies, creates desktop shortcuts, and builds `PeyalaPOS.exe`.
+    - `build-exe.bat` + `PeyalaLauncher.cs`: Generates `PeyalaPOS.exe` using built-in Windows C# compiler (`csc.exe`). Runs silently as a GUI application with Windows System Tray icon (Kiosk/Windowed toggle, server restart, exit).
+    - `create-windows-local-shortcut.bat`: VBScript-powered utility placing a 1-click "Peyala POS Station" shortcut on the Windows desktop for local server.
+    - `stop-local-server.bat`: 1-click utility to immediately stop all background servers and release ports 3000 & 4000.
+    - `start-kiosk.bat`: Lightweight kiosk launcher for cloud deployment (`https://peyala.vercel.app/login`).
     - Press `Alt + F4` or `F11` to close or toggle fullscreen.
   - **macOS**: `start-kiosk.sh` / `start-kiosk.command` launches Chrome targeting `https://peyala.vercel.app/login` with:
     `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --kiosk-printing --user-data-dir="$HOME/Library/Application Support/PeyalaPOSChrome"`
@@ -414,7 +418,11 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Users can mark anomalies as normal, muting them for 30 days (`dismissedUntil = Date.now() + 30 * 86400000`) with audit logging.
   - Users can submit 👍 / 👎 feedback with reason tags (`seasonal_price_change`, `menu_expansion_or_rush`, `bulk_purchase_discount`, `incorrect_data_entry`, `other`) to tune future detection sensitivity.
 - **UI & Visualization (`frontend/src/app/expense-leak-detector/page.tsx`)**:
-  - Features Top 3 Action Priorities banner, multi-dimensional filter bar, expandable anomaly cards with deduplication badges, Recharts historical trend comparisons, multi-supplier comparison tables, and raw transaction audit trails.
+  - Features Top 3 Action Priorities banner, multi-dimensional filter bar, expandable anomaly cards with deduplication badges, multi-supplier comparison tables, and raw transaction audit trails.
+  - **Adaptive Recharts Engine**: Automatically detects metric domain:
+    - *Usage Spikes (Consumption Increase)*: Visualizes monthly consumption rates comparing Historical Baseline (slate), Expected Pace scaled with sales growth (emerald), and Actual Rate (red leak alert), with a 1-tap toggle to view chronological purchase quantity entries.
+    - *Price Spikes & Supplier Variances*: Plots unit prices in `₹/unit` with high/flagged vendor comparisons.
+    - *Expense Spikes & Sales-Adjusted*: Plots categorical monthly expense rates side-by-side with total sales baselines.
 
 ### 3.19 Wastage Entry Module & P&L Statement Integration (`/wastage`)
 - **Frictionless 3-Field Wastage Capture**:
