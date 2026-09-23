@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn, execSync } = require('child_process');
 const net = require('net');
 const fs = require('fs');
+const os = require('os');
 
 let mainWindow = null;
 let tray = null;
@@ -215,14 +216,38 @@ function createMainWindow() {
   });
 }
 
+// ── Utility: Resolve Local Wi-Fi / LAN IP for Mobile Waiter Devices ──
+function getLocalLanIp() {
+  try {
+    const nets = os.networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal && !net.address.startsWith('169.254')) {
+          return net.address;
+        }
+      }
+    }
+  } catch (_) {}
+  return 'localhost';
+}
+
 // ── Setup Windows System Tray ─────────────────────────────────────────
 function setupTray() {
   try {
     tray = new Tray(ICON_PATH);
     tray.setToolTip('Peyala POS — Counter Station');
 
+    const lanIp = getLocalLanIp();
+    const mobileUrl = `http://${lanIp}:3000`;
+
     const contextMenu = Menu.buildFromTemplate([
       { label: '🍵 Peyala POS Station (Online)', enabled: false },
+      {
+        label: `📱 Mobile Waiter URL: ${mobileUrl}`,
+        click: () => {
+          require('electron').clipboard.writeText(mobileUrl);
+        },
+      },
       { type: 'separator' },
       {
         label: '🪑 POS Floor Plan (/tables)',

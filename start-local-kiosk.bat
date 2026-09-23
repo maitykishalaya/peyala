@@ -203,10 +203,19 @@ timeout /t 2 >nul
 :: 9. Ensure isolated profile directory exists
 if not exist "%USER_DATA_DIR%" mkdir "%USER_DATA_DIR%"
 
+:: Detect active LAN IP for mobile staff devices
+set "LAN_IP="
+for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual' -and $_.IPAddress -notlike '169.254*' } | Select-Object -First 1).IPAddress"`) do (
+    set "LAN_IP=%%i"
+)
+
 echo.
 echo ====================================================================
 echo   Station Status: Active and Serving
 echo   Local Portal:   %DEFAULT_URL%
+if not "!LAN_IP!"=="" (
+echo   Mobile Waiter:  http://!LAN_IP!:3000
+)
 echo   Print Engine:   Silent Auto-Print (--kiosk-printing)
 echo   Browser Engine: %BROWSER_NAME%
 if "%MODE%"=="windowed" (
