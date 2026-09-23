@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Peyala POS - Local Server & Dedicated Windows Kiosk Station
+title Peyala POS - Local Server and Dedicated Windows Kiosk Station
 
 echo ====================================================================
-echo   🍵 Peyala POS - Local Server & Dedicated Windows Kiosk Station
+echo    Peyala POS - Local Server and Dedicated Windows Kiosk Station
 echo ====================================================================
 echo.
 
@@ -13,7 +13,7 @@ set "BACKEND_DIR=%SCRIPT_DIR%backend"
 set "FRONTEND_DIR=%SCRIPT_DIR%frontend"
 set "PORTABLE_NODE_DIR=%SCRIPT_DIR%portable-node"
 set "USER_DATA_DIR=%LOCALAPPDATA%\PeyalaPOSProfile"
-set "DEFAULT_URL=http://localhost:3000/login"
+set "DEFAULT_URL=http://localhost:3000/"
 set "MODE=kiosk"
 
 :: Parse command line flags
@@ -31,27 +31,55 @@ shift
 goto PARSE_ARGS
 :ARGS_DONE
 
-:: 1. Check for Portable Node.js in pendrive folder
+:: 1. Check for Node.js in portable directory, PATH, and standard Windows install locations
+set "NODE_EXE="
+
 if exist "%PORTABLE_NODE_DIR%\node.exe" (
+    set "NODE_EXE=%PORTABLE_NODE_DIR%\node.exe"
+    set "PATH=%PORTABLE_NODE_DIR%;!PATH!"
     echo [*] Using portable Node.js runtime from %PORTABLE_NODE_DIR%
-    set "PATH=%PORTABLE_NODE_DIR%;%PATH%"
 )
 
-:: 2. Check if Node.js is installed / available in PATH
-where node >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Node.js was not found in PATH or portable-node folder.
+if "!NODE_EXE!"=="" (
+    where node >nul 2>&1
+    if not errorlevel 1 set "NODE_EXE=node"
+)
+
+if "!NODE_EXE!"=="" (
+    if exist "C:\Program Files\nodejs\node.exe" (
+        set "NODE_EXE=C:\Program Files\nodejs\node.exe"
+        set "PATH=C:\Program Files\nodejs;!PATH!"
+    )
+)
+
+if "!NODE_EXE!"=="" (
+    if exist "C:\Program Files (x86)\nodejs\node.exe" (
+        set "NODE_EXE=C:\Program Files (x86)\nodejs\node.exe"
+        set "PATH=C:\Program Files (x86)\nodejs;!PATH!"
+    )
+)
+
+if "!NODE_EXE!"=="" (
+    if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+        set "NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
+        set "PATH=%LOCALAPPDATA%\Programs\nodejs;!PATH!"
+    )
+)
+
+if "!NODE_EXE!"=="" (
+    echo [ERROR] Node.js was not found in PATH or standard installation folders.
     echo.
     echo To run the local server directly on this Windows laptop:
-    echo   1. Run "setup-windows.bat" in this folder to automatically
-    echo      download portable Node.js (no install required!), OR
-    echo   2. Download & install Node.js (LTS) from https://nodejs.org/
+    echo   1. Run setup-windows.bat in this folder to automatically
+    echo      download portable Node.js, OR
+    echo   2. Download and install Node.js from https://nodejs.org/
     echo.
     set /p "RUN_SETUP=Would you like to run setup-windows.bat now? (Y/N): "
     if /i "!RUN_SETUP!"=="Y" (
         call "%SCRIPT_DIR%setup-windows.bat"
         if exist "%PORTABLE_NODE_DIR%\node.exe" (
-            set "PATH=%PORTABLE_NODE_DIR%;%PATH%"
+            set "PATH=%PORTABLE_NODE_DIR%;!PATH!"
+            set "NODE_EXE=%PORTABLE_NODE_DIR%\node.exe"
         ) else (
             pause
             exit /b 1
@@ -64,7 +92,7 @@ if errorlevel 1 (
 
 :: 3. Verify dependencies exist for Windows
 if not exist "%BACKEND_DIR%\node_modules" (
-    echo [*] Installing backend dependencies (first time setup)...
+    echo [*] Installing backend dependencies first time setup...
     cd /d "%BACKEND_DIR%"
     call npm install
     if errorlevel 1 (
@@ -110,7 +138,7 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
     set "BROWSER_NAME=Google Chrome"
 )
 
-:: Fallback to Microsoft Edge (built-in on all Windows 10 & 11 laptops)
+:: Fallback to Microsoft Edge (built-in on all Windows 10 and 11 laptops)
 if "%BROWSER_BIN%"=="" (
     if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
         set "BROWSER_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -129,7 +157,7 @@ if "%BROWSER_BIN%"=="" (
     echo Local servers will still start, and default browser will open.
 )
 
-:: 5. Free stale ports 3000 & 4000 if occupied
+:: 5. Free stale ports 3000 and 4000 if occupied
 echo [*] Freeing ports 3000 and 4000...
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":3000 " ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a >nul 2>&1
@@ -138,13 +166,25 @@ for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":4000 " ^| findstr "L
     taskkill /F /PID %%a >nul 2>&1
 )
 
-:: 6. Launch Backend API (Port 4000)
-echo [*] Starting Backend API on port 4000...
-start "Peyala_Backend_API" /min cmd /c "cd /d "%BACKEND_DIR%" && npm run dev"
+:: 5.5 Verify Frontend Production Build exists
+if not exist "%FRONTEND_DIR%\.next\BUILD_ID" (
+    echo [*] First-time production optimization: compiling frontend...
+    cd /d "%FRONTEND_DIR%"
+    call npm run build
+    if errorlevel 1 (
+        echo [ERROR] Frontend production build failed.
+        pause
+        exit /b 1
+    )
+)
 
-:: 7. Launch Frontend Next.js (Port 3000)
-echo [*] Starting Frontend Next.js on port 3000...
-start "Peyala_Frontend_Next" /min cmd /c "cd /d "%FRONTEND_DIR%" && npm run dev"
+:: 6. Launch Backend API (Port 4000) in Production Mode
+echo [*] Starting Backend API on port 4000 (Production Mode)...
+start "Peyala_Backend_API" /d "%BACKEND_DIR%" /min cmd /c "npm start"
+
+:: 7. Launch Frontend Next.js (Port 3000) in Production Mode
+echo [*] Starting Frontend Next.js on port 3000 (Production Mode - Instant Load)...
+start "Peyala_Frontend_Next" /d "%FRONTEND_DIR%" /min cmd /c "npm start"
 
 :: 8. Wait for local server to be responsive
 echo [*] Waiting for local server to become ready (http://localhost:3000)...
@@ -165,15 +205,15 @@ if not exist "%USER_DATA_DIR%" mkdir "%USER_DATA_DIR%"
 
 echo.
 echo ====================================================================
-echo   Station Status: Active & Serving
+echo   Station Status: Active and Serving
 echo   Local Portal:   %DEFAULT_URL%
 echo   Print Engine:   Silent Auto-Print (--kiosk-printing)
 echo   Browser Engine: %BROWSER_NAME%
 if "%MODE%"=="windowed" (
 echo   Window Mode:    Windowed App (--app)
 ) else (
-echo   Window Mode:    Full-Screen Kiosk (--kiosk)
-echo                   (Tip: Press Alt + F4 or F11 to exit Kiosk mode)
+echo   Window Mode:    Full-Screen Kiosk
+echo                   Tip: Press Alt + F4 or F11 to exit Kiosk mode
 )
 echo ====================================================================
 echo.

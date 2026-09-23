@@ -8,7 +8,7 @@ const tableSchema = new mongoose.Schema({
     enum: ['available', 'occupied', 'reserved'],
     default: 'available',
   },
-  category: { type: String, trim: true, default: 'Indoor', index: true },
+  category: { type: String, trim: true, default: 'Indoor' },
   activeOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
 }, { timestamps: true });
 

@@ -9,7 +9,7 @@ if /i "%~1"=="/quiet" set "QUIET=1"
 
 if "%QUIET%"=="0" (
     echo ====================================================================
-    echo   🍵 Compiling native PeyalaPOS.exe (Using built-in Windows C#)
+    echo   Peyala POS - Native Windows Launcher Compiler
     echo ====================================================================
     echo.
 )
@@ -21,16 +21,20 @@ if exist "%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" (
     set "CSC=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 )
 
-if "%CSC%"=="" (
+if "!CSC!"=="" (
     if "%QUIET%"=="0" (
-        echo [ERROR] Microsoft .NET C# compiler (csc.exe) was not found.
-        echo You can still run Peyala POS directly via start-local-kiosk.bat!
+        echo [ERROR] Microsoft .NET C# compiler csc.exe was not found.
+        echo You can still run Peyala POS directly via start-peyala-app.bat or start-local-kiosk.bat!
         pause
     )
     exit /b 1
 )
 
-"%CSC%" /nologo /target:winexe /r:System.Windows.Forms.dll,System.Drawing.dll /out:"%SCRIPT_DIR%PeyalaPOS.exe" "%SCRIPT_DIR%PeyalaLauncher.cs"
+if exist "%SCRIPT_DIR%icon.ico" (
+    "!CSC!" /nologo /target:winexe /win32icon:"%SCRIPT_DIR%icon.ico" /r:System.Windows.Forms.dll,System.Drawing.dll /out:"%SCRIPT_DIR%PeyalaPOS.exe" "%SCRIPT_DIR%PeyalaLauncher.cs"
+) else (
+    "!CSC!" /nologo /target:winexe /r:System.Windows.Forms.dll,System.Drawing.dll /out:"%SCRIPT_DIR%PeyalaPOS.exe" "%SCRIPT_DIR%PeyalaLauncher.cs"
+)
 
 if errorlevel 1 (
     if "%QUIET%"=="0" (

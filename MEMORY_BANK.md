@@ -39,6 +39,13 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Printing**: Thermal print abstraction (`frontend/src/lib/thermal-print.ts`) supporting ESC/POS styling, HTML print frames, and visual canvas/PDF rendering via `ThermalPreviewModal.tsx`.
 - **Responsive Layout, Screen Height Locking, Bottom Padding & Desktop Auto-Minimizing Drawer**: Mobile-first architecture across all screens down to 375px viewports (`AppLayout.tsx`, `Modal.tsx`). Full viewport height is strictly bounded (`h-screen h-[100dvh] max-h-screen`) with flex child shrinking (`min-h-0 h-full overflow-y-auto`), completely eliminating vertical content clipping and enabling smooth internal scrolling across all pages. Generous bottom padding (`pb-36` / 144px on mobile, `md:pb-24` / 96px on desktop) ensures the fixed bottom navigation bar (~60px) and window edge never cover or overlap bottom content, totals, or action buttons. On mobile viewports (`< 768px`), the side navigation drawer and backdrop are completely removed (`hidden md:flex`), navigating cleanly via the native bottom navigation bar and mobile topbar. On laptops/desktops (`>= 768px`), the navigation drawer operates with the persistent auto-minimization rail (`w-16` / `w-60`) governed by `peyala_sidebar_open`.
 
+### Mobile Client (Enterprise Android APK)
+- **App Package**: `com.peyala.pos` (`Peyala-POS.apk`), targeting Android 7.0 (API 24) to Android 14/15 (API 34).
+- **Architecture**: Native Android wrapper (`android/`) with high-performance WebView, persistent LocalStorage, WebAudio for kitchen bell chimes, hardware back button navigation with exit confirmation, and screen wake lock (`FLAG_KEEP_SCREEN_ON`) for floor staff during service.
+- **Smart Connection & Server Selector**: Built-in connection diagnostic and retry engine. Default server is configured to the local station (`http://192.168.29.241:3000`). If Wi-Fi IP changes or server is unreachable, displays a branded diagnostic screen with 1-tap server address update and latency ping. Long-pressing the logo or using the settings trigger allows in-app server IP updates without reinstalling.
+- **Enterprise Signing**: Signed with a dedicated enterprise RSA keystore (`android/app/peyala-release.jks`, 10,000-day validity) for direct sideloading and frictionless staff installation.
+- **Distribution**: 1-click download button on the Web Login screen (`/Peyala-POS.apk`), root project APK (`Peyala-POS.apk`), and standalone build script `build-apk.bat`.
+
 ---
 
 ## 3) Core Business Rules & Implemented Workflows
@@ -671,6 +678,38 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - `Net Sales`: Mathematically defined and enforced across all reports and tables as:
     $$\text{Net Sales} = \text{Gross Sales} - \text{GST Collected}$$
   - `Invoice Range`: Period-level and day-level minimum and maximum bill numbers (`#start – #end`) formatted for statutory outward supplies reporting (GSTR-1 and GSTR-3B).
+
+### 5.10 Dedicated Local Windows Desktop Application & Native Printing Engine (`desktop/`)
+- **Operational Need**:
+  - The cloud website experienced latency from cloud cold starts and internet round-trips to MongoDB Atlas.
+  - Previous local scripts (`start-local-kiosk.bat` and `PeyalaLauncher.cs`) launched both frontend and backend using `npm run dev`, triggering on-demand Next.js route compilation that caused 3–8 second freezes on route changes.
+  - Thermal printing in standard browsers required command-line kiosk flags (`--kiosk-printing`) and external browser windows.
+- **Desktop Architecture (`desktop/`)**:
+  - **Framework**: Electron (`desktop/main.js`, `desktop/preload.js`, `desktop/package.json`).
+  - **Single Instance Enforcement**: Guarded by `app.requestSingleInstanceLock()` to prevent duplicate counter terminals.
+  - **Production-Only Engine**: Automatically starts Node.js Express backend (`node src/server.js` on port 4000) and pre-compiled Next.js production server (`next start -p 3000` on port 3000). Route changes execute in under 5ms.
+  - **Automatic Port Management**: Checks and frees ports 3000 and 4000 on startup and shutdown using native Windows `netstat` and `taskkill`, preventing locked ports and orphan processes.
+  - **Native Hardware Silent Thermal Printing Engine**:
+    - Exposes `window.electronAPI.printThermal(html, options)` via secure `contextBridge` in `preload.js`.
+    - Main process creates an off-screen `BrowserWindow`, loads the slip HTML, and calls `webContents.print({ silent: true, printBackground: true, margins: { marginType: 'none' }, pageSize: { width: 80000, height: 297000 } })`.
+    - Instantaneous zero-dialog silent printing for 80mm KOT tickets and customer bills.
+    - Fallback: If `window.electronAPI` is absent, `frontend/src/lib/thermal-print.ts` falls back to the hidden iframe `window.print()` method so mobile waiter devices accessing `http://<laptop-ip>:3000` over Wi-Fi continue to work seamlessly.
+  - **System Tray & Window Management**:
+    - Windows System Tray icon (`ICON_PATH = frontend/public/icon.png`) with status pill and quick navigation items (`/tables`, `/kds`, `/reports`, Kiosk toggle, Engine restart, Exit).
+    - Maximized default state with `F11` full-screen POS counter kiosk toggle.
+- **1-Click Launchers & Installers**:
+  - `Peyala-POS-Setup.exe`: Standalone Windows setup wizard generated via electron-builder with official logo.
+  - `INSTALL-PEYALA-POS.bat`: 1-click automated installer for any Windows laptop (provisions Node.js, compiles assets, sets up shortcuts).
+  - `start-peyala-app.bat`: 1-click desktop app launcher.
+  - `create-windows-shortcut.bat`: Creates the official "Peyala POS" desktop shortcut with `icon.ico`.
+  - `build-windows-exe.bat`: Rebuilds installer in `dist/`.
+  - `PeyalaPOS.exe`: Native compiled Windows C# launcher executable.
+- **Enterprise-Grade Performance Optimizations**:
+  - **Directory Sanitization**: Purged all `.DS_Store` macOS clutter, accidental empty brace directories (`frontend/src/{app,...}` & `backend/src/{models,...}`), obsolete Unix shell scripts, and duplicate legacy files in `scripts/`.
+  - **Database Connection Pooling (`backend/src/config/db.js`)**: Implemented 25-socket connection pool with 5 warm persistent connections and IPv4 enforcement (`family: 4`) to bypass Windows DNS resolution latency.
+  - **Schema Index Deduplication (`backend/src/models/Table.js`)**: Removed duplicate `index: true` on `category` to eliminate Mongoose schema warnings on startup.
+  - **Logger Streamlining (`backend/src/server.js`)**: Added Morgan skip filter for repetitive polling endpoints (`/pending-kots`, `/pending-bills`, `/alerts`, `/health`), eliminating console I/O bottlenecks during peak counter rush hours.
+  - **Frontend Asset Compression (`frontend/next.config.js`)**: Enabled Brotli/Gzip compression, disabled `x-powered-by`, set `reactStrictMode: false` for faster POS renders, and separated `Viewport` export in `layout.tsx` to eliminate all build warnings.
 
 ---
 

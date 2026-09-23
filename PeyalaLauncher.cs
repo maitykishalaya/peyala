@@ -132,7 +132,15 @@ namespace PeyalaPOS
 
             trayIcon = new NotifyIcon();
             trayIcon.Text = "Peyala POS (Local Server)";
-            trayIcon.Icon = SystemIcons.Application;
+            string iconPath = Path.Combine(appDir, "icon.ico");
+            if (File.Exists(iconPath))
+            {
+                try { trayIcon.Icon = new Icon(iconPath); } catch { trayIcon.Icon = SystemIcons.Application; }
+            }
+            else
+            {
+                trayIcon.Icon = SystemIcons.Application;
+            }
             trayIcon.ContextMenu = menu;
             trayIcon.Visible = true;
 
@@ -145,9 +153,26 @@ namespace PeyalaPOS
             {
                 string backendDir = Path.Combine(appDir, "backend");
                 string frontendDir = Path.Combine(appDir, "frontend");
+                string buildIdPath = Path.Combine(frontendDir, ".next", "BUILD_ID");
 
-                // Start Backend
-                ProcessStartInfo bInfo = new ProcessStartInfo("cmd.exe", "/c npm run dev")
+                // Ensure frontend production build exists
+                if (!File.Exists(buildIdPath))
+                {
+                    ProcessStartInfo buildInfo = new ProcessStartInfo("cmd.exe", "/c npm run build")
+                    {
+                        WorkingDirectory = frontendDir,
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    using (Process bp = Process.Start(buildInfo))
+                    {
+                        bp.WaitForExit();
+                    }
+                }
+
+                // Start Backend (Production)
+                ProcessStartInfo bInfo = new ProcessStartInfo("cmd.exe", "/c npm start")
                 {
                     WorkingDirectory = backendDir,
                     CreateNoWindow = true,
@@ -156,8 +181,8 @@ namespace PeyalaPOS
                 };
                 backendProcess = Process.Start(bInfo);
 
-                // Start Frontend
-                ProcessStartInfo fInfo = new ProcessStartInfo("cmd.exe", "/c npm run dev")
+                // Start Frontend (Production - Instant Route Loading)
+                ProcessStartInfo fInfo = new ProcessStartInfo("cmd.exe", "/c npm start")
                 {
                     WorkingDirectory = frontendDir,
                     CreateNoWindow = true,

@@ -94,10 +94,24 @@ export interface BillPrintData {
   isReprint?: boolean;
 }
 
-// ── Print Trigger via Hidden Iframe (Used in Production / Silent Print) ──
+// ── Print Trigger (Native Electron Silent Print or Hidden Iframe Fallback) ──
 export function printThermalSlip(html: string) {
   if (typeof window === 'undefined') return;
 
+  // 1. Native Electron Desktop Hardware Silent Print (Fastest, zero-dialog)
+  if ((window as any).electronAPI?.printThermal) {
+    (window as any).electronAPI
+      .printThermal(html)
+      .then((res: any) => {
+        if (!res?.success) {
+          console.warn('[Peyala Thermal Print Warning]', res?.failureReason);
+        }
+      })
+      .catch((err: any) => console.error('[Peyala Thermal Print Error]', err));
+    return;
+  }
+
+  // 2. Web Browser Fallback via Hidden Iframe (For mobile waiter devices on LAN)
   let iframe = document.getElementById('thermal-print-frame') as HTMLIFrameElement;
   if (!iframe) {
     iframe = document.createElement('iframe');

@@ -1,12 +1,28 @@
 import axios from 'axios';
 
+const getInitialBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('peyala_api_url');
+    if (custom) return custom;
+    return '/api';
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+};
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api',
+  baseURL: getInitialBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
 });
 
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
+    const customApiUrl = localStorage.getItem('peyala_api_url');
+    if (customApiUrl) {
+      config.baseURL = customApiUrl;
+    } else if (!config.baseURL || config.baseURL.includes('localhost:4000')) {
+      config.baseURL = '/api';
+    }
+
     const token = localStorage.getItem('peyala_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
   }
@@ -77,6 +93,7 @@ export const inventoryApi = {
   createItem: (data: any) => api.post('/inventory/items', data),
   updateItem: (id: string, data: any) => api.put(`/inventory/items/${id}`, data),
   deleteItem: (id: string) => api.delete(`/inventory/items/${id}`),
+  itemPurchases: (id: string) => api.get(`/inventory/items/${id}/purchase-history`),
 };
 
 // Purchases

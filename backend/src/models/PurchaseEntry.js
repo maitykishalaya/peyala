@@ -30,5 +30,6 @@ const purchaseEntrySchema = new mongoose.Schema({
 //   sort by date, filter by date range, filter by supplier.
 purchaseEntrySchema.index({ date: -1 });
 purchaseEntrySchema.index({ supplier: 1, date: -1 });
+purchaseEntrySchema.index({ 'items.item': 1, date: -1 });
 
 module.exports = mongoose.model('PurchaseEntry', purchaseEntrySchema);

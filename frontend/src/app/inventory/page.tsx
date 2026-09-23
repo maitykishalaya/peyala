@@ -6,9 +6,9 @@ import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
 import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
-import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw } from 'lucide-react';
+import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw, Clock, Calendar, Receipt, Store } from 'lucide-react';
 
-const CACHE_KEY = 'peyala_inventory_cache_v1';
+const CACHE_KEY = 'peyala_inventory_cache_v2';
 
 function readCache() {
   try {
@@ -51,8 +51,27 @@ export default function InventoryPage() {
   const [logsError, setLogsError] = useState('');
   const [logsSearch, setLogsSearch] = useState('');
 
+  // Last purchase history modal state
+  const [historyItem, setHistoryItem] = useState<any>(null);
+  const [itemPurchases, setItemPurchases] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   const [itemForm, setItemForm] = useState({ name: '', category: '', unit: 'kg', currentStock: 0, minimumStock: 0, lastPurchasePrice: 0, preferredSupplier: '', notes: '' });
   const [catForm, setCatForm] = useState({ name: '', icon: '📦', color: '#10b981' });
+
+  const openHistory = async (item: any) => {
+    setHistoryItem(item);
+    setItemPurchases([]);
+    setHistoryLoading(true);
+    try {
+      const res = await inventoryApi.itemPurchases(item._id);
+      setItemPurchases(res.data || []);
+    } catch (err) {
+      console.error('Failed to load item purchase history:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const load = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -323,9 +342,23 @@ export default function InventoryPage() {
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                       {catItems.map((item: any) => (
                         <tr key={item._id} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${item.isLowStock ? 'bg-yellow-50/50 dark:bg-yellow-900/5' : ''}`}>
-                          <td className="table-td font-medium flex items-center gap-2">
-                            {item.isLowStock && <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />}
-                            {item.name}
+                          <td className="table-td font-medium">
+                            <div className="flex items-center gap-2">
+                              {item.isLowStock && <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />}
+                              <span>{item.name}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openHistory(item);
+                                }}
+                                className="p-1 rounded-md text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors inline-flex items-center justify-center flex-shrink-0 group"
+                                title="View last purchase details (date, quantity, price)"
+                                aria-label={`View last purchase details for ${item.name}`}
+                              >
+                                <Clock className="w-3.5 h-3.5 text-gray-400 group-hover:text-brand-500 group-hover:scale-110 transition-all" />
+                              </button>
+                            </div>
                           </td>
                           <td className="table-td">
                             <span className={`font-semibold ${item.isLowStock ? 'text-yellow-600' : 'text-gray-900 dark:text-white'}`}>{item.currentStock}</span>
@@ -464,6 +497,170 @@ export default function InventoryPage() {
             })()
           )}
         </div>
+      </Modal>
+
+      {/* Last Purchase Details Modal */}
+      <Modal
+        open={Boolean(historyItem)}
+        onClose={() => setHistoryItem(null)}
+        title="Last Purchase Details"
+        size="lg"
+      >
+        {historyItem && (
+          <div className="space-y-5">
+            {/* Item Title & Overview Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{historyItem.category?.icon || '📦'}</span>
+                <div>
+                  <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
+                    {historyItem.name}
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                      {historyItem.category?.name || 'Item'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Current Stock: <strong className={historyItem.isLowStock ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-900 dark:text-gray-200'}>{historyItem.currentStock} {historyItem.unit}</strong> · Average Cost: {formatCurrency(historyItem.averageCost)}/{historyItem.unit}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Hero Cards for Last Purchase Info */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-brand-500" />
+                Latest Purchase Information
+              </h4>
+
+              {historyItem.lastPurchase ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Date Card */}
+                  <div className="p-3.5 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30">
+                    <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-1">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-xs font-medium uppercase tracking-wider">Purchase Date</span>
+                    </div>
+                    <div className="text-base font-bold text-gray-900 dark:text-white">
+                      {historyItem.lastPurchase.date ? formatDate(historyItem.lastPurchase.date) : 'Initial Record'}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {historyItem.lastPurchase.date ? new Date(historyItem.lastPurchase.date).toLocaleDateString('en-IN', { weekday: 'long' }) : 'Initial setup baseline'}
+                    </div>
+                  </div>
+
+                  {/* Quantity Card */}
+                  <div className="p-3.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 mb-1">
+                      <Package className="w-4 h-4" />
+                      <span className="text-xs font-medium uppercase tracking-wider">Quantity</span>
+                    </div>
+                    <div className="text-base font-bold text-gray-900 dark:text-white">
+                      {historyItem.lastPurchase.quantity != null
+                        ? `${historyItem.lastPurchase.quantity} ${historyItem.lastPurchase.unit || historyItem.unit}`
+                        : '—'}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {historyItem.lastPurchase.totalPrice
+                        ? `Invoice Total: ${formatCurrency(historyItem.lastPurchase.totalPrice)}`
+                        : 'Recorded stock quantity'}
+                    </div>
+                  </div>
+
+                  {/* Price Card */}
+                  <div className="p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
+                    <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 mb-1">
+                      <Receipt className="w-4 h-4" />
+                      <span className="text-xs font-medium uppercase tracking-wider">Price / Unit</span>
+                    </div>
+                    <div className="text-base font-bold text-gray-900 dark:text-white">
+                      {formatCurrency(historyItem.lastPurchase.pricePerUnit || historyItem.lastPurchasePrice || 0)}
+                      <span className="text-xs font-normal text-gray-400 ml-1">/{historyItem.lastPurchase.unit || historyItem.unit}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate" title={historyItem.lastPurchase.supplierName || historyItem.preferredSupplier?.name || 'No supplier listed'}>
+                      Supplier: <strong>{historyItem.lastPurchase.supplierName || historyItem.preferredSupplier?.name || '—'}</strong>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 rounded-xl border border-dashed border-gray-200 dark:border-gray-800 text-center text-sm text-gray-400">
+                  <Package className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                  No purchase entry recorded yet for <strong>{historyItem.name}</strong>.
+                  <p className="text-xs text-gray-400 mt-1">Purchases added under the Purchases page will automatically track the date, quantity, and price here.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Recent Purchases History Section */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-gray-400" />
+                  Recent Purchase Invoices
+                </h4>
+                {itemPurchases.length > 0 && (
+                  <span className="text-xs text-gray-400 font-medium">{itemPurchases.length} record{itemPurchases.length > 1 ? 's' : ''}</span>
+                )}
+              </div>
+
+              {historyLoading ? (
+                <div className="text-center py-6 text-xs text-gray-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-500" />
+                  Loading past invoices...
+                </div>
+              ) : itemPurchases.length > 0 ? (
+                <div className="table-responsive rounded-lg border border-gray-100 dark:border-gray-800 overflow-hidden">
+                  <table className="w-full text-xs min-w-max">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400">
+                      <tr>
+                        <th className="table-th py-2">Date</th>
+                        <th className="table-th py-2">Quantity</th>
+                        <th className="table-th py-2">Price / Unit</th>
+                        <th className="table-th py-2">Total Amount</th>
+                        <th className="table-th py-2">Supplier</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {itemPurchases.map((p: any, idx: number) => (
+                        <tr key={p._id || idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                          <td className="table-td py-2 font-medium text-gray-900 dark:text-white">
+                            {formatDate(p.date)}
+                          </td>
+                          <td className="table-td py-2">
+                            {p.quantity} {p.unit}
+                          </td>
+                          <td className="table-td py-2 font-medium text-gray-700 dark:text-gray-300">
+                            {formatCurrency(p.pricePerUnit)}/{p.unit}
+                          </td>
+                          <td className="table-td py-2 text-brand-600 font-semibold">
+                            {formatCurrency(p.totalPrice)}
+                          </td>
+                          <td className="table-td py-2 text-gray-500 dark:text-gray-400">
+                            {p.supplierName || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : !historyItem.lastPurchase ? null : (
+                <div className="text-xs text-gray-400 py-3 text-center bg-gray-50/50 dark:bg-gray-800/20 rounded-lg">
+                  No additional past purchase bills found for this item.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setHistoryItem(null)}
+                className="btn-secondary text-xs px-4 py-2"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </AppLayout>
   );

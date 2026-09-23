@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Peyala POS</string>
+    <string name="server_url_default">http://192.168.29.241:3000</string>
+    <string name="connecting">Connecting to Peyala Station...</string>
+    <string name="connection_failed">Cannot Connect to Peyala Station</string>
+    <string name="connection_failed_desc">Make sure the counter computer is running and your phone is connected to the restaurant Wi-Fi.</string>
+    <string name="server_address_hint">Server Address (e.g. 192.168.29.241:3000)</string>
+    <string name="retry">Retry Connection</string>
+    <string name="save_and_reconnect">Save &amp; Reconnect</string>
+    <string name="server_settings">Server Settings</string>
+    <string name="press_again_to_exit">Press back again to exit Peyala POS</string>
+</resources>

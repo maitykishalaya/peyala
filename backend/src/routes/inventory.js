@@ -1,10 +1,78 @@
 const router = require('express').Router();
+const mongoose = require('mongoose');
 const InventoryCategory = require('../models/InventoryCategory');
 const InventoryItem = require('../models/InventoryItem');
+const PurchaseEntry = require('../models/PurchaseEntry');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
 router.use(auth);
+
+// Helper function to attach latest purchase info to inventory items
+async function attachLatestPurchases(items) {
+  if (!items || items.length === 0) return [];
+  const itemIds = items.map(i => i._id);
+
+  const latestPurchases = await PurchaseEntry.aggregate([
+    { $match: { 'items.item': { $in: itemIds } } },
+    { $sort: { date: -1, createdAt: -1 } },
+    { $unwind: '$items' },
+    { $match: { 'items.item': { $in: itemIds } } },
+    {
+      $group: {
+        _id: '$items.item',
+        date: { $first: '$date' },
+        quantity: { $first: '$items.quantity' },
+        unit: { $first: '$items.unit' },
+        pricePerUnit: { $first: '$items.pricePerUnit' },
+        totalPrice: { $first: '$items.totalPrice' },
+        supplier: { $first: '$supplier' },
+        purchaseId: { $first: '$_id' },
+      }
+    },
+    {
+      $lookup: {
+        from: 'suppliers',
+        localField: 'supplier',
+        foreignField: '_id',
+        as: 'supplierDoc',
+      }
+    },
+    {
+      $unwind: {
+        path: '$supplierDoc',
+        preserveNullAndEmptyArrays: true,
+      }
+    }
+  ]);
+
+  const purchaseMap = {};
+  for (const p of latestPurchases) {
+    purchaseMap[p._id.toString()] = {
+      date: p.date,
+      quantity: p.quantity,
+      unit: p.unit,
+      pricePerUnit: p.pricePerUnit,
+      totalPrice: p.totalPrice,
+      supplierName: p.supplierDoc?.name || null,
+      purchaseId: p.purchaseId,
+    };
+  }
+
+  return items.map(item => {
+    const obj = item.toObject({ virtuals: true });
+    obj.lastPurchase = purchaseMap[item._id.toString()] || (item.lastPurchasePrice ? {
+      date: null,
+      quantity: null,
+      unit: item.unit,
+      pricePerUnit: item.lastPurchasePrice,
+      totalPrice: null,
+      supplierName: item.preferredSupplier?.name || null,
+      isInitial: true,
+    } : null);
+    return obj;
+  });
+}
 
 // Categories
 router.get('/categories', async (req, res) => {
@@ -53,12 +121,57 @@ router.get('/items', async (req, res) => {
   try {
     const filter = { isActive: true };
     if (req.query.category) filter.category = req.query.category;
+    let items;
     if (req.query.lowStock === 'true') {
-      const items = await InventoryItem.find(filter).populate('category preferredSupplier');
-      return res.json(items.filter(i => i.currentStock <= i.minimumStock));
+      const allItems = await InventoryItem.find(filter).populate('category preferredSupplier');
+      items = allItems.filter(i => i.currentStock <= i.minimumStock);
+    } else {
+      items = await InventoryItem.find(filter).populate('category preferredSupplier').sort('name');
     }
-    const items = await InventoryItem.find(filter).populate('category preferredSupplier').sort('name');
-    res.json(items);
+    const enriched = await attachLatestPurchases(items);
+    res.json(enriched);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// Purchase history for a specific inventory item (last 10 purchases)
+router.get('/items/:id/purchase-history', async (req, res) => {
+  try {
+    const itemId = new mongoose.Types.ObjectId(req.params.id);
+    const history = await PurchaseEntry.aggregate([
+      { $match: { 'items.item': itemId } },
+      { $sort: { date: -1, createdAt: -1 } },
+      { $unwind: '$items' },
+      { $match: { 'items.item': itemId } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'suppliers',
+          localField: 'supplier',
+          foreignField: '_id',
+          as: 'supplierDoc',
+        }
+      },
+      {
+        $unwind: {
+          path: '$supplierDoc',
+          preserveNullAndEmptyArrays: true,
+        }
+      },
+      {
+        $project: {
+          _id: '$_id',
+          date: 1,
+          quantity: '$items.quantity',
+          unit: '$items.unit',
+          pricePerUnit: '$items.pricePerUnit',
+          totalPrice: '$items.totalPrice',
+          supplierName: '$supplierDoc.name',
+          referenceNumber: 1,
+          paymentMode: 1,
+        }
+      }
+    ]);
+    res.json(history);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -66,7 +179,8 @@ router.get('/items/:id', async (req, res) => {
   try {
     const item = await InventoryItem.findById(req.params.id).populate('category preferredSupplier');
     if (!item) return res.status(404).json({ message: 'Item not found' });
-    res.json(item);
+    const [enriched] = await attachLatestPurchases([item]);
+    res.json(enriched || item);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

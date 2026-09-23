@@ -3,42 +3,61 @@ setlocal enabledelayedexpansion
 
 title Create Peyala POS Desktop Shortcut
 
-echo ======================================================
-echo   Creating Peyala POS Desktop Shortcut (Windows)
-echo ======================================================
-echo.
-
 set "SCRIPT_DIR=%~dp0"
-set "TARGET_BAT=%SCRIPT_DIR%start-kiosk.bat"
-set "VBS_FILE=%TEMP%\create_pos_shortcut_%RANDOM%.vbs"
+set "QUIET=0"
+if /i "%~1"=="/quiet" set "QUIET=1"
 
-if not exist "%TARGET_BAT%" (
-    echo [ERROR] Could not find start-kiosk.bat in %SCRIPT_DIR%
-    pause
-    exit /b 1
+if "%QUIET%"=="0" (
+    echo ======================================================
+    echo   Creating Peyala POS Desktop Shortcut with Official Logo
+    echo ======================================================
+    echo.
 )
 
-:: Generate VBScript to create Desktop Shortcut (.lnk)
-(
-    echo Set oWS = WScript.CreateObject^("WScript.Shell"^)
-    echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\Peyala POS Station.lnk"
-    echo Set oLink = oWS.CreateShortcut^(sLinkFile^)
-    echo oLink.TargetPath = "%TARGET_BAT%"
-    echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
-    echo oLink.Description = "Launch Peyala POS in Kiosk Mode with Silent Auto-Printing"
-    echo oLink.IconLocation = "shell32.dll,13"
-    echo oLink.WindowStyle = 1
-    echo oLink.Save
-) > "%VBS_FILE%"
+:: Ensure icon.ico exists from icon.png
+if not exist "%SCRIPT_DIR%icon.ico" (
+    if exist "%SCRIPT_DIR%scripts\make-ico.js" (
+        node "%SCRIPT_DIR%scripts\make-ico.js" >nul 2>&1
+    )
+)
 
-cscript //nologo "%VBS_FILE%"
-if exist "%VBS_FILE%" del "%VBS_FILE%"
+set "TARGET_FILE=%SCRIPT_DIR%start-peyala-app.bat"
+set "ICON_TARGET=%SCRIPT_DIR%icon.ico"
+if not exist "%ICON_TARGET%" (
+    if exist "%SCRIPT_DIR%PeyalaPOS.exe" set "ICON_TARGET=%SCRIPT_DIR%PeyalaPOS.exe"
+)
 
-echo [SUCCESS] "Peyala POS Station" shortcut created on your Desktop!
-echo.
-echo You can now simply double-click the shortcut on your Desktop to:
-echo  1. Launch Chrome in dedicated full-screen Kiosk mode
-echo  2. Automatically connect to your Vercel POS station
-echo  3. Silently auto-print all incoming mobile KOTs to your USB thermal printer
-echo.
-pause
+:: Create Desktop Shortcut
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ws = New-Object -ComObject WScript.Shell; " ^
+    "$desktop = [Environment]::GetFolderPath('Desktop'); " ^
+    "$scPath = Join-Path $desktop 'Peyala POS.lnk'; " ^
+    "$shortcut = $ws.CreateShortcut($scPath); " ^
+    "$shortcut.TargetPath = '%TARGET_FILE%'; " ^
+    "$shortcut.WorkingDirectory = '%SCRIPT_DIR%'; " ^
+    "$shortcut.Description = 'Peyala Restaurant Operations and POS Terminal'; " ^
+    "if (Test-Path '%ICON_TARGET%') { $shortcut.IconLocation = '%ICON_TARGET%' }; " ^
+    "$shortcut.Save()" >nul 2>&1
+
+:: Create Start Menu Shortcut
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ws = New-Object -ComObject WScript.Shell; " ^
+    "$startMenu = [Environment]::GetFolderPath('StartMenu'); " ^
+    "$programs = Join-Path $startMenu 'Programs'; " ^
+    "$scPath = Join-Path $programs 'Peyala POS.lnk'; " ^
+    "$shortcut = $ws.CreateShortcut($scPath); " ^
+    "$shortcut.TargetPath = '%TARGET_FILE%'; " ^
+    "$shortcut.WorkingDirectory = '%SCRIPT_DIR%'; " ^
+    "$shortcut.Description = 'Peyala Restaurant Operations and POS Terminal'; " ^
+    "if (Test-Path '%ICON_TARGET%') { $shortcut.IconLocation = '%ICON_TARGET%' }; " ^
+    "$shortcut.Save()" >nul 2>&1
+
+if "%QUIET%"=="0" (
+    echo [SUCCESS] Peyala POS shortcut created with your official logo!
+    echo Locations: Windows Desktop and Start Menu
+    echo.
+    pause
+)
+
+endlocal
+exit /b 0

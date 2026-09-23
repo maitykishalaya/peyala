@@ -5,40 +5,46 @@ const User = require('../models/User');
 const { auth, adminOnly } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
-// Ensure demo viewer account exists in database
-async function ensureViewerAccount() {
-  try {
-    const existing = await User.findOne({ email: 'viewer@peyala.com' });
-    if (!existing) {
-      await User.create({
-        name: 'Demo Viewer',
-        email: 'viewer@peyala.com',
-        password: 'peyala123',
-        role: 'viewer',
-        isActive: true,
-        isFirstLogin: false,
-        hasSeenWalkthrough: true,
-      });
-      console.log('✅ Demo viewer account initialized: viewer@peyala.com');
+// Ensure standard demo accounts exist in database with password peyala123
+async function ensureDefaultAccounts() {
+  const defaultAccounts = [
+    { name: 'Peyala Admin', email: 'admin@peyala.com', password: 'peyala123', role: 'admin' },
+    { name: 'Floor Manager', email: 'manager@peyala.com', password: 'peyala123', role: 'manager' },
+    { name: 'Staff Waiter', email: 'staff@peyala.com', password: 'peyala123', role: 'staff' },
+    { name: 'Demo Viewer', email: 'viewer@peyala.com', password: 'peyala123', role: 'viewer' },
+  ];
+
+  for (const acc of defaultAccounts) {
+    try {
+      let user = await User.findOne({ email: acc.email });
+      if (!user) {
+        await User.create({
+          ...acc,
+          isActive: true,
+          isFirstLogin: false,
+          hasSeenWalkthrough: true,
+        });
+        console.log(`✅ Default account initialized: ${acc.email} (${acc.role})`);
+      }
+    } catch (err) {
+      // Ignore duplicate key or startup errors
     }
-  } catch (err) {
-    // Ignore duplicate key or startup errors
   }
 }
 
 mongoose.connection.on('connected', () => {
-  ensureViewerAccount();
+  ensureDefaultAccounts();
 });
 if (mongoose.connection.readyState === 1) {
-  ensureViewerAccount();
+  ensureDefaultAccounts();
 }
 
 // Login
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (email === 'viewer@peyala.com') {
-      await ensureViewerAccount();
+    if (['admin@peyala.com', 'manager@peyala.com', 'staff@peyala.com', 'viewer@peyala.com'].includes(email)) {
+      await ensureDefaultAccounts();
     }
     const user = await User.findOne({ email });
     if (!user || !(await user.matchPassword(password))) {

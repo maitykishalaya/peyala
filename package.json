@@ -1,0 +1,15 @@
+{
+  "name": "peyala-v8",
+  "version": "8.0.0",
+  "description": "Peyala Restaurant Operations & POS Management Suite",
+  "scripts": {
+    "desktop": "cd desktop && npm start",
+    "build": "cd frontend && npm run build",
+    "start": "start-peyala-app.bat",
+    "backend": "cd backend && npm start",
+    "frontend": "cd frontend && npm start",
+    "dist": "cd desktop && npm run dist"
+  },
+  "author": "Peyala",
+  "license": "ISC"
+}

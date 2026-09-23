@@ -14,7 +14,18 @@ connectDB();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
+app.use(
+  morgan('dev', {
+    skip: (req) => {
+      const url = req.originalUrl || req.url;
+      return (
+        url.includes('/api/orders/pending-') ||
+        url.includes('/api/orders/kds/alerts') ||
+        url.includes('/api/health')
+      );
+    },
+  })
+);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes

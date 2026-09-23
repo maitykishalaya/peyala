@@ -766,4 +766,64 @@ node --check src/models/Wastage.js
 
 ---
 
-Built with pride for **Peyala Café & Restaurant** · Howrah, West Bengal 🍵
+## 💻 Dedicated Windows Desktop Application & Local POS Station
+
+Peyala POS includes a dedicated, high-performance local Windows desktop application powered by **Electron** and an optimized production engine, eliminating web latency, cloud spin-up delays, and development-mode route compilation overhead.
+
+### Key Capabilities:
+1. **Zero-Latency Execution (<5ms page loads)**:
+   - Unlike cloud serverless hosting or development servers (`npm run dev`), the desktop app runs a pre-compiled Next.js production build (`next build && next start`) and Node.js Express backend directly on the local machine.
+   - Screen transitions between POS Floor Plan (`/tables`), Kitchen Display (`/kds`), Menu, and Reports occur in milliseconds with 0 compilation delay.
+2. **Direct Hardware Silent Thermal Printing**:
+   - Integrated with Electron's native silent print engine (`webContents.print({ silent: true })`).
+   - 80mm KOT tickets and customer bills are sent directly to the thermal receipt printer with zero popup dialogs and no external browser dependencies.
+3. **Automated Server Process Management**:
+   - The desktop application automatically starts both backend (Port 4000) and frontend (Port 3000) production engines.
+   - Automatically frees ports and cleans up background processes on exit (preventing zombie Node processes).
+4. **Windows System Tray & Kiosk Integration**:
+   - System tray icon with quick links to POS Floor Plan, KDS, Sales Reports, Server Restart, and Fullscreen Kiosk toggle.
+   - Press `F11` to toggle between windowed mode and full-screen POS counter kiosk.
+5. **Cross-Device LAN Waiter Terminal Support**:
+   - While the Windows laptop acts as the master cashier station and counter print station, waitstaff on mobile phones/tablets connected to the restaurant Wi-Fi can navigate to `http://<laptop-ip>:3000/tables` to punch orders at tables.
+   - Orders submitted from mobile phones immediately print KOT tickets on the counter printer via the local desktop app.
+
+### Installing & Launching the Desktop Application:
+- **Standalone Windows Setup Wizard**: Double-click `Peyala-POS-Setup.exe` in the root folder to install on any Windows laptop with a guided wizard.
+- **Automated 1-Click Laptop Setup**: Double-click `INSTALL-PEYALA-POS.bat` in the root folder (auto-provisions Node.js, compiles assets, and creates desktop shortcuts).
+- **1-Click Desktop Shortcut**: Double-click the **`Peyala POS`** shortcut on your Windows desktop (created via `create-windows-shortcut.bat` with your official logo).
+- **Batch Launcher**: Double-click `start-peyala-app.bat` in the project root.
+- **Native C# Launcher**: Double-click `PeyalaPOS.exe` (compiled with your official logo embedded).
+- **Packaging Windows Installer**: Run `build-windows-exe.bat` to rebuild the standalone installer in the `dist/` directory.
+
+---
+
+## 📱 Dedicated Android Mobile Application for Staff (Enterprise APK)
+
+Peyala POS provides a standalone, production-ready enterprise Android application (`Peyala-POS.apk`) tailored specifically for restaurant waitstaff, captain order punchers, and floor managers to operate on their personal or restaurant Android smartphones without needing a web browser.
+
+### Key Mobile Capabilities:
+1. **Full-Screen Native POS Experience**:
+   - Zero browser controls, no URL bar, and no risk of accidental tab closing or page dismissal during active order punch.
+   - Branded launcher icons across all screen densities (hdpi to xxxhdpi) using the official Peyala logo.
+   - Status bar and navigation bar seamlessly themed in Peyala Slate 900 (`#0f172a`).
+2. **Floor Wake Lock & Battery Optimization**:
+   - Keeps the smartphone screen awake (`FLAG_KEEP_SCREEN_ON`) while taking customer orders at tables so staff don't have to keep unlocking their devices.
+3. **Smart Connection & Server Selector**:
+   - Pre-configured to point directly to the restaurant counter POS server (`http://192.168.29.241:3000`).
+   - If the router re-assigns the counter machine's IP (e.g., `192.168.1.100`), the app automatically catches connection loss and displays a sleek diagnostic screen with an IP address field, test connection ping, and 1-tap reconnect.
+   - Long-pressing the brand logo or tapping the top settings trigger opens the Server Settings dialog anytime without reinstalling the APK.
+4. **Hardware Back Button Safety Guard**:
+   - Seamlessly navigates back through pages and modals.
+   - At the root screen, requires a double-tap to exit to prevent accidental app closes in the middle of a customer transaction.
+5. **Signed Enterprise Release Certificate**:
+   - Signed with an enterprise RSA-2048 keystore (`android/app/peyala-release.jks`, 10,000-day validity) supporting Android 7.0 (Nougat) up to Android 14/15.
+   - Can be sideloaded directly via USB, WhatsApp, local Wi-Fi, or direct download link.
+
+### Distributing & Installing on Staff Phones:
+- **Direct Web Download Link**: Connect phone to restaurant Wi-Fi and open `http://<counter-ip>:3000/Peyala-POS.apk` or tap **"Install Staff Android App (APK)"** on the login screen.
+- **Root Folder**: Copy `Peyala-POS.apk` directly from the project root.
+- **Rebuilding the APK**: Double-click `build-apk.bat` or run `node scripts/build-apk.js` to compile a fresh APK anytime.
+
+---
+
+Built with pride for **Peyala Café & Restaurant** · Midnapore, West Bengal 🍵

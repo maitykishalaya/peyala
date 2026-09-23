@@ -1,49 +1,62 @@
 ====================================================================
-  🍵 PEYALA POS - PENDRIVE / WINDOWS LAPTOP QUICK START GUIDE
+  PEYALA POS - PENDRIVE / WINDOWS LAPTOP INSTALLATION & USER GUIDE
 ====================================================================
 
-HOW TO RUN ON YOUR WINDOWS LAPTOP:
+HOW TO INSTALL & RUN ON ANY WINDOWS LAPTOP:
 --------------------------------------------------------------------
 
-STEP 1: Copy this folder
-  - Copy this entire folder from your USB pendrive onto your Windows
-    laptop (for example, to C:\Peyala or your Desktop/Documents).
-  - (You can also run directly from the pendrive!)
+METHOD 1 (Recommended - Standalone Setup Wizard):
+  1. Copy "Peyala-POS-Setup.exe" to the laptop (or run directly from pendrive).
+  2. Double-click "Peyala-POS-Setup.exe".
+  3. Follow the setup wizard to install. It automatically creates desktop
+     and Start Menu shortcuts with your official logo.
+  4. Launch and start managing your restaurant!
 
-STEP 2: First-Time Setup (Run once)
-  - Double-click: "setup-windows.bat"
-  - What this does:
-    * Checks if Node.js is installed. If not, it can automatically
-      download a portable Node.js runtime for you!
-    * Installs required dependencies for Windows.
-    * Compiles the native "PeyalaPOS.exe" application.
-    * Places a "Peyala POS Station" shortcut on your Windows Desktop!
+METHOD 2 (1-Click Automated Laptop Installer):
+  1. Copy this entire "peyala_v8" folder onto your Windows laptop 
+     (e.g., to C:\Peyala or your Desktop).
+  2. Double-click "INSTALL-PEYALA-POS.bat".
+  3. What this does automatically:
+     * Auto-detects or provisions portable Node.js runtime (no admin install needed).
+     * Builds optimized production assets for instant (<5ms) route loading.
+     * Compiles the native "PeyalaPOS.exe" launcher with your logo embedded.
+     * Places the "Peyala POS" shortcut directly on your Windows Desktop!
 
-STEP 3: Launching the POS Station
-  - Simply double-click:
-      * "start-local-kiosk.bat" (in this folder), OR
-      * "Peyala POS Station" (on your Windows Desktop), OR
-      * "PeyalaPOS.exe" (for silent background running with System Tray icon)
+--------------------------------------------------------------------
+DAILY LAUNCHING:
+--------------------------------------------------------------------
+You can start Peyala POS anytime by double-clicking:
+  * "Peyala POS" shortcut on your Windows Desktop (with your logo), OR
+  * "start-peyala-app.bat" (in this folder), OR
+  * "PeyalaPOS.exe" (in this folder)
 
-  - The POS will automatically:
-      1. Clean and free ports 3000 & 4000
-      2. Start the Backend API (Port 4000)
-      3. Start the Next.js Frontend (Port 3000)
-      4. Open Google Chrome or Microsoft Edge in full-screen Kiosk mode
-         with silent thermal receipt auto-printing!
+The POS will automatically:
+  1. Check and free ports 3000 & 4000
+  2. Launch the local Backend API (Port 4000)
+  3. Launch the high-speed production Frontend (Port 3000)
+  4. Open the dedicated native POS window with direct hardware thermal printing!
+
+--------------------------------------------------------------------
+MOBILE WAITER ORDERING OVER RESTAURANT WI-FI (LAN):
+--------------------------------------------------------------------
+1. Connect mobile phones or tablets to the same restaurant Wi-Fi as this laptop.
+2. Find the laptop's local IP address (e.g., http://192.168.29.241:3000).
+3. Waiters can open http://<laptop-ip>:3000/tables on their phone browsers.
+4. Orders punched at tables will automatically print KOT tickets on the
+   counter thermal printer connected to this laptop!
 
 --------------------------------------------------------------------
 KEYBOARD SHORTCUTS & CONTROLS:
 --------------------------------------------------------------------
-* Exit Kiosk Mode:      Press [Alt] + [F4]
-* Toggle Fullscreen:    Press [F11]
-* Stop Local Servers:   Double-click "stop-local-server.bat"
-* Windowed App Mode:    Run "start-local-kiosk.bat --windowed"
+* Fullscreen Kiosk Mode:   Press [F11] to toggle fullscreen/windowed
+* Reload Page:             Press [F5] or [Ctrl] + [R]
+* Exit Application:        Press [Alt] + [F4] or right-click System Tray icon
+* Emergency Server Stop:   Double-click "stop-local-server.bat"
 
 --------------------------------------------------------------------
 DEFAULT CREDENTIALS:
 --------------------------------------------------------------------
-* Admin Portal:  admin@peyala.com / peyala123
-* Local URL:     http://localhost:3000/login
-* Local API:     http://localhost:4000/api
+* Admin Login:  admin@peyala.com / peyala123
+* Local Portal: http://localhost:3000/login
+* Local API:    http://localhost:4000/api
 ====================================================================

@@ -804,7 +804,11 @@ export default function LoginPage() {
       const redirectTarget = params?.get('redirect') || '/dashboard';
       router.push(redirectTarget);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Invalid email or password. Please check your credentials.');
+      if (!err.response) {
+        setError('Cannot reach server (' + (err.message || 'Network Error') + '). Please ensure phone is connected to the restaurant Wi-Fi.');
+      } else {
+        setError(err.response?.data?.message || 'Invalid email or password. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }
@@ -1180,6 +1184,19 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {/* Direct Android APK Download Button for Staff */}
+          <div className="pt-1">
+            <a
+              href="/Peyala-POS.apk"
+              download="Peyala-POS.apk"
+              className="w-full py-2.5 px-4 rounded-xl bg-gray-950 hover:bg-gray-850 border border-gray-800 hover:border-brand-500/40 text-xs font-bold text-gray-300 hover:text-white transition-all flex items-center justify-center gap-2 group shadow-sm"
+            >
+              <span className="text-emerald-400 text-sm">📱</span>
+              <span>Install Staff Android App (APK)</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">v1.0</span>
+            </a>
+          </div>
 
           {/* System Status Footer */}
           <div className="pt-2 text-center border-t border-gray-800/60 space-y-2">
