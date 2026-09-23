@@ -1,9 +1,11 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 const ps = `
 $sh = New-Object -ComObject WScript.Shell
-Get-ChildItem -Path "C:\\Users\\User\\Desktop\\*.lnk" | ForEach-Object {
+$desktop = [Environment]::GetFolderPath("Desktop")
+Get-ChildItem -Path "$desktop\\*.lnk" | ForEach-Object {
     $sc = $sh.CreateShortcut($_.FullName)
     [PSCustomObject]@{
         Name = $_.Name
