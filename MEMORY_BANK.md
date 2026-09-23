@@ -739,6 +739,21 @@ Whenever changes are made, run this validation suite before concluding:
    - Update `README.md` if any user-facing features, routes, or workflows changed.
    - Update `MEMORY_BANK.md` with architectural, schema, or convention decisions.
 
----
+### 5.12 Cloud Deployment (Vercel & Render) & Universal Hosting Architecture
+- **Dual-Mode Execution**: The codebase supports simultaneous cloud hosting (Vercel for frontend, Render for backend) and local on-premise execution (Electron desktop app or local Chrome kiosk) with zero code modifications.
+- **Frontend Vercel Adaptations**:
+  - rontend/next.config.js: Rewrites dynamically resolve process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000', allowing Vercel serverless proxying to the Render backend origin without CORS conflicts.
+  - rontend/src/lib/api.ts: Base URL discovery checks localStorage.getItem('peyala_api_url'), then process.env.NEXT_PUBLIC_API_URL, falling back to /api for relative proxying.
+  - rontend/src/app/settings/page.tsx: API health test connection dynamically resolves the configured API URL instead of hardcoded localhost.
+  - Added rontend/vercel.json and root ercel.json for seamless project imports.
+- **Backend Render Adaptations**:
+  - ackend/src/server.js: Added root / and /health endpoints in addition to /api/health so Render health checks pass immediately on any path.
+  - CORS middleware configured with { origin: true, credentials: true } to permit cross-origin requests from Vercel deployments.
+  - Added ender.yaml blueprint at repository root for 1-click Render web service deployment.
+  - Added ackend/.env.example and rontend/.env.example templates.
+- **Installer & Shortcut Standardization**:
+  - Added create-windows-desktop-app-shortcut.bat forwarding alias to create-windows-shortcut.bat ensuring backward and forward compatibility for INSTALL-PEYALA-POS.bat.
+  - Comprehensive .gitignore filtering out heavy binary toolchains (>1GB portable Android SDK, Gradle, JDK, and setup executables) to keep repository size lean and prevent GitHub 100MB file size rejections.
 
+---
 *Last Updated: September 2026 · Peyala v8 Engineering*

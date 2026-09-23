@@ -827,3 +827,38 @@ Peyala POS provides a standalone, production-ready enterprise Android applicatio
 ---
 
 Built with pride for **Peyala Café & Restaurant** · Midnapore, West Bengal 🍵
+
+---
+
+## ☁️ Cloud Deployment Guide (Vercel & Render)
+
+Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Vercel** + Backend on **Render**) and local deployment.
+
+### 1. Backend Deployment on Render (Web Service)
+1. In your [Render Dashboard](https://dashboard.render.com/), click **New +** > **Web Service**.
+2. Connect your GitHub repository (`peyala`).
+3. Configure the service settings:
+   - **Root Directory**: `backend`
+   - **Environment**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Health Check Path**: `/health`
+4. Set the following **Environment Variables**:
+   - `MONGODB_URI`: Your MongoDB Atlas connection URI
+   - `JWT_SECRET`: A secure random secret string
+   - `NODE_ENV`: `production`
+5. Click **Create Web Service**. Render will assign a public URL (e.g. `https://peyala-backend.onrender.com`).
+*(Note: A `render.yaml` blueprint is also included at the project root for 1-click Blueprint deployment).*
+
+### 2. Frontend Deployment on Vercel
+1. In your [Vercel Dashboard](https://vercel.com/dashboard), click **Add New...** > **Project**.
+2. Import your GitHub repository (`peyala`).
+3. In Project Configuration:
+   - **Framework Preset**: `Next.js`
+   - **Root Directory**: Click `Edit` and select `frontend` (or keep root with included `vercel.json`).
+4. Set the following **Environment Variables**:
+   - `NEXT_PUBLIC_API_URL`: Your Render backend URL with `/api` (e.g. `https://peyala-backend.onrender.com/api`)
+   - `BACKEND_URL`: Your Render backend origin (e.g. `https://peyala-backend.onrender.com`)
+5. Click **Deploy**. Vercel will build and assign your live production URL.
+
+---
