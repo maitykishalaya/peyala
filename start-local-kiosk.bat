@@ -230,33 +230,16 @@ echo When you close the kiosk window, this script will stop local servers.
 echo.
 
 :: 10. Launch Browser
+set "COMMON_ARGS=--kiosk-printing --user-data-dir=\"%USER_DATA_DIR%\" --disable-features=Translate --no-first-run --no-default-browser-check --disable-pinch --overscroll-history-navigation=0 --disable-infobars"
+
 if "%BROWSER_BIN%"=="" (
     start "" "%DEFAULT_URL%"
     echo Servers are running. Press any key to stop servers and exit.
     pause >nul
 ) else if "%MODE%"=="windowed" (
-    "%BROWSER_BIN%" ^
-        --kiosk-printing ^
-        --user-data-dir="%USER_DATA_DIR%" ^
-        --disable-features=Translate ^
-        --no-first-run ^
-        --no-default-browser-check ^
-        --disable-pinch ^
-        --overscroll-history-navigation=0 ^
-        --disable-infobars ^
-        --app="%DEFAULT_URL%"
+    "%BROWSER_BIN%" --app="%DEFAULT_URL%" %COMMON_ARGS%
 ) else (
-    "%BROWSER_BIN%" ^
-        --kiosk ^
-        --kiosk-printing ^
-        --user-data-dir="%USER_DATA_DIR%" ^
-        --disable-features=Translate ^
-        --no-first-run ^
-        --no-default-browser-check ^
-        --disable-pinch ^
-        --overscroll-history-navigation=0 ^
-        --disable-infobars ^
-        "%DEFAULT_URL%"
+    "%BROWSER_BIN%" --kiosk "%DEFAULT_URL%" %COMMON_ARGS%
 )
 
 :: 11. Cleanup upon exit

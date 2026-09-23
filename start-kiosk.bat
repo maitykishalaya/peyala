@@ -64,29 +64,12 @@ echo.
 echo Launching Chrome POS Station...
 
 :: 4. Launch Chrome with Kiosk & Silent Printing flags
+set "COMMON_ARGS=--kiosk-printing --user-data-dir=\"%USER_DATA_DIR%\" --disable-features=Translate --no-first-run --no-default-browser-check --disable-pinch --overscroll-history-navigation=0 --disable-infobars"
+
 if "%MODE%"=="windowed" (
-    start "" "%CHROME_BIN%" ^
-        --kiosk-printing ^
-        --user-data-dir="%USER_DATA_DIR%" ^
-        --disable-features=Translate ^
-        --no-first-run ^
-        --no-default-browser-check ^
-        --disable-pinch ^
-        --overscroll-history-navigation=0 ^
-        --disable-infobars ^
-        --app="%APP_URL%"
+    start "" "%CHROME_BIN%" --app="%APP_URL%" %COMMON_ARGS%
 ) else (
-    start "" "%CHROME_BIN%" ^
-        --kiosk ^
-        --kiosk-printing ^
-        --user-data-dir="%USER_DATA_DIR%" ^
-        --disable-features=Translate ^
-        --no-first-run ^
-        --no-default-browser-check ^
-        --disable-pinch ^
-        --overscroll-history-navigation=0 ^
-        --disable-infobars ^
-        "%APP_URL%"
+    start "" "%CHROME_BIN%" --kiosk "%APP_URL%" %COMMON_ARGS%
 )
 
 echo [OK] Chrome Kiosk Print Station is running!
