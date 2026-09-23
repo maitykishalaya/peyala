@@ -3,12 +3,13 @@
   "version": "8.0.0",
   "description": "Peyala Restaurant Operations & POS Management Suite",
   "scripts": {
-    "desktop": "cd desktop && npm start",
+    "start": "node -e \"if (process.platform === 'win32' && !process.env.CI) { require('child_process').spawn('cmd.exe', ['/c', 'start-peyala-app.bat'], { stdio: 'inherit' }); } else { require('child_process').spawn('npm', ['run', 'frontend'], { stdio: 'inherit', shell: true }); }\"",
     "build": "cd frontend && npm run build",
-    "start": "start-peyala-app.bat",
     "backend": "cd backend && npm start",
     "frontend": "cd frontend && npm start",
-    "dist": "cd desktop && npm run dist"
+    "desktop": "cd desktop && npm start",
+    "dist": "cd desktop && npm run dist",
+    "install:all": "npm --prefix backend install && npm --prefix frontend install && npm --prefix desktop install"
   },
   "author": "Peyala",
   "license": "ISC"

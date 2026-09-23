@@ -4,6 +4,9 @@ const getInitialBaseUrl = () => {
   if (typeof window !== 'undefined') {
     const custom = localStorage.getItem('peyala_api_url');
     if (custom) return custom;
+    if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+      return process.env.NEXT_PUBLIC_API_URL;
+    }
     return '/api';
   }
   return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
@@ -19,6 +22,8 @@ api.interceptors.request.use((config) => {
     const customApiUrl = localStorage.getItem('peyala_api_url');
     if (customApiUrl) {
       config.baseURL = customApiUrl;
+    } else if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+      config.baseURL = process.env.NEXT_PUBLIC_API_URL;
     } else if (!config.baseURL || config.baseURL.includes('localhost:4000')) {
       config.baseURL = '/api';
     }

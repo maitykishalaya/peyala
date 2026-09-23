@@ -14,6 +14,7 @@ connectDB();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+const fs = require('fs');
 app.use(
   morgan('dev', {
     skip: (req) => {
@@ -21,12 +22,17 @@ app.use(
       return (
         url.includes('/api/orders/pending-') ||
         url.includes('/api/orders/kds/alerts') ||
-        url.includes('/api/health')
+        url.includes('/health')
       );
     },
   })
 );
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+const uploadDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -56,8 +62,24 @@ app.use('/api/wastage', require('./routes/wastage'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/analytics', require('./routes/analytics'));
 
-// Health check
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'Peyala Business Admin' }));
+// Health check endpoints for Render, Docker, and local pinging
+app.get(['/health', '/api/health'], (req, res) =>
+  res.json({
+    status: 'ok',
+    app: 'Peyala Business Admin',
+    timestamp: new Date().toISOString(),
+  })
+);
+
+// Root route confirmation
+app.get('/', (req, res) =>
+  res.json({
+    status: 'ok',
+    app: 'Peyala Business Admin - Backend API',
+    health: '/health',
+    version: '1.0.0',
+  })
+);
 
 // Error handler
 app.use((err, req, res, next) => {
