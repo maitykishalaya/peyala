@@ -251,18 +251,22 @@ export default function ReportsPage() {
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 0),
     0
   );
-  const editTaxAmount = activeEditItems.reduce((sum, it) => {
-    const lineTotal = (Number(it.price) || 0) * (Number(it.quantity) || 0);
-    const taxPct = it.taxPercent !== undefined ? Number(it.taxPercent) : 5;
-    return sum + (lineTotal * taxPct) / 100;
-  }, 0);
 
   const numDiscountValue = Math.max(0, Number(editDiscountValue) || 0);
   const editDiscountAmount = editDiscountType === 'percentage'
     ? Math.round(((editSubtotal * numDiscountValue) / 100) * 100) / 100
     : Math.min(editSubtotal, numDiscountValue);
 
-  const editGrandTotal = Math.max(0, Math.round((editSubtotal - editDiscountAmount + editTaxAmount) * 100) / 100);
+  const editDiscountedBase = Math.max(0, editSubtotal - editDiscountAmount);
+
+  const editTaxAmount = Math.round(activeEditItems.reduce((sum, it) => {
+    const lineTotal = (Number(it.price) || 0) * (Number(it.quantity) || 0);
+    const taxPct = it.taxPercent !== undefined ? Number(it.taxPercent) : 5;
+    const lineBase = editSubtotal > 0 ? lineTotal * (editDiscountedBase / editSubtotal) : 0;
+    return sum + (lineBase * taxPct) / 100;
+  }, 0) * 100) / 100;
+
+  const editGrandTotal = Math.max(0, Math.round(editDiscountedBase + editTaxAmount));
 
   const numEditPartCash = Math.max(0, parseFloat(editPartCash) || 0);
   const numEditPartUpi = Math.max(0, parseFloat(editPartUpi) || 0);

@@ -3,6 +3,7 @@ const MenuCategory = require('../models/MenuCategory');
 const MenuItem = require('../models/MenuItem');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const { matchesSearch, sortBySearchRelevance } = require('../utils/search');
 
 router.use(auth);
 
@@ -130,11 +131,8 @@ router.get('/', async (req, res) => {
 
     if (category) filter.category = category;
     if (availableOnly === 'true') filter.isAvailable = true;
-    if (search && search.trim()) {
-      filter.name = { $regex: search.trim(), $options: 'i' };
-    }
 
-    const items = await MenuItem.find(filter)
+    let items = await MenuItem.find(filter)
       .populate({
         path: 'category',
         select: 'name sortOrder isActive defaultAddons',
@@ -142,6 +140,17 @@ router.get('/', async (req, res) => {
       })
       .populate('addons')
       .sort('name');
+
+    if (search && search.trim()) {
+      const matched = items.filter((item) =>
+        matchesSearch([item.name, item.description, item.category?.name], search)
+      );
+      items = sortBySearchRelevance(matched, search, (item) => [
+        item.name,
+        item.description,
+        item.category?.name,
+      ]);
+    }
 
     res.json(items);
   } catch (err) {

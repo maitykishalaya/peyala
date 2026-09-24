@@ -20,6 +20,7 @@ import {
   TableCategory,
 } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
+import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { playTwoBlinkAlertSound, listenToKdsReady, KdsReadyEvent } from '@/lib/audio-alerts';
 import {
@@ -639,7 +640,7 @@ export default function TablesPage() {
     const filtered = tables.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (tableSearch.trim()) {
-        return t.tableNumber.toLowerCase().includes(tableSearch.toLowerCase());
+        return matchesSearch([t.tableNumber, (t as any).name, (t as any).section], tableSearch);
       }
       return true;
     });
@@ -2378,7 +2379,8 @@ export default function TablesPage() {
                       if (cId !== selectedCategory) return false;
                     }
                     if (menuSearch.trim()) {
-                      return item.name.toLowerCase().includes(menuSearch.toLowerCase());
+                      const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
+                      return matchesSearch([item.name, item.description, catName], menuSearch);
                     }
                     return true;
                   }).length === 0 ? (
@@ -2394,7 +2396,8 @@ export default function TablesPage() {
                             if (cId !== selectedCategory) return false;
                           }
                           if (menuSearch.trim()) {
-                            return item.name.toLowerCase().includes(menuSearch.toLowerCase());
+                            const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
+                            return matchesSearch([item.name, item.description, catName], menuSearch);
                           }
                           return true;
                         })
@@ -3038,7 +3041,7 @@ export default function TablesPage() {
           // Filter addons based on search input
           const filteredAddons = applicableAddons.filter((a) => {
             if (!addonSearch.trim()) return true;
-            return a.name.toLowerCase().includes(addonSearch.toLowerCase());
+            return matchesSearch(a.name, addonSearch);
           });
 
           return (
@@ -3409,18 +3412,24 @@ export default function TablesPage() {
                       <span>Subtotal:</span>
                       <span>{formatCurrency(activeOrder.subtotal)}</span>
                     </div>
+                    {activeOrder.discount > 0 && (
+                      <>
+                        <div className="flex justify-between text-emerald-600 font-semibold">
+                          <span>Discount:</span>
+                          <span>−{formatCurrency(activeOrder.discount)}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-500 text-xs">
+                          <span>Taxable Amount:</span>
+                          <span>{formatCurrency(Math.max(0, activeOrder.subtotal - activeOrder.discount))}</span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex justify-between text-gray-500">
                       <span>Tax / GST:</span>
                       <span>{formatCurrency(activeOrder.taxAmount)}</span>
                     </div>
-                    {activeOrder.discount > 0 && (
-                      <div className="flex justify-between text-emerald-600 font-semibold">
-                        <span>Discount:</span>
-                        <span>−{formatCurrency(activeOrder.discount)}</span>
-                      </div>
-                    )}
                     {(() => {
-                      const net = activeOrder.subtotal + activeOrder.taxAmount - (activeOrder.discount || 0);
+                      const net = Math.max(0, activeOrder.subtotal - (activeOrder.discount || 0)) + activeOrder.taxAmount;
                       const roundOff = Math.round((activeOrder.total - net) * 100) / 100;
                       if (Math.abs(roundOff) >= 0.01) {
                         return (

@@ -3,9 +3,6 @@ const nextConfig = {
   reactStrictMode: false, // Disables double-render cycles in POS production environment
   compress: true,        // Enables Gzip & Brotli asset compression for lightning-fast network transfer
   poweredByHeader: false, // Security & bandwidth hardening
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '/api',
   },

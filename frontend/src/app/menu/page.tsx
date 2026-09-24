@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { menuApi, addonsApi, MenuCategory, MenuItem, Addon, MenuItemVariant } from '@/lib/pos-api';
 import { formatCurrency, cn } from '@/lib/utils';
+import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import {
@@ -129,10 +130,8 @@ export default function MenuPage() {
 
       // Search filter
       if (search.trim()) {
-        const query = search.toLowerCase();
-        const matchesName = item.name.toLowerCase().includes(query);
-        const matchesDesc = item.description?.toLowerCase().includes(query);
-        if (!matchesName && !matchesDesc) return false;
+        const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
+        if (!matchesSearch([item.name, item.description, catName], search)) return false;
       }
 
       return true;

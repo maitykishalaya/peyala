@@ -107,23 +107,20 @@ orderSchema.index({ fiscalQuarter: 1, billNumber: 1 });
 // Static helper to calculate order financial totals excluding cancelled items
 orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discountType = 'flat') {
   let subtotal = 0;
-  let taxAmount = 0;
+  const validItems = [];
 
   for (const item of items) {
     if (item.status === 'cancelled') continue;
     const qty = Number(item.quantity) || 0;
     const price = Number(item.price) || 0;
-    const taxPct = Number(item.taxPercent) || 0;
+    const taxPct = item.taxPercent !== undefined ? Number(item.taxPercent) : 5;
 
     const lineTotal = price * qty;
-    const lineTax = (lineTotal * taxPct) / 100;
-
     subtotal += lineTotal;
-    taxAmount += lineTax;
+    validItems.push({ lineTotal, taxPct });
   }
 
   const cleanSubtotal = Math.round(subtotal * 100) / 100;
-  const cleanTax = Math.round(taxAmount * 100) / 100;
 
   // Handle discountType: 'percentage' vs 'flat'
   let cleanDiscount = 0;
@@ -135,11 +132,25 @@ orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discoun
     cleanDiscount = Math.round(rawValue * 100) / 100;
   }
 
-  // Discount cannot exceed subtotal + taxAmount
-  cleanDiscount = Math.min(cleanDiscount, cleanSubtotal + cleanTax);
+  // Discount cannot exceed subtotal
+  cleanDiscount = Math.min(cleanDiscount, cleanSubtotal);
   cleanDiscount = Math.max(0, cleanDiscount);
 
-  const rawTotal = Math.max(0, Math.round((cleanSubtotal + cleanTax - cleanDiscount) * 100) / 100);
+  // Discounted taxable base
+  const discountedBase = Math.max(0, cleanSubtotal - cleanDiscount);
+
+  // Calculate GST / tax after discount on the discounted taxable base
+  let taxAmount = 0;
+  if (cleanSubtotal > 0 && discountedBase > 0) {
+    for (const it of validItems) {
+      const itemDiscountedBase = it.lineTotal * (discountedBase / cleanSubtotal);
+      const lineTax = (itemDiscountedBase * it.taxPct) / 100;
+      taxAmount += lineTax;
+    }
+  }
+
+  const cleanTax = Math.round(taxAmount * 100) / 100;
+  const rawTotal = Math.max(0, Math.round((discountedBase + cleanTax) * 100) / 100);
 
   return {
     subtotal: cleanSubtotal,

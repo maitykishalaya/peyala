@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import { ordersApi, Order, KdsPrepNextItem, OrderItem, KdsPrepTableEntry } from '@/lib/pos-api';
 import { formatCurrency, cn, isBeverageItem } from '@/lib/utils';
+import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { playTwoBlinkAlertSound, broadcastKdsReady } from '@/lib/audio-alerts';
 import Link from 'next/link';
@@ -69,7 +70,7 @@ const playKitchenChime = () => {
 };
 
 export default function KitchenDisplayPage() {
-  const [activeTab, setActiveTab] = useState<'prep_next' | 'tickets' | 'history'>('prep_next');
+  const [activeTab, setActiveTab] = useState<'prep_next' | 'categories' | 'tickets' | 'history'>('prep_next');
   const [orders, setOrders] = useState<Order[]>([]);
   const [prepNext, setPrepNext] = useState<KdsPrepNextItem[]>([]);
   const [fulfilledHistory, setFulfilledHistory] = useState<Order[]>([]);
@@ -263,15 +264,21 @@ export default function KitchenDisplayPage() {
     return () => clearInterval(interval);
   }, [loadKdsData]);
 
-  // Handle marking an individual item status in ticket view
-  const handleUpdateItemStatus = async (orderId: string, itemId: string, currentStatus: string) => {
+  // Handle marking an individual item status in ticket or category view
+  const handleUpdateItemStatus = async (
+    orderId: string,
+    itemId: string,
+    currentStatus: string,
+    explicitTargetStatus?: 'pending' | 'preparing' | 'served'
+  ) => {
     try {
       const nextStatus =
-        currentStatus === 'pending'
+        explicitTargetStatus ||
+        (currentStatus === 'pending'
           ? 'preparing'
           : currentStatus === 'preparing'
           ? 'served'
-          : 'pending';
+          : 'pending');
 
       setActionLoading(`${orderId}-${itemId}`);
       await ordersApi.updateKdsItemStatus(orderId, itemId, nextStatus);
@@ -509,6 +516,66 @@ export default function KitchenDisplayPage() {
     return Math.floor(diffMs / (1000 * 60));
   };
 
+  // Helper to extract addon names cleanly from item
+  const getItemAddons = (item: any): string[] => {
+    if (Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0) {
+      return item.selectedAddons
+        .map((a: any) => (typeof a === 'string' ? a : a?.name || ''))
+        .filter(Boolean);
+    }
+    if (Array.isArray(item.addons) && item.addons.length > 0) {
+      return item.addons
+        .map((a: any) => (typeof a === 'string' ? a : a?.name || ''))
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  // Helper to get the exact punch time for an item (supporting Round 2, 3, etc.)
+  const getItemPunchTime = (order: Order, item: OrderItem): Date => {
+    if (item.roundNumber && order.kotRounds && order.kotRounds.length > 0) {
+      const matchedRound = order.kotRounds.find((r) => r.roundNumber === item.roundNumber);
+      if (matchedRound?.createdAt) return new Date(matchedRound.createdAt);
+    }
+    if (item.createdAt) return new Date(item.createdAt);
+    if (item.effectiveTime) return new Date(item.effectiveTime);
+    return new Date(order.createdAt);
+  };
+
+  // Helper to get active ticket punch time and round info for header display
+  const getTicketActiveInfo = (order: Order) => {
+    const activeItems = (order.items || []).filter((i) => i.status !== 'cancelled');
+    const unserved = activeItems.filter((i) => i.status === 'pending' || i.status === 'preparing');
+
+    if (unserved.length > 0) {
+      // Find the active unserved round (minimum unserved round number)
+      const unservedRoundNums = unserved.map((i) => i.roundNumber || 1);
+      const minRound = Math.min(...unservedRoundNums);
+      const matchedRound = order.kotRounds?.find((r) => r.roundNumber === minRound);
+
+      const roundPunchTime = matchedRound?.createdAt
+        ? new Date(matchedRound.createdAt)
+        : unserved.reduce((oldest, it) => {
+            const t = getItemPunchTime(order, it);
+            return t.getTime() < oldest.getTime() ? t : oldest;
+          }, getItemPunchTime(order, unserved[0]));
+
+      const roundTag = matchedRound?.roundTag || (minRound > 1 ? `[ROUND ${minRound} - ADD-ON]` : '[INITIAL ORDER]');
+      return { punchTime: roundPunchTime, roundNumber: minRound, roundTag, hasUnserved: true };
+    }
+
+    const latestRound = order.kotRounds && order.kotRounds.length > 0
+      ? order.kotRounds[order.kotRounds.length - 1]
+      : null;
+    const roundPunchTime = latestRound?.createdAt
+      ? new Date(latestRound.createdAt)
+      : new Date(order.foodServedAt || order.effectiveActiveTime || order.createdAt);
+    const roundTag = latestRound?.roundTag || (order.kotRounds && order.kotRounds.length > 1 ? `Round ${order.kotRounds.length}` : 'Round 1');
+    const roundNumber = latestRound?.roundNumber || (order.kotRounds ? order.kotRounds.length : 1);
+
+    return { punchTime: roundPunchTime, roundNumber, roundTag, hasUnserved: false };
+  };
+
   // Color urgency helper
   const getUrgencyColor = (minutes: number) => {
     if (minutes < 10) {
@@ -546,8 +613,7 @@ export default function KitchenDisplayPage() {
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter((i) => i.name.toLowerCase().includes(q) || (i.variantName && i.variantName.toLowerCase().includes(q)));
+      items = items.filter((i) => matchesSearch([i.name, i.variantName], searchQuery));
     }
 
     if (prepSort === 'oldest') {
@@ -572,11 +638,10 @@ export default function KitchenDisplayPage() {
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
       list = list.filter((o) => {
-        const tNum = typeof o.table === 'object' ? o.table.tableNumber : '';
-        const hasItem = (o.items || []).some((it) => it.name.toLowerCase().includes(q));
-        return tNum.toLowerCase().includes(q) || hasItem || String(o.orderNumber || '').includes(q);
+        const tNum = typeof o.table === 'object' && o.table !== null ? o.table.tableNumber : '';
+        const itemNames = (o.items || []).map((it) => it.name);
+        return matchesSearch([tNum, String(o.orderNumber || ''), String(o.billNumber || ''), ...itemNames], searchQuery);
       });
     }
 
@@ -596,6 +661,101 @@ export default function KitchenDisplayPage() {
     return list;
   }, [orders, stationFilter, searchQuery]);
 
+  interface CategoryItemEntry {
+    orderId: string;
+    itemId: string;
+    orderNumber?: number;
+    tableNumber: string;
+    name: string;
+    quantity: number;
+    variantName?: string;
+    addons: string[];
+    notes?: string;
+    roundNumber?: number;
+    status: 'pending' | 'preparing' | 'served';
+    punchTime: Date;
+    isVeg: boolean;
+    isBeverage: boolean;
+  }
+
+  interface CategoryGroup {
+    categoryName: string;
+    oldestPunchTime: Date;
+    totalQuantity: number;
+    items: CategoryItemEntry[];
+  }
+
+  // Category-wise grouped queue:
+  // - Columns ordered LEFT TO RIGHT by oldest waiting category (earliest punch time)
+  // - Items inside category ordered TOP TO DOWN by punch time (oldest item first)
+  const categoryGroups = useMemo<CategoryGroup[]>(() => {
+    const map = new Map<string, CategoryItemEntry[]>();
+
+    for (const order of filteredOrders) {
+      const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+
+      for (const item of (order.items || [])) {
+        if (!item._id || item.status === 'cancelled' || item.status === 'served') continue;
+
+        // Group by item's category
+        const cat = (item.menuItem as any)?.category || (item as any)?.category;
+        const rawCatName = typeof cat === 'object' && cat !== null ? cat.name : cat;
+        const categoryName = (typeof rawCatName === 'string' && rawCatName.trim()) ? rawCatName.trim() : 'General';
+
+        const punchTime = getItemPunchTime(order, item);
+        const addons = getItemAddons(item);
+        const isVeg = typeof item.menuItem === 'object' && item.menuItem !== null ? Boolean((item.menuItem as any).isVeg) : false;
+        const isBev = isBeverageItem(item);
+
+        const entry: CategoryItemEntry = {
+          orderId: order._id,
+          itemId: item._id,
+          orderNumber: order.orderNumber,
+          tableNumber,
+          name: item.name,
+          quantity: item.quantity,
+          variantName: item.variant?.name,
+          addons,
+          notes: item.notes,
+          roundNumber: item.roundNumber || 1,
+          status: item.status as any,
+          punchTime,
+          isVeg,
+          isBeverage: isBev,
+        };
+
+        const existing = map.get(categoryName);
+        if (existing) {
+          existing.push(entry);
+        } else {
+          map.set(categoryName, [entry]);
+        }
+      }
+    }
+
+    const groups: CategoryGroup[] = [];
+
+    map.forEach((items, categoryName) => {
+      // Sort items inside category TOP TO DOWN by punch time (oldest punched item at top)
+      items.sort((a, b) => a.punchTime.getTime() - b.punchTime.getTime());
+
+      const oldestPunchTime = items.length > 0 ? items[0].punchTime : new Date();
+      const totalQuantity = items.reduce((sum, it) => sum + it.quantity, 0);
+
+      groups.push({
+        categoryName,
+        oldestPunchTime,
+        totalQuantity,
+        items,
+      });
+    });
+
+    // Sort categories LEFT TO RIGHT by oldest waiting category (oldest waiting category leftmost)
+    groups.sort((a, b) => a.oldestPunchTime.getTime() - b.oldestPunchTime.getTime());
+
+    return groups;
+  }, [filteredOrders]);
+
   // Filtered fulfilled orders (served but unbilled)
   const filteredFulfilled = useMemo(() => {
     let list = [...fulfilledHistory];
@@ -609,11 +769,10 @@ export default function KitchenDisplayPage() {
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
       list = list.filter((o) => {
-        const tNum = typeof o.table === 'object' ? o.table.tableNumber : '';
-        const hasItem = (o.items || []).some((it) => it.name.toLowerCase().includes(q));
-        return tNum.toLowerCase().includes(q) || hasItem || String(o.orderNumber || '').includes(q);
+        const tNum = typeof o.table === 'object' && o.table !== null ? o.table.tableNumber : '';
+        const itemNames = (o.items || []).map((it) => it.name);
+        return matchesSearch([tNum, String(o.orderNumber || ''), String(o.billNumber || ''), ...itemNames], searchQuery);
       });
     }
 
@@ -794,7 +953,7 @@ export default function KitchenDisplayPage() {
         {/* VIEW SELECTOR TABS & STATION FILTERS */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-gray-900 p-2.5 rounded-2xl border border-gray-200 dark:border-gray-800">
-          {/* Main 3 View Tabs */}
+          {/* Main 4 View Tabs */}
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
             <button
               type="button"
@@ -815,6 +974,23 @@ export default function KitchenDisplayPage() {
 
             <button
               type="button"
+              onClick={() => setActiveTab('categories')}
+              className={cn(
+                'px-3.5 py-1.5 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all cursor-pointer',
+                activeTab === 'categories'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              )}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Category View</span>
+              <span className="bg-white/20 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full ml-0.5">
+                {categoryGroups.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('tickets')}
               className={cn(
                 'px-3.5 py-1.5 text-xs font-black rounded-lg flex items-center gap-1.5 transition-all cursor-pointer',
@@ -823,7 +999,7 @@ export default function KitchenDisplayPage() {
                   : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               )}
             >
-              <Layers className="w-3.5 h-3.5" />
+              <ChefHat className="w-3.5 h-3.5" />
               <span>KOT Tickets</span>
               <span className="bg-white/20 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full ml-0.5">
                 {filteredOrders.length}
@@ -1040,6 +1216,18 @@ export default function KitchenDisplayPage() {
                                         Prep
                                       </span>
                                     )}
+                                    {t.addons && t.addons.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 items-center">
+                                        {t.addons.map((addon, aIdx) => (
+                                          <span
+                                            key={aIdx}
+                                            className="text-[10px] font-black px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 shadow-2xs"
+                                          >
+                                            +{addon}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
                                     {t.notes && (
                                       <span
                                         className="text-[10px] text-amber-700 dark:text-amber-300 font-bold truncate max-w-[120px]"
@@ -1104,7 +1292,227 @@ export default function KitchenDisplayPage() {
         )}
 
         {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* TAB 2: KOT TICKETS (INDIVIDUAL ORDER CARDS) */}
+        {/* TAB 2: CATEGORY-WISE VIEW (LEFT-TO-RIGHT & TOP-TO-DOWN PRIORITY) */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {activeTab === 'categories' && (
+          <div>
+            {loading ? (
+              <div className="py-24 text-center text-gray-400 flex flex-col items-center gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-red-600" />
+                <span className="text-sm font-bold">Loading Category Queue...</span>
+              </div>
+            ) : categoryGroups.length === 0 ? (
+              <div className="py-20 text-center bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8 shadow-xs">
+                <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <h3 className="font-black text-lg text-gray-900 dark:text-white">
+                  All Caught Up! No Dishes Pending
+                </h3>
+                <p className="text-sm text-gray-500 mt-1 max-w-sm mx-auto">
+                  All category queues are clean. Newly punched items will appear here automatically grouped by category.
+                </p>
+              </div>
+            ) : (
+              <div className="flex gap-3.5 overflow-x-auto pb-4 items-start select-none">
+                {categoryGroups.map((group) => {
+                  const categoryElapsedMins = getElapsedMinutes(group.oldestPunchTime);
+                  const catUrgency = getUrgencyColor(categoryElapsedMins);
+
+                  return (
+                    <div
+                      key={group.categoryName}
+                      className="min-w-[320px] max-w-[360px] w-[340px] shrink-0 bg-white dark:bg-gray-900 rounded-2xl border-2 border-gray-200 dark:border-gray-800 shadow-sm flex flex-col overflow-hidden"
+                    >
+                      {/* Column Header: Category Name, Wait Priority & Count */}
+                      <div
+                        className={cn(
+                          'p-3.5 border-b flex items-center justify-between gap-2',
+                          catUrgency.bg
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <Utensils className="w-4 h-4 shrink-0 text-gray-700 dark:text-gray-300" />
+                            <h3 className="font-black text-base truncate text-gray-900 dark:text-white uppercase tracking-tight">
+                              {group.categoryName}
+                            </h3>
+                          </div>
+                          <p className="text-[11px] font-bold text-gray-600 dark:text-gray-400 mt-0.5">
+                            {group.items.length} item{group.items.length !== 1 ? 's' : ''} • {group.totalQuantity} total qty
+                          </p>
+                        </div>
+
+                        <span
+                          className={cn(
+                            'text-[10px] font-black uppercase px-2.5 py-1 rounded-full shrink-0 shadow-2xs',
+                            catUrgency.badge
+                          )}
+                        >
+                          {categoryElapsedMins}m wait
+                        </span>
+                      </div>
+
+                      {/* Items Inside Category: TOP TO DOWN BY PUNCH TIME */}
+                      <div className="p-2.5 space-y-2.5 max-h-[calc(100vh-250px)] overflow-y-auto">
+                        {group.items.map((it, itIdx) => {
+                          const itemElapsedMins = getElapsedMinutes(it.punchTime);
+                          const itemUrgency = getUrgencyColor(itemElapsedMins);
+                          const itemActionKey = `${it.orderId}-${it.itemId}`;
+                          const isItemLoading = actionLoading === itemActionKey;
+                          const isCooking = it.status === 'preparing';
+
+                          return (
+                            <div
+                              key={`${it.orderId}-${it.itemId}-${itIdx}`}
+                              className={cn(
+                                'p-3 rounded-xl border-2 transition-all flex flex-col justify-between gap-2 shadow-2xs bg-gray-50/70 dark:bg-gray-800/60 hover:border-gray-300 dark:hover:border-gray-600',
+                                isCooking
+                                  ? 'border-blue-400/80 bg-blue-50/40 dark:bg-blue-950/20'
+                                  : itemUrgency.border
+                              )}
+                            >
+                              {/* Item Top: Table #, Token, Round, Wait Timer */}
+                              <div className="flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-gray-200/60 dark:border-gray-700/60">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-black text-gray-900 dark:text-white px-2 py-0.5 rounded-md bg-white dark:bg-gray-700 shadow-2xs border border-gray-200 dark:border-gray-600">
+                                    {it.tableNumber.startsWith('Table') ? it.tableNumber : `Table ${it.tableNumber}`}
+                                  </span>
+                                  {it.orderNumber && (
+                                    <span className="text-[10px] font-bold text-gray-400">
+                                      #{it.orderNumber}
+                                    </span>
+                                  )}
+                                  {it.roundNumber && it.roundNumber > 1 && (
+                                    <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded-md bg-amber-500 text-white shadow-2xs">
+                                      Round {it.roundNumber}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-gray-400">
+                                    {it.punchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'text-[10px] font-black uppercase px-2 py-0.5 rounded-full shadow-2xs',
+                                      itemUrgency.badge
+                                    )}
+                                  >
+                                    {itemElapsedMins}m
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Item Dish Details */}
+                              <div>
+                                <div className="flex items-start gap-2">
+                                  <span className="text-lg font-black px-2 py-0.5 rounded-lg bg-red-600 text-white shadow-2xs shrink-0 leading-none mt-0.5">
+                                    ×{it.quantity}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span
+                                        className={cn(
+                                          'w-2 h-2 rounded-full shrink-0',
+                                          it.isVeg ? 'bg-emerald-500' : 'bg-red-500'
+                                        )}
+                                      />
+                                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white leading-tight">
+                                        {it.name}
+                                      </h4>
+                                    </div>
+                                    {it.variantName && (
+                                      <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+                                        Portion: {it.variantName}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* High-visibility Addon Badges */}
+                                {it.addons && it.addons.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {it.addons.map((addon, aIdx) => (
+                                      <span
+                                        key={aIdx}
+                                        className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 shadow-2xs"
+                                      >
+                                        <span className="text-emerald-600 font-extrabold">+</span>
+                                        {addon}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Special Notes */}
+                                {it.notes && (
+                                  <div className="mt-1.5 p-1.5 bg-amber-50 dark:bg-amber-950/40 rounded-md border border-amber-200 dark:border-amber-900 text-xs text-amber-900 dark:text-amber-200 font-bold flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                    <span className="truncate">{it.notes}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Item Action Row */}
+                              <div className="mt-1 pt-2 border-t border-gray-200/60 dark:border-gray-700/60 flex items-center justify-between gap-2">
+                                <span
+                                  className={cn(
+                                    'text-[10px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-1',
+                                    isCooking
+                                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  )}
+                                >
+                                  {isCooking && <Flame className="w-2.5 h-2.5 animate-pulse" />}
+                                  {it.status}
+                                </span>
+
+                                <div className="flex items-center gap-1.5">
+                                  {it.status === 'pending' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItemStatus(it.orderId, it.itemId, it.status, 'preparing')}
+                                      disabled={isItemLoading}
+                                      className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                                      title="Mark as cooking/preparing"
+                                    >
+                                      <Flame className="w-3 h-3 text-blue-600" />
+                                      <span>Prep</span>
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateItemStatus(it.orderId, it.itemId, it.status, 'served')}
+                                    disabled={isItemLoading}
+                                    className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-black flex items-center gap-1 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                                    title="Mark item ready & notify server/cashier"
+                                  >
+                                    {isItemLoading ? (
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-3 h-3" />
+                                    )}
+                                    <span>Ready ✓</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* TAB 3: KOT TICKETS (INDIVIDUAL ORDER CARDS) */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeTab === 'tickets' && (
           <div>
@@ -1129,13 +1537,10 @@ export default function KitchenDisplayPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filteredOrders.map((order) => {
                   const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
-                  const ticketEffectiveTime = order.effectiveActiveTime || order.createdAt;
-                  const elapsedMins = getElapsedMinutes(ticketEffectiveTime);
+                  const activeInfo = getTicketActiveInfo(order);
+                  const elapsedMins = getElapsedMinutes(activeInfo.punchTime);
                   const urgency = getUrgencyColor(elapsedMins);
-                  const latestRound = order.kotRounds && order.kotRounds.length > 0
-                    ? order.kotRounds[order.kotRounds.length - 1]
-                    : null;
-                  const roundTag = latestRound?.roundTag || (order.kotRounds && order.kotRounds.length > 1 ? `Round ${order.kotRounds.length}` : 'Round 1');
+                  const roundTag = activeInfo.roundTag;
                   const activeItems = (order.items || []).filter((i) => i.status !== 'cancelled');
                   // Food items first, beverage section items appear after food items
                   const sortedActiveItems = [...activeItems].sort((a, b) => {
@@ -1168,9 +1573,9 @@ export default function KitchenDisplayPage() {
                               <h3 className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight">
                                 Table {tableNumber}
                               </h3>
-                              {order.kotRounds && order.kotRounds.length > 1 && (
+                              {activeInfo.roundNumber > 1 && (
                                 <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded-lg bg-amber-500 text-white shadow-2xs animate-pulse">
-                                  Round {order.kotRounds.length}
+                                  Round {activeInfo.roundNumber}
                                 </span>
                               )}
                             </div>
@@ -1191,10 +1596,10 @@ export default function KitchenDisplayPage() {
                           </div>
                         </div>
 
-                        {/* Waiter Name & Order Time */}
+                        {/* Waiter Name & Order Punch Time */}
                         <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 py-1.5">
                           <span>Waiter: {order.createdBy?.name || 'Staff'}</span>
-                          <span>{new Date(ticketEffectiveTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span>{activeInfo.punchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
 
                         {/* Items Checklist */}
@@ -1203,6 +1608,9 @@ export default function KitchenDisplayPage() {
                             const isItemDone = item.status === 'served';
                             const isItemCooking = item.status === 'preparing';
                             const isBev = isBeverageItem(item);
+                            const itemPunchTime = getItemPunchTime(order, item);
+                            const itemElapsedMins = getElapsedMinutes(itemPunchTime);
+                            const itemAddons = getItemAddons(item);
 
                             return (
                               <div
@@ -1233,10 +1641,18 @@ export default function KitchenDisplayPage() {
                                         {item.variant.name}
                                       </p>
                                     )}
-                                    {item.selectedAddons && item.selectedAddons.length > 0 && (
-                                      <p className="text-xs text-gray-500">
-                                        +{item.selectedAddons.map((a) => a.name).join(', ')}
-                                      </p>
+                                    {itemAddons.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {itemAddons.map((addon, aIdx) => (
+                                          <span
+                                            key={aIdx}
+                                            className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 shadow-2xs"
+                                          >
+                                            <span className="text-emerald-600 font-extrabold">+</span>
+                                            {addon}
+                                          </span>
+                                        ))}
+                                      </div>
                                     )}
                                     {item.notes && (
                                       <p className="text-xs font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded mt-0.5">
@@ -1249,6 +1665,9 @@ export default function KitchenDisplayPage() {
                                           Round {item.roundNumber}
                                         </span>
                                       )}
+                                      <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                                        {itemElapsedMins}m wait
+                                      </span>
                                       {isBev && (
                                         <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded inline-block border border-blue-200 dark:border-blue-900">
                                           Beverage

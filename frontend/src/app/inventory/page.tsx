@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
 import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
+import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw, Clock, Calendar, Receipt, Store } from 'lucide-react';
@@ -228,7 +229,7 @@ export default function InventoryPage() {
 
   // Group by category — filtered by search text first
   const searchedItems = search.trim()
-    ? items.filter(i => i.name?.toLowerCase().includes(search.trim().toLowerCase()))
+    ? items.filter(i => matchesSearch([i.name, i.category?.name, i.preferredSupplier?.name], search))
     : items;
   const grouped = categories.reduce((acc: any, cat: any) => {
     acc[cat._id] = { cat, items: searchedItems.filter(i => i.category?._id === cat._id) };
@@ -481,8 +482,7 @@ export default function InventoryPage() {
             (() => {
               const filtered = logsSearch.trim()
                 ? logs.filter((entry: any) =>
-                    entry.description?.toLowerCase().includes(logsSearch.trim().toLowerCase()) ||
-                    entry.userName?.toLowerCase().includes(logsSearch.trim().toLowerCase())
+                    matchesSearch([entry.description, entry.userName], logsSearch)
                   )
                 : logs;
               if (filtered.length === 0) {

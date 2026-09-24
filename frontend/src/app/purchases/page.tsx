@@ -26,6 +26,7 @@ import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, UNITS, cn } from '@/lib/utils';
+import { matchesSearch, sortBySearchRelevance, isExactMatch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, Search, AlertCircle, RefreshCw } from 'lucide-react';
@@ -76,12 +77,16 @@ function ItemSearchCell({
   const selectedItem = items.find(i => i._id === value);
 
   // Filter items by search query
-  const filtered = query.length > 0
-    ? items.filter(i => i.name.toLowerCase().includes(query.toLowerCase()))
+  const filtered = query.trim().length > 0
+    ? sortBySearchRelevance(
+        items.filter(i => matchesSearch([i.name, i.category?.name], query)),
+        query,
+        i => [i.name, i.category?.name]
+      )
     : items.slice(0, 10); // show first 10 when no query
 
   // Check if query exactly matches any item
-  const exactMatch = items.some(i => i.name.toLowerCase() === query.toLowerCase());
+  const exactMatch = items.some(i => isExactMatch(i.name, query));
 
   // Close dropdown when clicking outside
   useEffect(() => {

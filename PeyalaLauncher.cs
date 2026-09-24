@@ -35,43 +35,70 @@ namespace PeyalaPOS
                 Environment.SetEnvironmentVariable("PATH", portableNodeDir + ";" + pathEnv);
             }
 
-            // Find Chrome or Edge
-            LocateBrowser();
-
-            // Setup System Tray
-            InitializeTray();
-
-            // Free previous ports 3000 & 4000
-            FreePort(3000);
-            FreePort(4000);
-
-            // Start backend and frontend
-            StartServers();
-
-            // Wait for local server to be ready in background thread
-            Thread waitThread = new Thread(() =>
+            try
             {
-                bool isReady = WaitForServer(3000, 60);
-                if (isReady)
-                {
-                    Thread.Sleep(1500); // settle
-                    LaunchBrowser(args.Length > 0 && args[0].ToLower() == "--windowed");
-                }
-                else
-                {
-                    MessageBox.Show(
-                        "Peyala local server took too long to respond on port 3000.\nCheck if Node.js is installed or start manually with start-local-kiosk.bat.",
-                        "Peyala POS Warning",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning
-                    );
-                }
-            });
-            waitThread.IsBackground = true;
-            waitThread.Start();
+                // Find Chrome or Edge
+                LocateBrowser();
 
-            // Keep application running in background for tray icon
-            Application.Run();
+                // Setup System Tray
+                InitializeTray();
+
+                // Check if dedicated Electron desktop application is available
+                string electronExe = Path.Combine(appDir, "desktop", "node_modules", "electron", "dist", "electron.exe");
+                string desktopDir = Path.Combine(appDir, "desktop");
+                if (File.Exists(electronExe) && Directory.Exists(desktopDir))
+                {
+                    try
+                    {
+                        ProcessStartInfo eInfo = new ProcessStartInfo(electronExe, string.Format("\"{0}\"", desktopDir))
+                        {
+                            WorkingDirectory = desktopDir,
+                            UseShellExecute = false
+                        };
+                        browserProcess = Process.Start(eInfo);
+                        Application.Run();
+                        return;
+                    }
+                    catch { }
+                }
+
+                // Fallback: Standalone Web/Kiosk mode (Chrome or Edge)
+                if (!IsPortListening(3000) || !IsPortListening(4000))
+                {
+                    FreePort(3000);
+                    FreePort(4000);
+                    StartServers();
+                }
+
+                // Wait for local server to be ready in background thread
+                Thread waitThread = new Thread(() =>
+                {
+                    bool isReady = WaitForServer(3000, 60);
+                    if (isReady)
+                    {
+                        Thread.Sleep(1000); // settle
+                        LaunchBrowser(args.Length > 0 && args[0].ToLower() == "--windowed");
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            "Peyala local server took too long to respond on port 3000.\nCheck if Node.js is installed or start manually with start-local-kiosk.bat.",
+                            "Peyala POS Warning",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning
+                        );
+                    }
+                });
+                waitThread.IsBackground = true;
+                waitThread.Start();
+
+                // Keep application running in background for tray icon
+                Application.Run();
+            }
+            catch (Exception ex)
+            {
+                File.WriteAllText(Path.Combine(appDir, "launcher_crash.log"), ex.ToString());
+            }
         }
 
         private static void LocateBrowser()
@@ -119,13 +146,13 @@ namespace PeyalaPOS
             menu.MenuItems.Add(header);
             menu.MenuItems.Add(new MenuItem("-"));
 
-            MenuItem openKiosk = new MenuItem("Open in Kiosk Mode", (s, e) => LaunchBrowser(false));
-            MenuItem openWindowed = new MenuItem("Open in Windowed Mode", (s, e) => LaunchBrowser(true));
+            MenuItem openStation = new MenuItem("Open Peyala POS Station", (s, e) => LaunchApp(false));
+            MenuItem openBrowser = new MenuItem("Open in Web Browser", (s, e) => Process.Start("http://localhost:3000/login"));
             MenuItem restart = new MenuItem("Restart Local Servers", (s, e) => RestartServers());
             MenuItem exit = new MenuItem("Stop Servers & Exit", (s, e) => ExitApplication());
 
-            menu.MenuItems.Add(openKiosk);
-            menu.MenuItems.Add(openWindowed);
+            menu.MenuItems.Add(openStation);
+            menu.MenuItems.Add(openBrowser);
             menu.MenuItems.Add(new MenuItem("-"));
             menu.MenuItems.Add(restart);
             menu.MenuItems.Add(exit);
@@ -144,35 +171,30 @@ namespace PeyalaPOS
             trayIcon.ContextMenu = menu;
             trayIcon.Visible = true;
 
-            trayIcon.DoubleClick += (s, e) => LaunchBrowser(false);
+            trayIcon.DoubleClick += (s, e) => LaunchApp(false);
+        }
+
+        private static string GetNodePath()
+        {
+            string portable = Path.Combine(portableNodeDir, "node.exe");
+            if (File.Exists(portable)) return portable;
+            string sys64 = @"C:\Program Files\nodejs\node.exe";
+            if (File.Exists(sys64)) return sys64;
+            return "node.exe";
         }
 
         private static void StartServers()
         {
             try
             {
+                string nodeExe = GetNodePath();
                 string backendDir = Path.Combine(appDir, "backend");
                 string frontendDir = Path.Combine(appDir, "frontend");
-                string buildIdPath = Path.Combine(frontendDir, ".next", "BUILD_ID");
+                string backendScript = Path.Combine(backendDir, "src", "server.js");
+                string nextCli = Path.Combine(frontendDir, "node_modules", "next", "dist", "bin", "next");
 
-                // Ensure frontend production build exists
-                if (!File.Exists(buildIdPath))
-                {
-                    ProcessStartInfo buildInfo = new ProcessStartInfo("cmd.exe", "/c npm run build")
-                    {
-                        WorkingDirectory = frontendDir,
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    using (Process bp = Process.Start(buildInfo))
-                    {
-                        bp.WaitForExit();
-                    }
-                }
-
-                // Start Backend (Production)
-                ProcessStartInfo bInfo = new ProcessStartInfo("cmd.exe", "/c npm start")
+                // Start Backend
+                ProcessStartInfo bInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\"", backendScript))
                 {
                     WorkingDirectory = backendDir,
                     CreateNoWindow = true,
@@ -181,8 +203,8 @@ namespace PeyalaPOS
                 };
                 backendProcess = Process.Start(bInfo);
 
-                // Start Frontend (Production - Instant Route Loading)
-                ProcessStartInfo fInfo = new ProcessStartInfo("cmd.exe", "/c npm start")
+                // Start Frontend
+                ProcessStartInfo fInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\" start -p 3000", nextCli))
                 {
                     WorkingDirectory = frontendDir,
                     CreateNoWindow = true,
@@ -249,14 +271,58 @@ namespace PeyalaPOS
             {
                 ProcessStartInfo info = new ProcessStartInfo(browserPath, flags)
                 {
-                    UseShellExecute = false
+                    UseShellExecute = true
                 };
                 browserProcess = Process.Start(info);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to launch browser: " + ex.Message);
+                Process.Start(url);
             }
+        }
+
+        private static bool IsPortListening(int port)
+        {
+            try
+            {
+                using (TcpClient client = new TcpClient())
+                {
+                    IAsyncResult ar = client.BeginConnect("127.0.0.1", port, null, null);
+                    bool success = ar.AsyncWaitHandle.WaitOne(800);
+                    if (success)
+                    {
+                        client.EndConnect(ar);
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static bool LaunchApp(bool windowed)
+        {
+            // 1. Try launching dedicated native Electron Desktop App
+            string electronExe = Path.Combine(appDir, "desktop", "node_modules", "electron", "dist", "electron.exe");
+            string desktopDir = Path.Combine(appDir, "desktop");
+            if (File.Exists(electronExe) && Directory.Exists(desktopDir))
+            {
+                try
+                {
+                    ProcessStartInfo eInfo = new ProcessStartInfo(electronExe, string.Format("\"{0}\"", desktopDir))
+                    {
+                        WorkingDirectory = desktopDir,
+                        UseShellExecute = false
+                    };
+                    browserProcess = Process.Start(eInfo);
+                    return true;
+                }
+                catch { }
+            }
+
+            // 2. Fall back to Google Chrome or Microsoft Edge Kiosk
+            LaunchBrowser(windowed);
+            return false;
         }
 
         private static void RestartServers()

@@ -13,6 +13,7 @@ const SalesAnalyticsConfig = require('../models/SalesAnalyticsConfig');
 const { auth, managerOrAdmin } = require('../middleware/auth');
 const { getIstDayRange, getIstFiscalQuarter } = require('../utils/date');
 const { evaluateSalesSuggestions } = require('../utils/salesSuggestionEngine');
+const { matchesSearch } = require('../utils/search');
 
 router.use(auth);
 
@@ -841,8 +842,7 @@ router.get('/items', async (req, res) => {
 
     // Filter by Search Query
     if (search && String(search).trim()) {
-      const q = String(search).toLowerCase().trim();
-      items = items.filter((it) => it.name.toLowerCase().includes(q) || it.category.toLowerCase().includes(q));
+      items = items.filter((it) => matchesSearch([it.name, it.category], search));
     }
 
     // Sort items
@@ -1074,8 +1074,10 @@ router.get('/gst', async (req, res) => {
       const paidDate = o.paidAt || o.createdAt;
       const dateStr = getIstDayRange(paidDate).istDateStr;
       const orderSubtotal = Number(o.subtotal) || 0;
+      const orderDiscount = Number(o.discount) || 0;
       const orderTax = Number(o.taxAmount) || 0;
       const orderTotal = Number(o.settledAmount ?? o.total) || 0;
+      const orderTaxable = Math.max(0, orderSubtotal - orderDiscount);
 
       // Determine invoice / bill number (prefers quarterly billNumber, fallbacks to orderNumber)
       const invoiceNum = o.billNumber != null ? o.billNumber : (o.orderNumber != null ? o.orderNumber : null);
@@ -1086,7 +1088,7 @@ router.get('/gst', async (req, res) => {
       }
 
       grossSalesTotal += orderSubtotal + orderTax;
-      taxableSalesTotal += orderSubtotal;
+      taxableSalesTotal += orderTaxable;
       totalGst += orderTax;
       totalInvoiceValue += orderTotal;
 
@@ -1110,7 +1112,7 @@ router.get('/gst', async (req, res) => {
         });
       }
       const dayRow = dailyGstMap.get(dateStr);
-      dayRow.taxableSales += orderSubtotal;
+      dayRow.taxableSales += orderTaxable;
       dayRow.cgst += orderCgst;
       dayRow.sgst += orderSgst;
       dayRow.totalGst += orderTax;
@@ -1126,12 +1128,14 @@ router.get('/gst', async (req, res) => {
         }
       }
 
-      // Item level breakdown
+      // Item level breakdown (proportional discount applied to each line item)
+      const orderDiscPct = orderSubtotal > 0 ? orderDiscount / orderSubtotal : 0;
       o.items?.forEach((it) => {
         if (it.status === 'cancelled') return;
         const qty = Number(it.quantity) || 1;
         const price = Number(it.price) || 0;
-        const lineTaxable = qty * price;
+        const lineBase = qty * price;
+        const lineTaxable = Math.round(Math.max(0, lineBase * (1 - orderDiscPct)) * 100) / 100;
         const rate = Number(it.taxPercent) || 5;
         const lineGst = Math.round(((lineTaxable * rate) / 100) * 100) / 100;
         const lineCgst = Math.round((lineGst / 2) * 100) / 100;
@@ -1185,7 +1189,7 @@ router.get('/gst', async (req, res) => {
       });
 
       // Discrepancy check: expected tax vs recorded tax
-      const expectedTax = Math.round(((orderSubtotal * 0.05) * 100) / 100);
+      const expectedTax = Math.round(((orderTaxable * 0.05) * 100) / 100);
       if (Math.abs(expectedTax - orderTax) > 1) {
         discrepancies.push({
           orderId: o._id,

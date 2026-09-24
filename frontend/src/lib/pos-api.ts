@@ -444,6 +444,7 @@ export interface KdsPrepTableEntry {
   quantity: number;
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
   notes?: string;
+  addons?: string[];
   createdAt: string;
   orderedAt?: string;
   effectiveTime?: string;

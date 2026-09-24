@@ -31,20 +31,21 @@
         android:progressDrawable="@android:drawable/progress_horizontal"
         android:visibility="gone" />
 
-    <!-- Sleek In-App Server Settings Button (Discreet in top-right) -->
+    <!-- Sleek In-App Server Settings Button (Always accessible floating in top-right) -->
     <ImageButton
         android:id="@+id/btnSettings"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_alignParentTop="true"
         android:layout_alignParentEnd="true"
         android:layout_margin="12dp"
-        android:background="@android:color/transparent"
+        android:background="@drawable/btn_settings_bg"
         android:contentDescription="@string/server_settings"
-        android:padding="10dp"
+        android:elevation="6dp"
+        android:padding="11dp"
         android:src="@android:drawable/ic_menu_manage"
-        android:tint="#8094a3b8"
-        android:visibility="gone" />
+        android:tint="#f8fafc"
+        android:visibility="visible" />
 
     <!-- Enterprise Fallback / Connection Manager Panel -->
     <LinearLayout

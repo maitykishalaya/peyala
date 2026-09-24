@@ -46,18 +46,18 @@ interface Slide {
   metrics: { label: string; value: string; trend?: string }[];
   highlights: string[];
   mockupType:
-    | 'pos'
-    | 'pos-engine'
-    | 'kds'
-    | 'leak'
-    | 'wastage'
-    | 'pnl'
-    | 'attendance'
-    | 'inventory'
-    | 'treasury'
-    | 'printing'
-    | 'security'
-    | 'overview';
+  | 'pos'
+  | 'pos-engine'
+  | 'kds'
+  | 'leak'
+  | 'wastage'
+  | 'pnl'
+  | 'attendance'
+  | 'inventory'
+  | 'treasury'
+  | 'printing'
+  | 'security'
+  | 'overview';
 }
 
 const PITCH_SLIDES: Slide[] = [
@@ -838,18 +838,16 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => setActiveTab('features')}
-            className={`px-3 py-1.5 rounded-md transition-all ${
-              activeTab === 'features' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
-            }`}
+            className={`px-3 py-1.5 rounded-md transition-all ${activeTab === 'features' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
+              }`}
           >
             Features
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('login')}
-            className={`px-3 py-1.5 rounded-md transition-all ${
-              activeTab === 'login' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
-            }`}
+            className={`px-3 py-1.5 rounded-md transition-all ${activeTab === 'login' ? 'bg-brand-500 text-white shadow-xs' : 'text-gray-400'
+              }`}
           >
             Sign In
           </button>
@@ -860,9 +858,8 @@ export default function LoginPage() {
       {/* LEFT COLUMN: SCROLLABLE FEATURES SHOWCASE SLIDES                          */}
       {/* ========================================================================= */}
       <div
-        className={`flex-1 flex flex-col h-full overflow-hidden ${
-          activeTab === 'features' ? 'flex' : 'hidden lg:flex'
-        }`}
+        className={`flex-1 flex flex-col h-full overflow-hidden ${activeTab === 'features' ? 'flex' : 'hidden lg:flex'
+          }`}
       >
         {/* Top Header Bar (Pinned) */}
         <div className="p-4 sm:p-5 lg:px-8 lg:py-4 border-b border-gray-800/80 shrink-0 bg-gray-950/90 backdrop-blur-md flex items-center justify-between gap-4 z-10">
@@ -928,11 +925,10 @@ export default function LoginPage() {
                   pillRefs.current[idx] = el;
                 }}
                 onClick={() => scrollToSlide(idx)}
-                className={`text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-brand-500 text-white shadow-xs ring-2 ring-brand-400/40'
-                    : 'bg-gray-900/80 hover:bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-800'
-                }`}
+                className={`text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer ${isActive
+                  ? 'bg-brand-500 text-white shadow-xs ring-2 ring-brand-400/40'
+                  : 'bg-gray-900/80 hover:bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-800'
+                  }`}
               >
                 {slide.badge}
               </button>
@@ -1035,9 +1031,8 @@ export default function LoginPage() {
               <button
                 key={idx}
                 onClick={() => scrollToSlide(idx)}
-                className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                  idx === currentSlideIndex ? 'w-8 bg-brand-500' : 'w-2 bg-gray-800 hover:bg-gray-700'
-                }`}
+                className={`h-1.5 rounded-full transition-all cursor-pointer ${idx === currentSlideIndex ? 'w-8 bg-brand-500' : 'w-2 bg-gray-800 hover:bg-gray-700'
+                  }`}
                 title={`Jump to slide ${idx + 1}`}
               />
             ))}
@@ -1063,9 +1058,8 @@ export default function LoginPage() {
       {/* RIGHT COLUMN: POLISHED, SECURE BUSINESS LOGIN PORTAL                      */}
       {/* ========================================================================= */}
       <div
-        className={`w-full lg:w-[440px] xl:w-[480px] p-6 sm:p-10 lg:p-12 flex flex-col justify-center bg-gray-900/95 border-l border-gray-800/80 backdrop-blur-2xl shrink-0 h-full overflow-y-auto ${
-          activeTab === 'login' ? 'flex' : 'hidden lg:flex'
-        }`}
+        className={`w-full lg:w-[440px] xl:w-[480px] p-6 sm:p-10 lg:p-12 flex flex-col justify-center bg-gray-900/95 border-l border-gray-800/80 backdrop-blur-2xl shrink-0 h-full overflow-y-auto ${activeTab === 'login' ? 'flex' : 'hidden lg:flex'
+          }`}
       >
         <div className="w-full max-w-sm mx-auto space-y-6">
           {/* Brand Header */}
@@ -1205,7 +1199,7 @@ export default function LoginPage() {
               <span>System Operational · v8.0 Production Ready</span>
             </div>
             <p className="text-[11px] text-gray-400">
-              Peyala Café & Restaurant Operations Engine · Howrah, WB
+              Peyala Café & Restaurant Operations Engine · Midnapore, WB
             </p>
           </div>
         </div>

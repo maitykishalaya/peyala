@@ -5,6 +5,7 @@ const Account = require('../models/Account');
 const Supplier = require('../models/Supplier');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const { matchesSearch } = require('../utils/search');
 
 const parseDate = (value) => {
   if (!value) return null;
@@ -68,24 +69,6 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Optional text search across payee, description, referenceNumber, subcategory
-    if (search && search.trim()) {
-      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(escaped, 'i');
-      const searchConditions = [
-        { payee: regex },
-        { description: regex },
-        { referenceNumber: regex },
-        { subcategory: regex },
-      ];
-      if (filter.$or) {
-        filter.$and = [{ $or: filter.$or }, { $or: searchConditions }];
-        delete filter.$or;
-      } else {
-        filter.$or = searchConditions;
-      }
-    }
-
     // Sort order
     const direction = sortOrder === 'asc' ? 1 : -1;
     let sortObj = { date: -1 };
@@ -99,15 +82,43 @@ router.get('/', async (req, res) => {
       sortObj = { payee: direction, date: -1 };
     }
 
-    const total = await Payment.countDocuments(filter);
-    const payments = await Payment.find(filter)
-      .populate('paidFrom', 'name type')
-      .populate('createdBy', 'name')
-      .populate('supplier', 'name')
-      .populate('staff', 'name position')
-      .sort(sortObj)
-      .skip((page - 1) * limit)
-      .limit(limit);
+    let total = 0;
+    let payments = [];
+
+    if (search && search.trim()) {
+      const allCandidates = await Payment.find(filter)
+        .populate('paidFrom', 'name type')
+        .populate('createdBy', 'name')
+        .populate('supplier', 'name')
+        .populate('staff', 'name position')
+        .sort(sortObj);
+
+      const matched = allCandidates.filter((p) =>
+        matchesSearch(
+          [
+            p.payee,
+            p.description,
+            p.referenceNumber,
+            p.subcategory,
+            p.supplier?.name,
+            p.staff?.name,
+          ],
+          search
+        )
+      );
+      total = matched.length;
+      payments = matched.slice((page - 1) * limit, page * limit);
+    } else {
+      total = await Payment.countDocuments(filter);
+      payments = await Payment.find(filter)
+        .populate('paidFrom', 'name type')
+        .populate('createdBy', 'name')
+        .populate('supplier', 'name')
+        .populate('staff', 'name position')
+        .sort(sortObj)
+        .skip((page - 1) * limit)
+        .limit(limit);
+    }
 
     if (req.user?.role === 'viewer') {
       const sanitized = payments.map((p) => {

@@ -207,13 +207,13 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
       return `
         <tr>
-          <td style="width: 28px; vertical-align: top; font-weight: bold; font-size: 13px;">${idx + 1}.</td>
-          <td style="vertical-align: top; font-size: 13px; font-weight: 600;">
+          <td style="width: 22px; vertical-align: top; font-weight: bold; font-size: 13px;">${idx + 1}.</td>
+          <td style="vertical-align: top; font-size: 13px; font-weight: 600; padding-right: 4px;">
             ${escapeHtml(item.name)}${variantHtml}
             ${addonsHtml}
             ${notesHtml}
           </td>
-          <td style="width: 45px; text-align: right; vertical-align: top; font-size: 15px; font-weight: 900;">
+          <td style="width: 38px; text-align: right; vertical-align: top; font-size: 15px; font-weight: 900; padding-right: 2px;">
             ${item.quantity}
           </td>
         </tr>
@@ -239,7 +239,8 @@ export function generateKOTHtml(data: KOTPrintData): string {
           }
           @media print {
             html, body {
-              width: 76mm !important;
+              width: 70mm !important;
+              max-width: 70mm !important;
               margin: 0 auto !important;
               padding: 0 !important;
               padding-top: 0.5mm !important;
@@ -257,9 +258,11 @@ export function generateKOTHtml(data: KOTPrintData): string {
             line-height: 1.3;
             color: #000;
             background: #fff;
-            width: 76mm;
+            width: 70mm;
+            max-width: 70mm;
             margin: 0 auto !important;
             padding: 0.5mm 1.5mm 3mm 1.5mm !important;
+            box-sizing: border-box;
           }
           .center { text-align: center; }
           .bold { font-weight: bold; }
@@ -309,11 +312,11 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <!-- Meta Info -->
         <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 2px;">
           <div><b>KOT No:</b> #${escapeHtml(String(kotDisplay))}</div>
-          <div><b>Time:</b> ${timeStr}</div>
+          <div style="padding-right: 2px;"><b>Time:</b> ${timeStr}</div>
         </div>
         <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 4px;">
           <div><b>Date:</b> ${dateStr}</div>
-          <div><b>Server:</b> ${escapeHtml(data.billerName || 'Staff')}</div>
+          <div style="padding-right: 2px;"><b>Server:</b> ${escapeHtml(data.billerName || 'Staff')}</div>
         </div>
 
         <div class="divider-solid"></div>
@@ -322,9 +325,9 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <table>
           <thead>
             <tr style="border-bottom: 1px solid #000; font-size: 11px;">
-              <th style="text-align: left; width: 28px;">S.No</th>
+              <th style="text-align: left; width: 22px;">S.No</th>
               <th style="text-align: left;">Item Name</th>
-              <th style="text-align: right; width: 45px;">Qty</th>
+              <th style="text-align: right; width: 38px; padding-right: 2px;">Qty</th>
             </tr>
           </thead>
           <tbody>
@@ -337,7 +340,7 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <!-- Bottom Total Quantity -->
         <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; margin-top: 3px;">
           <span>Total Quantity:</span>
-          <span>${totalQty}</span>
+          <span style="padding-right: 2px;">${totalQty}</span>
         </div>
 
         <div class="divider" style="margin-top: 8px;"></div>
@@ -374,10 +377,11 @@ export function generateBillHtml(data: BillPrintData): string {
 
   const totalQty = data.items.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
 
-  // 5% GST split: 2.5% CGST + 2.5% SGST
+  // 5% GST split: 2.5% CGST + 2.5% SGST (Calculated on discounted base)
   const halfTax = Math.round((data.taxAmount / 2) * 100) / 100;
   const roundedBillTotal = Math.round(data.total);
-  const rawCalculatedTotal = data.subtotal + halfTax * 2 - (data.discount || 0);
+  const discountedBase = Math.max(0, data.subtotal - (data.discount || 0));
+  const rawCalculatedTotal = discountedBase + halfTax * 2;
   const roundOff = Math.round((roundedBillTotal - rawCalculatedTotal) * 100) / 100;
 
   const rows = data.items
@@ -431,7 +435,8 @@ export function generateBillHtml(data: BillPrintData): string {
           }
           @media print {
             html, body {
-              width: 76mm !important;
+              width: 70mm !important;
+              max-width: 70mm !important;
               margin: 0 auto !important;
               padding: 0 !important;
               padding-top: 0.5mm !important;
@@ -449,9 +454,11 @@ export function generateBillHtml(data: BillPrintData): string {
             line-height: 1.3;
             color: #000;
             background: #fff;
-            width: 76mm;
+            width: 70mm;
+            max-width: 70mm;
             margin: 0 auto !important;
             padding: 0.5mm 1.5mm 3mm 1.5mm !important;
+            box-sizing: border-box;
           }
           .center { text-align: center; }
           .bold { font-weight: bold; }
@@ -553,30 +560,34 @@ export function generateBillHtml(data: BillPrintData): string {
         <table style="font-size: 11px; margin-top: 2px;">
           <tr>
             <td style="font-weight: 500;">Quantity</td>
-            <td style="text-align: right; font-weight: 700;">${totalQty}</td>
+            <td style="text-align: right; font-weight: 700; padding-right: 2px;">${totalQty}</td>
           </tr>
           <tr>
             <td style="font-weight: 500;">Sub Total</td>
-            <td style="text-align: right; font-weight: 600;">&#8377;${data.subtotal.toFixed(2)}</td>
-          </tr>
-          <tr>
-            <td>CGST@2.5 (2.5%)</td>
-            <td style="text-align: right;">&#8377;${halfTax.toFixed(2)}</td>
-          </tr>
-          <tr>
-            <td>SGST@2.5 (2.5%)</td>
-            <td style="text-align: right;">&#8377;${halfTax.toFixed(2)}</td>
+            <td style="text-align: right; font-weight: 600; padding-right: 2px;">&#8377;${data.subtotal.toFixed(2)}</td>
           </tr>
           ${(data.discount || 0) > 0 ? `
             <tr>
               <td>Discount ${data.discountType === 'percentage' && data.discountValue ? `(${data.discountValue}%)` : ''}</td>
-              <td style="text-align: right; color: #111;">-&#8377;${Number(data.discount).toFixed(2)}</td>
+              <td style="text-align: right; color: #111; padding-right: 2px;">-&#8377;${Number(data.discount).toFixed(2)}</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 500;">Taxable Amount</td>
+              <td style="text-align: right; font-weight: 600; padding-right: 2px;">&#8377;${discountedBase.toFixed(2)}</td>
             </tr>
           ` : ''}
+          <tr>
+            <td>CGST@2.5 (2.5%)</td>
+            <td style="text-align: right; padding-right: 2px;">&#8377;${halfTax.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td>SGST@2.5 (2.5%)</td>
+            <td style="text-align: right; padding-right: 2px;">&#8377;${halfTax.toFixed(2)}</td>
+          </tr>
           ${Math.abs(roundOff) >= 0.01 ? `
             <tr>
               <td>Round Off</td>
-              <td style="text-align: right;">${roundOff > 0 ? `+&#8377;${roundOff.toFixed(2)}` : `-&#8377;${Math.abs(roundOff).toFixed(2)}`}</td>
+              <td style="text-align: right; padding-right: 2px;">${roundOff > 0 ? `+&#8377;${roundOff.toFixed(2)}` : `-&#8377;${Math.abs(roundOff).toFixed(2)}`}</td>
             </tr>
           ` : ''}
         </table>

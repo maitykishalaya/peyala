@@ -2,6 +2,8 @@ const router = require('express').Router();
 const AuditLog = require('../models/AuditLog');
 const { auth, adminOnly } = require('../middleware/auth');
 
+const { matchesSearch } = require('../utils/search');
+
 router.use(auth);
 
 // Get audit logs.
@@ -19,13 +21,22 @@ router.get('/', async (req, res) => {
 
     const filter = {};
     if (module) filter.module = module;
-    if (user) filter.userName = new RegExp(user, 'i');
 
-    const total = await AuditLog.countDocuments(filter);
-    const logs = await AuditLog.find(filter)
-      .sort('-createdAt')
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    let total = 0;
+    let logs = [];
+
+    if (user && user.trim()) {
+      const allLogs = await AuditLog.find(filter).sort('-createdAt').lean();
+      const matched = allLogs.filter((l) => matchesSearch(l.userName, user));
+      total = matched.length;
+      logs = matched.slice((page - 1) * limit, page * limit);
+    } else {
+      total = await AuditLog.countDocuments(filter);
+      logs = await AuditLog.find(filter)
+        .sort('-createdAt')
+        .skip((page - 1) * limit)
+        .limit(Number(limit));
+    }
 
     res.json({ logs, total, page: Number(page), pages: Math.ceil(total / limit) });
   } catch (err) { res.status(500).json({ message: err.message }); }

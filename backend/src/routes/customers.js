@@ -5,6 +5,7 @@ const Order = require('../models/Order');
 const Account = require('../models/Account');
 const { auth } = require('../middleware/auth');
 const { getIstDayRange } = require('../utils/date');
+const { matchesSearch, sortBySearchRelevance } = require('../utils/search');
 
 router.use(auth);
 
@@ -18,11 +19,11 @@ router.get('/search', async (req, res) => {
       return res.json([]);
     }
 
-    // Escape regex special characters to prevent regex injection
+    // Try fast regex search first
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escaped, 'i');
 
-    const customers = await Customer.find({
+    const regexCustomers = await Customer.find({
       isActive: true,
       $or: [
         { phone: regex },
@@ -34,7 +35,19 @@ router.get('/search', async (req, res) => {
       .limit(10)
       .lean();
 
-    res.json(customers);
+    if (regexCustomers.length >= 10) {
+      return res.json(regexCustomers);
+    }
+
+    // If fewer than 10 results (e.g. typos or spacing variations), fuzzy search active customers
+    const allActive = await Customer.find({ isActive: true })
+      .select('name phone totalDue totalOrders lastVisit')
+      .sort({ totalDue: -1, lastVisit: -1 })
+      .lean();
+
+    const matched = allActive.filter((c) => matchesSearch([c.name, c.phone], q));
+    const sorted = sortBySearchRelevance(matched, q, (c) => [c.name, c.phone]);
+    res.json(sorted.slice(0, 10));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -86,18 +99,25 @@ router.get('/due-report', async (req, res) => {
         filter.totalDue = { $gt: 0 };
       }
 
-      if (search && search.trim()) {
-        const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(escaped, 'i');
-        filter.$or = [{ name: regex }, { phone: regex }];
-      }
+      let totalCount = 0;
+      let customers = [];
 
-      const totalCount = await Customer.countDocuments(filter);
-      const customers = await Customer.find(filter)
-        .sort({ totalDue: -1, lastVisit: -1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum)
-        .lean();
+      if (search && search.trim()) {
+        const allCandidates = await Customer.find(filter)
+          .sort({ totalDue: -1, lastVisit: -1 })
+          .lean();
+        const matched = allCandidates.filter(c => matchesSearch([c.name, c.phone], search));
+        const sorted = sortBySearchRelevance(matched, search, c => [c.name, c.phone]);
+        totalCount = sorted.length;
+        customers = sorted.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+      } else {
+        totalCount = await Customer.countDocuments(filter);
+        customers = await Customer.find(filter)
+          .sort({ totalDue: -1, lastVisit: -1 })
+          .skip((pageNum - 1) * limitNum)
+          .limit(limitNum)
+          .lean();
+      }
 
       // Fetch pending bill counts per customer
       const customerIds = customers.map(c => c._id);
@@ -141,30 +161,46 @@ router.get('/due-report', async (req, res) => {
       billFilter.dueSettled = true;
     }
 
-    if (search && search.trim()) {
-      const q = search.trim();
-      const isNum = !isNaN(Number(q));
-      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(escaped, 'i');
-      const orConditions = [
-        { customerName: regex },
-        { customerPhone: regex },
-      ];
-      if (isNum) {
-        orConditions.push({ orderNumber: Number(q) });
-        orConditions.push({ billNumber: Number(q) });
-      }
-      billFilter.$or = orConditions;
-    }
+    let totalCount = 0;
+    let orders = [];
 
-    const totalCount = await Order.countDocuments(billFilter);
-    const orders = await Order.find(billFilter)
-      .populate('table', 'tableNumber')
-      .populate('createdBy', 'name')
-      .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum)
-      .lean();
+    if (search && search.trim()) {
+      const allCandidates = await Order.find(billFilter)
+        .populate('table', 'tableNumber')
+        .populate('createdBy', 'name')
+        .sort({ createdAt: -1 })
+        .lean();
+      const matched = allCandidates.filter((o) =>
+        matchesSearch(
+          [
+            o.customerName,
+            o.customerPhone,
+            String(o.orderNumber || ''),
+            String(o.billNumber || ''),
+            o.table?.tableNumber,
+          ],
+          search
+        )
+      );
+      const sorted = sortBySearchRelevance(matched, search, (o) => [
+        o.customerName,
+        o.customerPhone,
+        String(o.orderNumber || ''),
+        String(o.billNumber || ''),
+        o.table?.tableNumber,
+      ]);
+      totalCount = sorted.length;
+      orders = sorted.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    } else {
+      totalCount = await Order.countDocuments(billFilter);
+      orders = await Order.find(billFilter)
+        .populate('table', 'tableNumber')
+        .populate('createdBy', 'name')
+        .sort({ createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum)
+        .lean();
+    }
 
     const formattedBills = orders.map(o => {
       const remainingDue = Math.max(0, (o.dueAmount || 0) - (o.dueSettledAmount || 0));

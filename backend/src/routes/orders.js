@@ -210,38 +210,19 @@ router.get('/pending-bills', async (req, res) => {
 
 // Helper to determine effective priority time for an item on an order
 const getItemEffectiveTime = (order, item) => {
-  if (item.effectiveTime) return new Date(item.effectiveTime);
-
-  const orderCreated = new Date(order.createdAt);
-  if (item.createdAt) {
-    const itemCreated = new Date(item.createdAt);
-    // If item was created more than 45 seconds after the initial order creation:
-    if (itemCreated.getTime() - orderCreated.getTime() > 45000) {
-      // Check if food was already served before this item's creation
-      if (order.foodServedAt && new Date(order.foodServedAt) <= itemCreated) {
-        return itemCreated;
-      }
-      // Check prior items (items created before this item)
-      const priorItems = (order.items || []).filter(
-        (i) => i._id && String(i._id) !== String(item._id) && i.createdAt && new Date(i.createdAt) < itemCreated
-      );
-      // If all prior items were already served or cancelled, this is a fresh round
-      if (priorItems.length > 0 && priorItems.every((i) => i.status === 'served' || i.status === 'cancelled')) {
-        return itemCreated;
-      }
-      // If any prior items are still unserved (pending/preparing), inherit the oldest unserved priority time
-      const unservedPrior = priorItems.filter((i) => i.status === 'pending' || i.status === 'preparing');
-      if (unservedPrior.length > 0) {
-        const oldest = unservedPrior.reduce((min, it) => {
-          const t = getItemEffectiveTime(order, it);
-          return t < min ? t : min;
-        }, getItemEffectiveTime(order, unservedPrior[0]));
-        return oldest;
-      }
-      return itemCreated;
+  // Check if item belongs to a specific KOT round (Round 1, 2, 3, etc.)
+  if (item.roundNumber && Array.isArray(order.kotRounds) && order.kotRounds.length > 0) {
+    const matchedRound = order.kotRounds.find((r) => r.roundNumber === item.roundNumber);
+    if (matchedRound && matchedRound.createdAt) {
+      return new Date(matchedRound.createdAt);
     }
   }
-  return orderCreated;
+
+  // If item has an explicit creation/punch timestamp, that is when it was ordered
+  if (item.createdAt) return new Date(item.createdAt);
+  if (item.effectiveTime) return new Date(item.effectiveTime);
+
+  return new Date(order.createdAt);
 };
 
 // Helper to recalculate order.effectiveActiveTime from remaining unserved items
@@ -312,11 +293,14 @@ router.get('/kds/active', async (req, res) => {
           const t = getItemEffectiveTime(order, it);
           return t < min ? t : min;
         }, getItemEffectiveTime(order, unserved[0]));
-        order._doc.effectiveActiveTime = oldestActiveTime;
+        order.effectiveActiveTime = oldestActiveTime;
+        if (order._doc) order._doc.effectiveActiveTime = oldestActiveTime;
         activeOrders.push(order);
       } else {
         // All items served, awaiting billing
-        order._doc.effectiveActiveTime = order.foodServedAt || order.createdAt;
+        const effectiveTime = order.foodServedAt || order.createdAt;
+        order.effectiveActiveTime = effectiveTime;
+        if (order._doc) order._doc.effectiveActiveTime = effectiveTime;
         fulfilledOrders.push(order);
       }
     }
@@ -358,6 +342,10 @@ router.get('/kds/active', async (req, res) => {
         const variantName = item.variant?.name || '';
         const key = `${menuItemId}__${variantName}`;
 
+        const itemAddons = (Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0)
+          ? item.selectedAddons.map((a) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean)
+          : (Array.isArray(item.addons) ? item.addons.map((a) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean) : []);
+
         const tableEntry = {
           orderId: order._id,
           itemId: item._id,
@@ -366,6 +354,7 @@ router.get('/kds/active', async (req, res) => {
           quantity: item.quantity,
           status: item.status,
           notes: item.notes || '',
+          addons: itemAddons,
           createdAt: itemPriorityTime,
           orderedAt: item.createdAt || order.createdAt,
           effectiveTime: itemPriorityTime,
@@ -945,7 +934,7 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
       order.foodServedAt = null;
     }
 
-    const totals = Order.calcTotals(order.items, order.discount);
+    const totals = Order.calcTotals(order.items, order.discountValue != null ? order.discountValue : order.discount, order.discountType || 'flat');
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
     order.total = totals.total;
@@ -1015,7 +1004,7 @@ router.patch('/:id/items/:itemId', staffOrAdmin, async (req, res) => {
     if (quantity !== undefined && Number(quantity) > 0) item.quantity = Number(quantity);
     if (notes !== undefined) item.notes = notes;
 
-    const totals = Order.calcTotals(order.items, order.discount);
+    const totals = Order.calcTotals(order.items, order.discountValue != null ? order.discountValue : order.discount, order.discountType || 'flat');
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
     order.total = totals.total;
@@ -1057,7 +1046,7 @@ router.delete('/:id/items/:itemId', staffOrAdmin, async (req, res) => {
     // Soft-cancel: kept for record, excluded from totals
     item.status = 'cancelled';
 
-    const totals = Order.calcTotals(order.items, order.discount);
+    const totals = Order.calcTotals(order.items, order.discountValue != null ? order.discountValue : order.discount, order.discountType || 'flat');
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
     order.total = totals.total;
@@ -2314,15 +2303,15 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       order.items = formattedItems;
     }
 
-    // 3. Discount recalculation
+    // 3. Discount & Financial recalculation (GST applied on discounted base)
     const discountType = req.body.discountType === 'percentage' ? 'percentage' : 'flat';
     const discountValue = Math.max(0, Number(req.body.discountValue !== undefined ? req.body.discountValue : order.discountValue) || 0);
-    const newDiscount = discountType === 'percentage'
-      ? Math.round(((newSubtotal * discountValue) / 100) * 100) / 100
-      : Math.min(newSubtotal, discountValue);
+    const totals = Order.calcTotals(order.items, discountValue, discountType);
 
-    // 4. Grand Total & Settlement recalculation
-    const newTotal = Math.max(0, Math.round(newSubtotal - newDiscount + newTaxAmount));
+    newSubtotal = totals.subtotal;
+    newTaxAmount = totals.taxAmount;
+    const newDiscount = totals.discount;
+    const newTotal = totals.total;
 
     const validMethods = ['cash', 'card', 'upi', 'due', 'other', 'part'];
     const newMethod = req.body.paymentMethod && validMethods.includes(req.body.paymentMethod)

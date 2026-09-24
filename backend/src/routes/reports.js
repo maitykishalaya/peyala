@@ -9,6 +9,7 @@ const Table = require('../models/Table');
 const Wastage = require('../models/Wastage');
 const { auth } = require('../middleware/auth');
 const { getIstDayRange } = require('../utils/date');
+const { matchesSearch } = require('../utils/search');
 
 router.use(auth);
 
@@ -329,14 +330,13 @@ router.get('/sales', async (req, res) => {
     // In-memory search for order number / table number / staff / items
     let filteredOrders = allMatchingOrders;
     if (search && search.trim()) {
-      const q = search.trim().toLowerCase();
       filteredOrders = allMatchingOrders.filter(o => {
-        const orderNo = String(o.orderNumber || '').toLowerCase();
-        const billNo = String(o.billNumber || '').toLowerCase();
-        const tableNo = String(o.table?.tableNumber || '').toLowerCase();
-        const staff = String(o.createdBy?.name || '').toLowerCase();
-        const itemMatch = o.items?.some(it => String(it.name || '').toLowerCase().includes(q));
-        return billNo.includes(q) || orderNo.includes(q) || tableNo.includes(q) || staff.includes(q) || itemMatch;
+        const orderNo = String(o.orderNumber || '');
+        const billNo = String(o.billNumber || '');
+        const tableNo = String(o.table?.tableNumber || '');
+        const staff = String(o.createdBy?.name || '');
+        const itemNames = (o.items || []).map(it => String(it.name || ''));
+        return matchesSearch([billNo, orderNo, tableNo, staff, ...itemNames], search);
       });
     }
 

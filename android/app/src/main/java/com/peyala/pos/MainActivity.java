@@ -149,6 +149,9 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (timeoutRunnable != null) {
+                    timeoutHandler.removeCallbacks(timeoutRunnable);
+                }
                 progressBar.setVisibility(View.GONE);
                 swipeRefreshLayout.setRefreshing(false);
 
@@ -161,6 +164,9 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (timeoutRunnable != null) {
+                    timeoutHandler.removeCallbacks(timeoutRunnable);
+                }
                 if (request.isForMainFrame()) {
                     progressBar.setVisibility(View.GONE);
                     swipeRefreshLayout.setRefreshing(false);
@@ -268,7 +274,38 @@ public class MainActivity extends AppCompatActivity {
         btnSettings.setOnClickListener(v -> showServerSettingsDialog());
     }
 
+    private final Handler timeoutHandler = new Handler(Looper.getMainLooper());
+    private Runnable timeoutRunnable = null;
+    private static final long CONNECTION_TIMEOUT_MS = 6000;
+
+    public static String normalizeServerUrl(String raw) {
+        if (raw == null) return DEFAULT_SERVER_URL;
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) return DEFAULT_SERVER_URL;
+
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            trimmed = "http://" + trimmed;
+        }
+
+        try {
+            Uri uri = Uri.parse(trimmed);
+            String host = uri.getHost();
+            int port = uri.getPort();
+            if (port == -1 && host != null && !host.contains("vercel.app") && !host.contains("render.com")) {
+                if (trimmed.endsWith("/")) {
+                    trimmed = trimmed.substring(0, trimmed.length() - 1);
+                }
+                trimmed = trimmed + ":3000";
+            }
+        } catch (Exception ignored) {}
+
+        return trimmed;
+    }
+
     private void showConnectionError(String errorDetail) {
+        if (timeoutRunnable != null) {
+            timeoutHandler.removeCallbacks(timeoutRunnable);
+        }
         webView.setVisibility(View.GONE);
         layoutError.setVisibility(View.VISIBLE);
         txtStatus.setText(errorDetail);
@@ -277,15 +314,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void retryConnection() {
         String inputUrl = etServerUrl.getText().toString().trim();
-        if (inputUrl.isEmpty()) {
-            inputUrl = DEFAULT_SERVER_URL;
-        }
-        if (!inputUrl.startsWith("http://") && !inputUrl.startsWith("https://")) {
-            inputUrl = "http://" + inputUrl;
-        }
-
-        currentServerUrl = inputUrl;
+        currentServerUrl = normalizeServerUrl(inputUrl);
         prefs.edit().putString(KEY_SERVER_URL, currentServerUrl).apply();
+        etServerUrl.setText(currentServerUrl);
 
         txtStatus.setText("Testing connection to " + currentServerUrl + "...");
         btnRetry.setEnabled(false);
@@ -300,7 +331,7 @@ public class MainActivity extends AppCompatActivity {
                     webView.setVisibility(View.VISIBLE);
                     loadUrl(testUrl);
                 } else {
-                    txtStatus.setText("❌ Server unreachable. Make sure the computer is on and Wi-Fi matches.");
+                    txtStatus.setText("❌ Server unreachable. Make sure the counter PC is on and Wi-Fi matches.");
                     Toast.makeText(MainActivity.this, "Cannot connect to " + testUrl, Toast.LENGTH_SHORT).show();
                 }
             });
@@ -311,8 +342,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             URL url = new URL(serverUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
+            conn.setConnectTimeout(3500);
+            conn.setReadTimeout(3500);
             conn.setRequestMethod("GET");
             int responseCode = conn.getResponseCode();
             conn.disconnect();
@@ -323,33 +354,61 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showServerSettingsDialog() {
+        if (timeoutRunnable != null) {
+            timeoutHandler.removeCallbacks(timeoutRunnable);
+        }
+
         final EditText input = new EditText(this);
         input.setText(currentServerUrl);
         input.setSelection(input.getText().length());
         input.setPadding(40, 30, 40, 30);
+        input.setHint("e.g. 192.168.1.15:3000");
 
         new AlertDialog.Builder(this)
                 .setTitle("Peyala Server Address")
-                .setMessage("Enter the IP address of the counter computer running Peyala POS:")
+                .setMessage("Enter the IP address of the counter computer running Peyala POS (e.g. 192.168.1.15 or 192.168.1.15:3000):")
                 .setView(input)
-                .setPositiveButton("Save & Reload", (dialog, which) -> {
+                .setPositiveButton("Connect", (dialog, which) -> {
                     String newUrl = input.getText().toString().trim();
                     if (!newUrl.isEmpty()) {
-                        if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) {
-                            newUrl = "http://" + newUrl;
-                        }
-                        currentServerUrl = newUrl;
+                        currentServerUrl = normalizeServerUrl(newUrl);
                         prefs.edit().putString(KEY_SERVER_URL, currentServerUrl).apply();
                         etServerUrl.setText(currentServerUrl);
+                        Toast.makeText(MainActivity.this, "Connecting to " + currentServerUrl + "...", Toast.LENGTH_SHORT).show();
                         loadUrl(currentServerUrl);
                     }
+                })
+                .setNeutralButton("Cloud Portal", (dialog, which) -> {
+                    currentServerUrl = "https://peyala.vercel.app";
+                    prefs.edit().putString(KEY_SERVER_URL, currentServerUrl).apply();
+                    etServerUrl.setText(currentServerUrl);
+                    Toast.makeText(MainActivity.this, "Connecting to Peyala Cloud...", Toast.LENGTH_SHORT).show();
+                    loadUrl(currentServerUrl);
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
     private void loadUrl(String url) {
-        webView.loadUrl(url);
+        final String targetUrl = normalizeServerUrl(url);
+        currentServerUrl = targetUrl;
+        prefs.edit().putString(KEY_SERVER_URL, currentServerUrl).apply();
+        etServerUrl.setText(currentServerUrl);
+
+        if (timeoutRunnable != null) {
+            timeoutHandler.removeCallbacks(timeoutRunnable);
+        }
+
+        // 6-second connection watchdog timeout
+        timeoutRunnable = () -> {
+            if (progressBar.getVisibility() == View.VISIBLE || (webView.getVisibility() != View.VISIBLE)) {
+                webView.stopLoading();
+                showConnectionError("Connection timed out reaching " + targetUrl + ". Please verify Counter PC IP address.");
+            }
+        };
+        timeoutHandler.postDelayed(timeoutRunnable, CONNECTION_TIMEOUT_MS);
+
+        webView.loadUrl(targetUrl);
     }
 
     @Override

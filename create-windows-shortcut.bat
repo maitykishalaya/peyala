@@ -21,36 +21,35 @@ if not exist "%SCRIPT_DIR%icon.ico" (
     )
 )
 
-set "TARGET_FILE=%SCRIPT_DIR%start-peyala-app.bat"
+if exist "%SCRIPT_DIR%PeyalaPOS.exe" (
+    set "TARGET_FILE=%SCRIPT_DIR%PeyalaPOS.exe"
+) else (
+    set "TARGET_FILE=%SCRIPT_DIR%start-peyala-app.bat"
+)
 set "ICON_TARGET=%SCRIPT_DIR%icon.ico"
 if not exist "%ICON_TARGET%" (
     if exist "%SCRIPT_DIR%PeyalaPOS.exe" set "ICON_TARGET=%SCRIPT_DIR%PeyalaPOS.exe"
 )
 
-:: Create Desktop Shortcut
+:: Create/Update User & Public Desktop Shortcuts and Start Menu Shortcuts
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ws = New-Object -ComObject WScript.Shell; " ^
-    "$desktop = [Environment]::GetFolderPath('Desktop'); " ^
-    "$scPath = Join-Path $desktop 'Peyala POS.lnk'; " ^
-    "$shortcut = $ws.CreateShortcut($scPath); " ^
-    "$shortcut.TargetPath = '%TARGET_FILE%'; " ^
-    "$shortcut.WorkingDirectory = '%SCRIPT_DIR%'; " ^
-    "$shortcut.Description = 'Peyala Restaurant Operations and POS Terminal'; " ^
-    "if (Test-Path '%ICON_TARGET%') { $shortcut.IconLocation = '%ICON_TARGET%' }; " ^
-    "$shortcut.Save()" >nul 2>&1
-
-:: Create Start Menu Shortcut
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ws = New-Object -ComObject WScript.Shell; " ^
-    "$startMenu = [Environment]::GetFolderPath('StartMenu'); " ^
-    "$programs = Join-Path $startMenu 'Programs'; " ^
-    "$scPath = Join-Path $programs 'Peyala POS.lnk'; " ^
-    "$shortcut = $ws.CreateShortcut($scPath); " ^
-    "$shortcut.TargetPath = '%TARGET_FILE%'; " ^
-    "$shortcut.WorkingDirectory = '%SCRIPT_DIR%'; " ^
-    "$shortcut.Description = 'Peyala Restaurant Operations and POS Terminal'; " ^
-    "if (Test-Path '%ICON_TARGET%') { $shortcut.IconLocation = '%ICON_TARGET%' }; " ^
-    "$shortcut.Save()" >nul 2>&1
+    "$paths = @( " ^
+    "    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Peyala POS.lnk'), " ^
+    "    (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Peyala POS.lnk'), " ^
+    "    (Join-Path (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs') 'Peyala POS.lnk'), " ^
+    "    (Join-Path (Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs') 'Peyala POS.lnk') " ^
+    "); " ^
+    "foreach ($scPath in $paths) { " ^
+    "    try { " ^
+    "        $shortcut = $ws.CreateShortcut($scPath); " ^
+    "        $shortcut.TargetPath = '%TARGET_FILE%'; " ^
+    "        $shortcut.WorkingDirectory = '%SCRIPT_DIR%'; " ^
+    "        $shortcut.Description = 'Peyala Restaurant Operations and POS Station'; " ^
+    "        if (Test-Path '%ICON_TARGET%') { $shortcut.IconLocation = '%ICON_TARGET%' }; " ^
+    "        $shortcut.Save(); " ^
+    "    } catch {} " ^
+    "}" >nul 2>&1
 
 if "%QUIET%"=="0" (
     echo [SUCCESS] Peyala POS shortcut created with your official logo!

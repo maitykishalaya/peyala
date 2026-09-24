@@ -5,7 +5,7 @@ function verifyNetSalesMath() {
 
   // Case 1: Order-level data
   const orders = [
-    { subtotal: 340, discount: 34, taxAmount: 17, total: 323, settledAmount: 323 },
+    { subtotal: 340, discount: 34, taxAmount: 15.3, total: 321.3, settledAmount: 321 },
     { subtotal: 150, discount: 0, taxAmount: 7.5, total: 157.5, settledAmount: 158 },
     { subtotal: 60, discount: 0, taxAmount: 3, total: 63, settledAmount: 60 },
   ];
@@ -25,7 +25,7 @@ function verifyNetSalesMath() {
   console.log(`  GST:         ₹${gst}`);
   console.log(`  Net Sales:   ₹${netSales}`);
   assert.strictEqual(netSales, Math.round((grossSales - gst) * 100) / 100);
-  assert.strictEqual(netSales, 541 - 27.5); // 513.5
+  assert.strictEqual(netSales, 539 - 25.8);
   console.log('  Passed!\n');
 
   // Case 2: Multi-channel sales entries

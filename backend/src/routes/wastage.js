@@ -3,6 +3,7 @@ const Wastage = require('../models/Wastage');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
+const { matchesSearch } = require('../utils/search');
 
 router.use(auth);
 
@@ -42,38 +43,56 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Search query by itemName or reason
-    if (search && String(search).trim()) {
-      const q = String(search).trim();
-      filter.$or = [
-        { itemName: { $regex: q, $options: 'i' } },
-        { reason: { $regex: q, $options: 'i' } },
-      ];
-    }
+    let total = 0;
+    let wastage = [];
+    let summary = { totalValue: 0, totalQty: 0, count: 0 };
 
-    // Fetch entries and aggregate period totals concurrently
-    const [total, wastage, summaryAgg] = await Promise.all([
-      Wastage.countDocuments(filter),
-      Wastage.find(filter)
+    if (search && String(search).trim()) {
+      const allEntries = await Wastage.find(filter)
         .populate('createdBy', 'name role')
         .sort({ date: -1, createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      Wastage.aggregate([
-        { $match: filter },
-        {
-          $group: {
-            _id: null,
-            totalValue: { $sum: '$approxValue' },
-            totalQty: { $sum: '$quantity' },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
-    ]);
+        .lean();
 
-    const summary = summaryAgg[0] || { totalValue: 0, totalQty: 0, count: 0 };
+      const matched = allEntries.filter((w) =>
+        matchesSearch([w.itemName, w.reason, w.notes], search)
+      );
+
+      total = matched.length;
+      wastage = matched.slice((page - 1) * limit, page * limit);
+      const totalValue = matched.reduce((s, w) => s + (w.approxValue || 0), 0);
+      const totalQty = matched.reduce((s, w) => s + (w.quantity || 0), 0);
+      summary = { totalValue, totalQty, count: total };
+    } else {
+      const [totalCount, wastageEntries, summaryAgg] = await Promise.all([
+        Wastage.countDocuments(filter),
+        Wastage.find(filter)
+          .populate('createdBy', 'name role')
+          .sort({ date: -1, createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+        Wastage.aggregate([
+          { $match: filter },
+          {
+            $group: {
+              _id: null,
+              totalValue: { $sum: '$approxValue' },
+              totalQty: { $sum: '$quantity' },
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+      ]);
+
+      total = totalCount;
+      wastage = wastageEntries;
+      const agg = summaryAgg[0] || { totalValue: 0, totalQty: 0, count: 0 };
+      summary = {
+        totalValue: agg.totalValue || 0,
+        totalQty: agg.totalQty || 0,
+        count: total,
+      };
+    }
 
     res.json({
       wastage,
