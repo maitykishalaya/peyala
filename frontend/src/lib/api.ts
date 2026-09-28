@@ -15,6 +15,7 @@ const getInitialBaseUrl = () => {
 const api = axios.create({
   baseURL: getInitialBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
+  timeout: 12000, // 12-second safeguard to prevent network or cloud DB stalls from freezing UI states
 });
 
 api.interceptors.request.use((config) => {
@@ -41,6 +42,9 @@ api.interceptors.response.use(
       localStorage.removeItem('peyala_token');
       localStorage.removeItem('peyala_user');
       window.location.href = '/login';
+    }
+    if (err.code === 'ECONNABORTED' && err.message?.includes('timeout')) {
+      console.warn('[Peyala API] Request timed out after 12s. Released UI wait lock.');
     }
     return Promise.reject(err);
   }

@@ -5,6 +5,10 @@
 
 export type SearchTarget = string | number | null | undefined;
 
+// Flat reusable buffer for Levenshtein calculations (avoids allocating 2D array objects on every keystroke)
+const MAX_SEARCH_TOKEN_LEN = 64;
+const LEV_BUFFER = new Int32Array((MAX_SEARCH_TOKEN_LEN + 1) * (MAX_SEARCH_TOKEN_LEN + 1));
+
 /**
  * Damerau-Levenshtein distance calculation (handles insertions, deletions, substitutions, and transpositions).
  */
@@ -15,31 +19,43 @@ export function damerauLevenshtein(a: string, b: string): number {
   if (lb === 0) return la;
   if (Math.abs(la - lb) > 3) return Math.abs(la - lb);
 
-  const d: number[][] = [];
+  const width = lb + 1;
+  const totalSize = (la + 1) * width;
+  const d = totalSize <= LEV_BUFFER.length ? LEV_BUFFER : new Int32Array(totalSize);
+
   for (let i = 0; i <= la; i++) {
-    d[i] = [i];
+    d[i * width] = i;
   }
   for (let j = 0; j <= lb; j++) {
-    d[0][j] = j;
+    d[j] = j;
   }
 
   for (let i = 1; i <= la; i++) {
+    const curRow = i * width;
+    const prevRow = (i - 1) * width;
+    const prevPrevRow = (i - 2) * width;
+
     for (let j = 1; j <= lb; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i][j] = Math.min(
-        d[i - 1][j] + 1,        // deletion
-        d[i][j - 1] + 1,        // insertion
-        d[i - 1][j - 1] + cost   // substitution
+      let minVal = Math.min(
+        d[prevRow + j] + 1,          // deletion
+        d[curRow + (j - 1)] + 1,      // insertion
+        d[prevRow + (j - 1)] + cost   // substitution
       );
 
       // transposition
       if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        const transVal = d[prevPrevRow + (j - 2)] + 1;
+        if (transVal < minVal) {
+          minVal = transVal;
+        }
       }
+
+      d[curRow + j] = minVal;
     }
   }
 
-  return d[la][lb];
+  return d[la * width + lb];
 }
 
 /**

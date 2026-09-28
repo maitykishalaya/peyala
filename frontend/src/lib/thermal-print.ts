@@ -124,6 +124,8 @@ export function printThermalSlip(html: string) {
     iframe.style.border = '0';
     iframe.style.opacity = '0';
     iframe.style.pointerEvents = 'none';
+    iframe.tabIndex = -1;
+    iframe.setAttribute('aria-hidden', 'true');
     document.body.appendChild(iframe);
   }
 
@@ -134,12 +136,23 @@ export function printThermalSlip(html: string) {
   doc.write(html);
   doc.close();
 
+  // Preserve currently focused element so background printing never steals active typing focus
+  const previouslyFocused = typeof document !== 'undefined'
+    ? (document.activeElement as HTMLElement | null)
+    : null;
+
   setTimeout(() => {
     try {
-      iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
     } catch (err) {
       console.error('Thermal print failed:', err);
+    } finally {
+      // Immediately restore focus back to the user's active input field
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        try {
+          previouslyFocused.focus();
+        } catch (_) {}
+      }
     }
   }, 150);
 }

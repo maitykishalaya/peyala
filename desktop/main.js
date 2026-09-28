@@ -356,6 +356,15 @@ function createMainWindow() {
   mainWindow.show();
   mainWindow.focus();
 
+  // Ensure internal webContents receives focus whenever the OS focuses the window
+  mainWindow.on('focus', () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.focus();
+      }
+    } catch (_) {}
+  });
+
   // Handle window close
   mainWindow.on('close', (e) => {
     logEngine('mainWindow close event triggered');
@@ -496,11 +505,48 @@ function setupTray() {
 // ── Native Hardware Silent Thermal Printing IPC Handlers ──────────────
 ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent = true }) => {
   return new Promise((resolve) => {
+    let resolved = false;
+    let printTimeout = null;
+    let printWindow = null;
+
+    const safeResolve = (res) => {
+      if (resolved) return;
+      resolved = true;
+      if (printTimeout) {
+        clearTimeout(printTimeout);
+        printTimeout = null;
+      }
+
+      try {
+        if (printWindow && !printWindow.isDestroyed()) {
+          printWindow.destroy();
+        }
+      } catch (_) {}
+
+      // CRITICAL: Ensure mainWindow maintains or restores focus so cashiers never lose typing focus
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.focus();
+          mainWindow.webContents.focus();
+        }
+      } catch (_) {}
+
+      resolve(res);
+    };
+
+    // 12-second safety timeout in case Windows Print Spooler hangs or stalls
+    printTimeout = setTimeout(() => {
+      console.warn('[Peyala Print] Print job timed out after 12s');
+      safeResolve({ success: false, failureReason: 'Print job timed out after 12s' });
+    }, 12000);
+
     try {
-      const printWindow = new BrowserWindow({
+      printWindow = new BrowserWindow({
         show: false,
         width: 360,
         height: 600,
+        focusable: false,    // CRITICAL: Windows OS must never divert focus to print window
+        skipTaskbar: true,   // Never show or flicker in Windows taskbar
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
@@ -511,35 +557,34 @@ ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent =
 
       printWindow.webContents.on('did-finish-load', () => {
         setTimeout(() => {
-          printWindow.webContents.print(
-            {
-              silent: silent !== false,
-              printBackground: true,
-              deviceName: printerName || '',
-              margins: { marginType: 'printableArea' },
-            },
-            (success, failureReason) => {
-              try {
-                printWindow.close();
-              } catch (_) {}
-              if (!success) {
-                console.error('[Peyala Print Error]', failureReason);
+          if (resolved) return;
+          try {
+            printWindow.webContents.print(
+              {
+                silent: silent !== false,
+                printBackground: true,
+                deviceName: printerName || '',
+                margins: { marginType: 'printableArea' },
+              },
+              (success, failureReason) => {
+                if (!success) {
+                  console.error('[Peyala Print Error]', failureReason);
+                }
+                safeResolve({ success, failureReason });
               }
-              resolve({ success, failureReason });
-            }
-          );
+            );
+          } catch (err) {
+            safeResolve({ success: false, failureReason: err.message });
+          }
         }, 100);
       });
 
       printWindow.webContents.on('did-fail-load', (e, code, desc) => {
-        try {
-          printWindow.close();
-        } catch (_) {}
-        resolve({ success: false, failureReason: desc });
+        safeResolve({ success: false, failureReason: desc });
       });
     } catch (err) {
       console.error('[Peyala Print Exception]', err);
-      resolve({ success: false, failureReason: err.message });
+      safeResolve({ success: false, failureReason: err.message });
     }
   });
 });

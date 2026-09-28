@@ -586,13 +586,19 @@ export default function TablesPage() {
   // Periodic background refresh for tables status (syncs green bill status & real-time changes)
   useEffect(() => {
     const tablePoller = setInterval(() => {
+      // If cashier is actively typing in a search box, customer field, or note, defer background re-render
+      const isUserTyping =
+        typeof document !== 'undefined' &&
+        ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName || '');
+
       if (
         typeof document !== 'undefined' &&
         document.visibilityState === 'visible' &&
         activeView === 'table_view' &&
         !showOrderDetailsModal &&
         !moveModal.open &&
-        !orderModalLoading
+        !orderModalLoading &&
+        !isUserTyping
       ) {
         loadData(true);
       }
