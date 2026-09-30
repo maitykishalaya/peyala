@@ -124,6 +124,76 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [dark, mounted]);
 
+  // ── HOURLY DATABASE SYNC (EXCEPT /tables AND /kds) ─────────────────
+  useEffect(() => {
+    // Tables POS and Kitchen KDS have their own fast polling intervals and must not be interrupted
+    if (pathname.startsWith('/tables') || pathname.startsWith('/kds')) {
+      return;
+    }
+
+    const ONE_HOUR_MS = 60 * 60 * 1000; // 1 hour
+    const CHECK_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
+    let lastSync = Date.now();
+
+    const clearDataCaches = () => {
+      const cachePrefixes = [
+        'peyala_dashboard_cache',
+        'peyala_inventory_cache',
+        'peyala_reports_',
+        'peyala_sales_',
+        'peyala_purchases_',
+        'peyala_payments_',
+        'peyala_staff_',
+        'peyala_suppliers_',
+        'peyala_wastage_',
+        'peyala_accounts_',
+        'peyala_balancesheet_',
+        'peyala_attendance_',
+        'peyala_dues_',
+        'peyala_menu_',
+        'peyala_analytics_',
+      ];
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && cachePrefixes.some((p) => key.startsWith(p))) {
+            localStorage.removeItem(key);
+          }
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    };
+
+    const syncTimer = setInterval(() => {
+      // Re-verify current path
+      const currentPath = window.location.pathname;
+      if (currentPath.startsWith('/tables') || currentPath.startsWith('/kds')) {
+        lastSync = Date.now();
+        return;
+      }
+
+      const elapsed = Date.now() - lastSync;
+      if (elapsed >= ONE_HOUR_MS) {
+        // Defer if user is actively filling a form or modal is open
+        const isUserInteracting = document.querySelector(
+          '[role="dialog"], .modal, .modal-backdrop, input:focus, textarea:focus, select:focus'
+        );
+        if (isUserInteracting) {
+          lastSync = Date.now() - (ONE_HOUR_MS - 5 * 60 * 1000); // retry in 5 mins
+          return;
+        }
+
+        lastSync = Date.now();
+        clearDataCaches();
+        window.dispatchEvent(new CustomEvent('peyala:db_sync', { detail: { timestamp: Date.now() } }));
+        window.location.reload();
+      }
+    }, CHECK_INTERVAL_MS);
+
+    return () => clearInterval(syncTimer);
+  }, [pathname]);
+
   const toggleSidebar = () => {
     setSidebarOpen((prev) => {
       const next = !prev;
@@ -292,7 +362,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Content */}
         <main
           onClick={handleContentClick}
-          className="flex-1 min-h-0 h-full overflow-y-auto p-3.5 sm:p-6 pb-36 md:pb-24"
+          className="flex-1 min-h-0 h-full overflow-y-auto overscroll-y-contain p-3.5 sm:p-6 pb-36 md:pb-24"
         >
           {children}
         </main>

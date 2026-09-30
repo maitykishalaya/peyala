@@ -99,6 +99,12 @@ public class MainActivity extends AppCompatActivity {
 
         etServerUrl.setText(currentServerUrl);
         swipeRefreshLayout.setColorSchemeResources(R.color.accent, R.color.primary_dark);
+
+        // Disable SwipeRefreshLayout gesture detection so it never intercepts WebView touch events.
+        // In an SPA (Single Page Application), internal DOM containers scroll while WebView.getScrollY()
+        // remains 0. If SwipeRefreshLayout is active, swiping down to scroll back up is misidentified
+        // as a pull-to-refresh gesture, hijacking touches and triggering accidental page reloads.
+        swipeRefreshLayout.setEnabled(false);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -272,6 +278,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         btnSettings.setOnClickListener(v -> showServerSettingsDialog());
+        btnSettings.setOnLongClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Reloading page...", Toast.LENGTH_SHORT).show();
+            webView.reload();
+            return true;
+        });
     }
 
     private final Handler timeoutHandler = new Handler(Looper.getMainLooper());

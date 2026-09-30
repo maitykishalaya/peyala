@@ -8,7 +8,8 @@ import { toast } from '@/lib/toast';
 import {
   ShieldAlert, AlertTriangle, AlertCircle, CheckCircle2, TrendingUp,
   TrendingDown, RefreshCw, Calendar, Filter, ArrowRight, Info,
-  ThumbsUp, ThumbsDown, X, Layers, ArrowUpRight, Check, Sparkles, HelpCircle
+  ThumbsUp, ThumbsDown, X, Layers, ArrowUpRight, Check, Sparkles, HelpCircle,
+  Receipt
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend
@@ -545,6 +546,20 @@ export default function ExpenseLeakDetectorPage() {
                             <span className="font-medium">Supplier:</span> {a.supplier}
                           </p>
                         )}
+                        {a.relatedOrders?.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-bold border border-red-200 dark:border-red-900/50 flex items-center gap-1">
+                              <Receipt className="w-3 h-3 text-red-600 dark:text-red-400" />
+                              {a.detector === 'kot_items_deleted'
+                                ? `${a.relatedOrders.length} Order(s) with Deleted KOT Items`
+                                : `${a.relatedOrders.length} Cancelled Order(s)`}
+                            </span>
+                            <span className="text-gray-500 dark:text-gray-400 text-[10px] truncate max-w-[200px] sm:max-w-xs">
+                              {a.relatedOrders.slice(0, 4).map((ro: any) => ro.orderNumber).join(', ')}
+                              {a.relatedOrders.length > 4 ? ` +${a.relatedOrders.length - 4} more` : ''}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Financial Comparison Metric Box */}
@@ -927,6 +942,111 @@ export default function ExpenseLeakDetectorPage() {
                             <td className="p-2 text-right font-bold text-red-600">{formatCurrency(e.amount)}</td>
                           </tr>
                         ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Flagged Orders & KOT Deleted Items Audit Trail */}
+              {selectedAnomaly.relatedOrders?.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                      <Receipt className="w-3.5 h-3.5 text-red-500" />
+                      <span>Flagged Orders ({selectedAnomaly.relatedOrders.length})</span>
+                    </h3>
+                    <span className="text-[11px] text-gray-500">
+                      Audit Trail & Table Drilldown
+                    </span>
+                  </div>
+
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 sticky top-0 z-10 shadow-xs">
+                        <tr>
+                          <th className="p-2.5 text-left font-semibold">Order / Table</th>
+                          <th className="p-2.5 text-left font-semibold">Date & Time</th>
+                          <th className="p-2.5 text-left font-semibold">Items & Cancellation Details</th>
+                          <th className="p-2.5 text-right font-semibold">Value</th>
+                          <th className="p-2.5 text-right font-semibold">Action By</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {selectedAnomaly.relatedOrders.map((ord: any, idx: number) => {
+                          const isKotDeleted = Boolean(ord.cancelledItems?.length);
+                          const isPrinted = Boolean(ord.billPrinted);
+
+                          return (
+                            <tr key={idx} className={cn(isPrinted ? 'bg-red-50/40 dark:bg-red-950/20' : 'hover:bg-gray-50/50 dark:hover:bg-gray-800/40')}>
+                              <td className="p-2.5 align-top">
+                                <div className="font-bold text-gray-900 dark:text-white flex items-center gap-1">
+                                  <span>{ord.orderNumber}</span>
+                                  {ord.billNumber && (
+                                    <span className="text-[10px] text-brand-600 dark:text-brand-400 font-medium">({ord.billNumber})</span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-gray-500 mt-0.5">
+                                  Table {ord.table} {ord.tableCategory ? `(${ord.tableCategory})` : ''}
+                                </div>
+                                {isPrinted && (
+                                  <span className="mt-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                    Bill Printed Before Void
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="p-2.5 align-top text-gray-500 whitespace-nowrap">
+                                <div>{ord.date ? new Date(ord.date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</div>
+                                <div className="text-[10px] text-gray-400">
+                                  {ord.date ? new Date(ord.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </div>
+                              </td>
+
+                              <td className="p-2.5 align-top">
+                                {isKotDeleted ? (
+                                  <div className="space-y-1">
+                                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide block">
+                                      Deleted from Kitchen KOT:
+                                    </span>
+                                    <div className="space-y-0.5">
+                                      {ord.cancelledItems.map((ci: any, cidx: number) => (
+                                        <div key={cidx} className="text-gray-800 dark:text-gray-200 text-[11px] flex items-center justify-between gap-2">
+                                          <span>• {ci.name} × {ci.quantity}</span>
+                                          <span className="text-red-500 font-semibold">{formatCurrency(ci.lineTotal)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    {ord.activeItemsCount > 0 && (
+                                      <div className="text-[10px] text-gray-400 mt-0.5">
+                                        ({ord.activeItemsCount} item(s) kept on order)
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <span className="text-[11px] text-gray-700 dark:text-gray-300 block line-clamp-2">
+                                      {ord.itemsSummary || `${ord.itemsCount || 0} item(s) ordered`}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">
+                                      Order Status: <strong className="capitalize">{ord.orderStatus}</strong>
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="p-2.5 align-top text-right whitespace-nowrap font-bold text-red-600 dark:text-red-400">
+                                {formatCurrency(isKotDeleted ? ord.cancelledValue : ord.orderTotal)}
+                              </td>
+
+                              <td className="p-2.5 align-top text-right whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                <span className="inline-block px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[11px]">
+                                  {ord.cancelledBy || 'Staff'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

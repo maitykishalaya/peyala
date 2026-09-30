@@ -102,6 +102,15 @@ router.get('/summary', async (req, res) => {
       .populate('supplier', 'name')
       .select('supplier totalAmount isPaid');
 
+    // Today's purchases (all entries, summed)
+    const todayPurchasesAgg = await PurchaseEntry.aggregate([
+      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
+    ]);
+    const todayPurchases = await PurchaseEntry.find({ date: { $gte: todayRange.start, $lte: todayRange.end } })
+      .populate('supplier', 'name')
+      .select('supplier totalAmount isPaid');
+
     // 3. Today's sales & expenses in IST
     const todaySales = await SalesEntry.findOne({
       date: { $gte: todayRange.start, $lte: todayRange.end }
@@ -255,10 +264,26 @@ router.get('/summary', async (req, res) => {
     const isViewer = req.user?.role === 'viewer';
 
     const finalToday = isViewer ? {
+      date: todayRange.canonicalDate,
       sales: { outlet: null, zomato: null, fatafat: null, other: null, total: null },
+      purchases: {
+        total: null,
+        count: todayPurchasesAgg[0]?.count || 0,
+        entries: [],
+      },
       expenses: null,
     } : {
+      date: todayRange.canonicalDate,
       sales: todaySalesData,
+      purchases: {
+        total: todayPurchasesAgg[0]?.total || 0,
+        count: todayPurchasesAgg[0]?.count || 0,
+        entries: todayPurchases.map(p => ({
+          supplier: p.supplier?.name || 'Unknown',
+          amount: p.totalAmount,
+          isPaid: p.isPaid,
+        })),
+      },
       expenses: todayExpenses,
     };
 

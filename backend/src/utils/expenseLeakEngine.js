@@ -46,6 +46,7 @@ function analyzeExpenseLeaks({
   purchases = [],
   salesEntries = [],
   orders = [],
+  auditLogs = [],
   currentRange,
   baselineRange,
   reviewsMap = new Map(),
@@ -76,6 +77,14 @@ function analyzeExpenseLeaks({
     else if (d >= baselineStart && d <= baselineEnd) baselinePurchases.push(p);
   }
 
+  const currentOrders = [];
+  const baselineOrders = [];
+  for (const o of orders) {
+    const d = new Date(o.createdAt || o.updatedAt || o.paidAt || o.billedAt);
+    if (d >= currentStart && d <= currentEnd) currentOrders.push(o);
+    else if (d >= baselineStart && d <= baselineEnd) baselineOrders.push(o);
+  }
+
   // Aggregate Sales
   let currentSalesTotal = 0;
   let baselineSalesTotal = 0;
@@ -89,6 +98,7 @@ function analyzeExpenseLeaks({
   // Fallback to Orders if SalesEntry is empty
   if (currentSalesTotal === 0 && orders.length > 0) {
     for (const o of orders) {
+      if (o.status !== 'paid') continue;
       const d = new Date(o.paidAt || o.createdAt);
       const amt = o.settledAmount || o.total || 0;
       if (d >= currentStart && d <= currentEnd) currentSalesTotal += amt;
@@ -102,10 +112,11 @@ function analyzeExpenseLeaks({
   const salesGrowthRate = baselineDailySales > 0 ? (currentDailySales - baselineDailySales) / baselineDailySales : 0;
   const salesGrowthPct = Math.round(salesGrowthRate * 100);
 
-  // Order Counts
+  // Order Counts (paid/settled customer orders)
   let currentOrderCount = 0;
   let baselineOrderCount = 0;
   for (const o of orders) {
+    if (o.status !== 'paid') continue;
     const d = new Date(o.paidAt || o.createdAt);
     if (d >= currentStart && d <= currentEnd) currentOrderCount++;
     else if (d >= baselineStart && d <= baselineEnd) baselineOrderCount++;
@@ -792,6 +803,345 @@ function analyzeExpenseLeaks({
     }
   }
 
+  // ── HELPER: Resolve Canceller from Audit Logs or Order ──────────────
+  function findCanceller(order, itemName) {
+    const tableNum = order.table?.tableNumber || order.tableCategory || '';
+    const orderNum = order.orderNumber ? String(order.orderNumber) : '';
+
+    if (itemName && Array.isArray(auditLogs)) {
+      const match = auditLogs.find(l =>
+        l.description && (
+          l.description.includes(itemName) ||
+          (orderNum && l.description.includes(orderNum))
+        )
+      );
+      if (match && match.userName) return match.userName;
+    }
+
+    if (Array.isArray(auditLogs)) {
+      const matchOrder = auditLogs.find(l =>
+        l.description && (
+          (tableNum && l.description.includes(`Table ${tableNum}`)) ||
+          (orderNum && l.description.includes(orderNum))
+        )
+      );
+      if (matchOrder && matchOrder.userName) return matchOrder.userName;
+    }
+
+    if (order.createdBy?.name) return order.createdBy.name;
+    return 'Staff';
+  }
+
+  // ── DETECTOR #9: KOT ITEMS DELETED AFTER ORDERING ───────────────────
+  // Identifies orders where items were placed on kitchen KOT and later deleted/cancelled
+  function extractKotDeletedOrders(orderList) {
+    const deletedOrders = [];
+    let sumDeletedVal = 0;
+    let sumDeletedQty = 0;
+    const itemFreqMap = {};
+
+    for (const o of orderList) {
+      const cancelledItems = (o.items || []).filter(i => i.status === 'cancelled');
+      if (cancelledItems.length === 0) continue;
+
+      const tableNum = o.table?.tableNumber || o.tableCategory || 'Takeaway';
+      const orderNum = o.orderNumber ? `#${o.orderNumber}` : (o.billNumber ? `Bill #${o.billNumber}` : `Table ${tableNum}`);
+
+      let orderCancelledVal = 0;
+      const formattedCancelled = [];
+
+      for (const ci of cancelledItems) {
+        const qty = Number(ci.quantity) || 1;
+        const price = Number(ci.price) || 0;
+        const lineVal = qty * price;
+        orderCancelledVal += lineVal;
+        sumDeletedQty += qty;
+        itemFreqMap[ci.name] = (itemFreqMap[ci.name] || 0) + qty;
+
+        formattedCancelled.push({
+          name: ci.name,
+          quantity: qty,
+          price,
+          lineTotal: lineVal,
+          roundNumber: ci.roundNumber || 1,
+        });
+      }
+
+      sumDeletedVal += orderCancelledVal;
+      const canceller = findCanceller(o, cancelledItems[0]?.name);
+
+      deletedOrders.push({
+        orderId: o._id,
+        orderNumber: orderNum,
+        rawOrderNumber: o.orderNumber,
+        billNumber: o.billNumber ? `#${o.billNumber}` : null,
+        table: tableNum,
+        tableCategory: o.tableCategory,
+        orderStatus: o.status,
+        orderTotal: o.total || o.subtotal || 0,
+        activeItemsCount: (o.items || []).filter(i => i.status !== 'cancelled').length,
+        cancelledItems: formattedCancelled,
+        cancelledValue: orderCancelledVal,
+        date: o.createdAt ? new Date(o.createdAt).toISOString() : null,
+        cancelledBy: canceller,
+        hasKotRounds: (o.kotRounds || []).length > 0,
+      });
+    }
+
+    return { deletedOrders, sumDeletedVal, sumDeletedQty, itemFreqMap };
+  }
+
+  const currentKotData = extractKotDeletedOrders(currentOrders);
+  const baselineKotData = extractKotDeletedOrders(baselineOrders);
+
+  if (currentKotData.deletedOrders.length > 0) {
+    const totalDeletedVal = currentKotData.sumDeletedVal;
+    const totalDeletedQty = currentKotData.sumDeletedQty;
+    const affectedOrdersCount = currentKotData.deletedOrders.length;
+    const baseDeletedVal = baselineKotData.sumDeletedVal;
+
+    const monthlyRate = Math.round((totalDeletedVal / currentDays) * 30);
+    const estimatedMonthlyImpact = Math.max(totalDeletedVal, monthlyRate);
+
+    const topDeleted = Object.entries(currentKotData.itemFreqMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, qty]) => `${name} (${qty}x)`);
+
+    const orderNumbersList = currentKotData.deletedOrders
+      .slice(0, 6)
+      .map(o => o.orderNumber);
+    if (currentKotData.deletedOrders.length > 6) {
+      orderNumbersList.push(`+${currentKotData.deletedOrders.length - 6} more`);
+    }
+
+    const isHighRisk = totalDeletedVal >= 500 || affectedOrdersCount >= 3;
+    const score = Math.min(95, Math.round(65 + Math.min(20, totalDeletedVal / 100) + (affectedOrdersCount * 2)));
+
+    anomalies.push(enrichAnomaly({
+      id: 'kot_items_deleted_summary',
+      detector: 'kot_items_deleted',
+      domainGroup: 'kot_cancellations',
+      category: 'Kitchen & Billing',
+      item: topDeleted[0] ? topDeleted[0].split(' (')[0] : 'KOT Items',
+      title: `${totalDeletedQty} food item(s) sent to kitchen KOT later deleted across ${affectedOrdersCount} order(s)`,
+      severity: isHighRisk ? 'potential_leak' : 'unusual',
+      score,
+      confidence: 'high',
+      currentValue: totalDeletedVal,
+      baselineValue: baseDeletedVal || 0,
+      unit: '₹',
+      difference: totalDeletedVal,
+      percentageIncrease: baseDeletedVal > 0 ? Math.round(((totalDeletedVal - baseDeletedVal) / baseDeletedVal) * 100) : 100,
+      estimatedMonthlyImpact,
+      whyFlagged: [
+        `In ${affectedOrdersCount} order(s), items were punched and sent to kitchen KOT, but subsequently removed/cancelled before bill settlement.`,
+        `Total value of cancelled food items: ${formatInr(totalDeletedVal)} across ${totalDeletedQty} portion(s).`,
+        `Frequently deleted items: ${topDeleted.join(', ')}.`,
+        `Orders affected: ${orderNumbersList.join(', ')}.`,
+      ],
+      possibleCauses: [
+        'Customer changed mind or food delayed after KOT fired',
+        'Kitchen ingredient shortage after order placed',
+        'Food was served but cashier deleted item from bill to pocket cash (pilferage risk)',
+        'Mistaken duplicate punch corrected by staff',
+      ],
+      recommendedActions: [
+        'Cross-examine kitchen waste bin logs to verify if deleted items were actually discarded or served.',
+        'Require manager PIN authorization for deleting any item after KOT generation.',
+        'Review staff shift audit logs for repeated item deletions.',
+      ],
+      relatedOrders: currentKotData.deletedOrders,
+      historicalTrend: [
+        {
+          name: 'Baseline Period',
+          label: 'Baseline Period',
+          date: 'Baseline',
+          value: baseDeletedVal || 0,
+          orders: baselineKotData.deletedOrders.length,
+        },
+        {
+          name: 'Current Period',
+          label: 'Current Period',
+          date: 'Current',
+          value: totalDeletedVal,
+          orders: affectedOrdersCount,
+        },
+      ],
+    }));
+  }
+
+  // ── DETECTOR #10: CANCELLED BILLS & VOIDED ORDERS ───────────────────
+  // Identifies orders where food was ordered or bills printed and then cancelled
+  function extractCancelledBills(orderList) {
+    const cancelledList = [];
+    let sumCancelledVal = 0;
+    let printedAndCancelledCount = 0;
+
+    for (const o of orderList) {
+      if (o.status !== 'cancelled') continue;
+
+      const hasPrintedBill = Boolean(o.billPrinted || o.billPrintedAt);
+      const hasBillNumber = Boolean(o.billNumber != null || o.billedAt != null);
+      const itemsCount = (o.items || []).length;
+      const kotRoundsCount = (o.kotRounds || []).length;
+      const billVal = o.total || o.subtotal || (o.items || []).reduce((s, i) => s + ((i.price || 0) * (i.quantity || 1)), 0);
+
+      // Only count if order had actual items/KOT or was billed (ignore empty zero-dollar accidental opens)
+      if (billVal <= 0 && itemsCount === 0 && kotRoundsCount === 0) continue;
+
+      if (hasPrintedBill) printedAndCancelledCount++;
+      sumCancelledVal += billVal;
+
+      const tableNum = o.table?.tableNumber || o.tableCategory || 'Takeaway';
+      const orderNum = o.orderNumber ? `#${o.orderNumber}` : (o.billNumber ? `Bill #${o.billNumber}` : `Table ${tableNum}`);
+      const canceller = findCanceller(o, null);
+
+      cancelledList.push({
+        orderId: o._id,
+        orderNumber: orderNum,
+        rawOrderNumber: o.orderNumber,
+        billNumber: o.billNumber ? `#${o.billNumber}` : null,
+        table: tableNum,
+        tableCategory: o.tableCategory,
+        orderStatus: 'cancelled',
+        billPrinted: hasPrintedBill,
+        hasBillNumber,
+        orderTotal: billVal,
+        subtotal: o.subtotal || 0,
+        itemsCount,
+        itemsSummary: (o.items || []).map(i => `${i.name} (x${i.quantity || 1})`).slice(0, 4).join(', '),
+        kotRoundsCount,
+        date: o.createdAt ? new Date(o.createdAt).toISOString() : null,
+        cancelledAt: o.updatedAt ? new Date(o.updatedAt).toISOString() : null,
+        cancelledBy: canceller,
+      });
+    }
+
+    return { cancelledList, sumCancelledVal, printedAndCancelledCount };
+  }
+
+  const currentCancelledData = extractCancelledBills(currentOrders);
+  const baselineCancelledData = extractCancelledBills(baselineOrders);
+
+  if (currentCancelledData.cancelledList.length > 0) {
+    const totalCancelledVal = currentCancelledData.sumCancelledVal;
+    const cancelledCount = currentCancelledData.cancelledList.length;
+    const printedAndCancelledCount = currentCancelledData.printedAndCancelledCount;
+    const baseCancelledVal = baselineCancelledData.sumCancelledVal;
+
+    const monthlyRate = Math.round((totalCancelledVal / currentDays) * 30);
+    const estimatedMonthlyImpact = Math.max(totalCancelledVal, monthlyRate);
+
+    const cancelledOrderNumbers = currentCancelledData.cancelledList
+      .slice(0, 5)
+      .map(o => `${o.orderNumber}${o.billPrinted ? ' (Bill Printed)' : ''}`);
+    if (currentCancelledData.cancelledList.length > 5) {
+      cancelledOrderNumbers.push(`+${currentCancelledData.cancelledList.length - 5} more`);
+    }
+
+    const printedOrders = currentCancelledData.cancelledList
+      .filter(o => o.billPrinted)
+      .map(o => o.orderNumber);
+
+    const isCritical = printedAndCancelledCount > 0 || totalCancelledVal >= 1000;
+    const score = printedAndCancelledCount > 0 ? 95 : (totalCancelledVal >= 1000 ? 88 : 75);
+
+    anomalies.push(enrichAnomaly({
+      id: 'cancelled_bills_summary',
+      detector: 'cancelled_bills',
+      domainGroup: 'cancelled_orders',
+      category: 'Kitchen & Billing',
+      title: `${cancelledCount} bills/orders cancelled after preparation (${formatInr(totalCancelledVal)})`,
+      severity: isCritical ? 'potential_leak' : 'unusual',
+      score,
+      confidence: 'high',
+      currentValue: totalCancelledVal,
+      baselineValue: baseCancelledVal || 0,
+      unit: '₹',
+      difference: totalCancelledVal,
+      percentageIncrease: baseCancelledVal > 0 ? Math.round(((totalCancelledVal - baseCancelledVal) / baseCancelledVal) * 100) : 100,
+      estimatedMonthlyImpact,
+      whyFlagged: [
+        `${cancelledCount} order(s) with food prepared were marked cancelled during this period.`,
+        printedAndCancelledCount > 0
+          ? `⚠️ HIGH RISK: ${printedAndCancelledCount} order(s) (${printedOrders.join(', ')}) were cancelled AFTER the customer bill was already printed!`
+          : `Orders were cancelled or voided without recorded payment settlement.`,
+        `Total cancelled bill value: ${formatInr(totalCancelledVal)}.`,
+        `Orders affected: ${cancelledOrderNumbers.join(', ')}.`,
+      ],
+      possibleCauses: [
+        'Cash payment collected from customer, then order cancelled in POS (revenue diversion)',
+        'Customer walked out or cancelled order after food delay',
+        'Billing dispute or wrong items punched by staff',
+        'Duplicate order created and discarded',
+      ],
+      recommendedActions: [
+        printedAndCancelledCount > 0
+          ? `Immediately investigate orders with printed bills (${printedOrders.join(', ')}) against cashier shift records and UPI logs.`
+          : 'Conduct audit with restaurant captain for reasons behind cancelled orders.',
+        'Review CCTV camera footage matching cancellation timestamps.',
+        'Enforce mandatory manager pin approval for any bill cancellation in POS settings.',
+      ],
+      relatedOrders: currentCancelledData.cancelledList,
+      historicalTrend: [
+        {
+          name: 'Baseline Period',
+          label: 'Baseline Period',
+          date: 'Baseline',
+          value: baseCancelledVal || 0,
+          orders: baselineCancelledData.cancelledList.length,
+        },
+        {
+          name: 'Current Period',
+          label: 'Current Period',
+          date: 'Current',
+          value: totalCancelledVal,
+          orders: cancelledCount,
+        },
+      ],
+    }));
+
+    // Highlight individual high-risk cancelled bills (specifically bills printed or value >= 350)
+    for (const o of currentCancelledData.cancelledList) {
+      if (o.billPrinted || o.orderTotal >= 350) {
+        anomalies.push(enrichAnomaly({
+          id: `cancelled_bill_${o.orderId}`,
+          detector: 'cancelled_bills',
+          domainGroup: `cancelled_order_${o.orderId}`,
+          category: 'Kitchen & Billing',
+          title: `Bill for ${o.orderNumber} (Table ${o.table}) was ${o.billPrinted ? 'printed and then cancelled' : 'cancelled'} (${formatInr(o.orderTotal)})`,
+          severity: o.billPrinted ? 'potential_leak' : 'unusual',
+          score: o.billPrinted ? 96 : 82,
+          confidence: 'high',
+          currentValue: o.orderTotal,
+          baselineValue: 0,
+          unit: '₹',
+          difference: o.orderTotal,
+          percentageIncrease: 100,
+          estimatedMonthlyImpact: o.orderTotal,
+          whyFlagged: [
+            o.billPrinted
+              ? `Customer bill was printed on Table ${o.table} (Total: ${formatInr(o.orderTotal)}) but the bill was subsequently cancelled instead of being settled.`
+              : `Order for Table ${o.table} (${o.itemsCount} items) was cancelled with total ${formatInr(o.orderTotal)}.`,
+            `Items included: ${o.itemsSummary || 'Food items'}.`,
+            `Action recorded by: ${o.cancelledBy}.`,
+          ],
+          possibleCauses: [
+            'Customer paid cash and cashier cancelled order in software',
+            'Customer dispute or walkout after receiving bill',
+            'Order entered for testing or wrong table',
+          ],
+          recommendedActions: [
+            'Verify cashier shift register and cash drawer tally for this timestamp.',
+            'Confirm if food was discarded or served with table captain.',
+          ],
+          relatedOrders: [o],
+        }));
+      }
+    }
+  }
+
   // ── ANTI-DOUBLE-COUNTING & ROOT CAUSE AGGREGATION ───────────────────
   // Group anomalies by domain/root cause to avoid counting overlapping impacts
   // e.g. Chicken Price Spike (₹18,000) inside Raw Materials Food Cost Anomaly (₹25,000)
@@ -804,7 +1154,9 @@ function analyzeExpenseLeaks({
     // Map item-level raw material alerts and category raw material alerts to a shared cluster
     const clusterKey = (domain.startsWith('item_') || domain.includes('raw_materials') || a.category === 'Raw Materials')
       ? 'cluster_food_cost_and_raw_materials'
-      : domain;
+      : (domain.includes('kot_') || domain.includes('cancelled_') || a.category === 'Kitchen & Billing')
+        ? 'cluster_billing_and_cancellations'
+        : domain;
 
     if (!rootCauseMap.has(clusterKey)) {
       rootCauseMap.set(clusterKey, {
@@ -830,7 +1182,11 @@ function analyzeExpenseLeaks({
     if (cluster.anomalies.length > 1) {
       cluster.anomalies.forEach(a => {
         a.rootCauseCluster = {
-          name: cluster.clusterKey === 'cluster_food_cost_and_raw_materials' ? 'Raw Materials & Food Cost Escalation' : 'Related Signals',
+          name: cluster.clusterKey === 'cluster_food_cost_and_raw_materials'
+            ? 'Raw Materials & Food Cost Escalation'
+            : cluster.clusterKey === 'cluster_billing_and_cancellations'
+              ? 'Operational Cancellations & Voided Bills'
+              : 'Related Signals',
           relatedAlertCount: cluster.anomalies.length,
           combinedImpact: cluster.maxImpact,
           isDeduplicated: true,
@@ -869,26 +1225,31 @@ function analyzeExpenseLeaks({
       action: a.recommendedActions?.[0] || 'Investigate invoice and pricing',
     }));
 
-  return {
-    summary: {
-      totalPotentialImpact: deduplicatedMonthlyImpact,
-      highRiskCount,
-      needsAttentionCount,
-      normalCount,
-      categoriesAnalyzed,
-      totalIssuesCount: activeAnomalies.length,
-      reviewedCount: anomalies.filter(a => a.status === 'reviewed').length,
-      dismissedCount: anomalies.filter(a => a.status === 'dismissed').length,
-      priorities: topPriorities,
-      salesTotal: currentSalesTotal,
-      salesGrowthPct,
-      hasEnoughData,
-      insufficientDataReason,
-    },
-    anomalies,
-    categories: Array.from(categorySpending.keys()),
-    suppliers: Array.from(new Set(purchases.map(p => p.supplier?.name || (p.supplier ? String(p.supplier) : null)).filter(Boolean))),
-  };
+    const allCategoryKeys = new Set(categorySpending.keys());
+    if (currentKotData.deletedOrders.length > 0 || currentCancelledData.cancelledList.length > 0) {
+      allCategoryKeys.add('Kitchen & Billing');
+    }
+
+    return {
+      summary: {
+        totalPotentialImpact: deduplicatedMonthlyImpact,
+        highRiskCount,
+        needsAttentionCount,
+        normalCount,
+        categoriesAnalyzed: allCategoryKeys.size,
+        totalIssuesCount: activeAnomalies.length,
+        reviewedCount: anomalies.filter(a => a.status === 'reviewed').length,
+        dismissedCount: anomalies.filter(a => a.status === 'dismissed').length,
+        priorities: topPriorities,
+        salesTotal: currentSalesTotal,
+        salesGrowthPct,
+        hasEnoughData,
+        insufficientDataReason,
+      },
+      anomalies,
+      categories: Array.from(allCategoryKeys),
+      suppliers: Array.from(new Set(purchases.map(p => p.supplier?.name || (p.supplier ? String(p.supplier) : null)).filter(Boolean))),
+    };
 }
 
 module.exports = {

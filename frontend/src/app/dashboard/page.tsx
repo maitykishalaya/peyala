@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ownerNote, setOwnerNote] = useState<string>('');
+  const [summaryPeriod, setSummaryPeriod] = useState<'today' | 'yesterday'>('yesterday');
 
   const fetchFresh = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -109,10 +110,19 @@ export default function DashboardPage() {
   );
 
   const month = data?.month || {};
-  const todaySales = data?.today?.sales;
   const yesterday = data?.yesterday || {};
+  const today = data?.today || {};
   const accounts = data?.accounts || [];
   const charts = data?.charts || {};
+
+  const isToday = summaryPeriod === 'today';
+  const activeSummary = isToday ? today : yesterday;
+  const activeDate = isToday ? (activeSummary.date || new Date().toISOString()) : yesterday.date;
+  const hasSummaryData = Boolean(
+    activeSummary.sales ||
+    (activeSummary.purchases?.count && activeSummary.purchases.count > 0) ||
+    (Array.isArray(activeSummary.purchases?.entries) && activeSummary.purchases.entries.length > 0)
+  );
 
   const daysElapsed = month.daysElapsed || Math.max(1, new Date().getDate());
   const dailyAverage = month.dailyAverage || {
@@ -179,53 +189,66 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {/* Yesterday's Summary Banner */}
-        <div className="card p-5 bg-gradient-to-r from-brand-500 to-brand-600 text-white border-0">
-          <p className="text-sm font-medium text-brand-100 mb-3">
-            Yesterday's Summary{yesterday.date ? ` · ${formatDate(yesterday.date)}` : ''}
-          </p>
+        {/* Yesterday's / Today's Summary Banner */}
+        <div className="card p-5 bg-gradient-to-r from-brand-500 to-brand-600 text-white border-0 shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                  {isToday ? "Today's Summary" : "Yesterday's Summary"}
+                </h3>
+                {isToday && (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-950 bg-emerald-300 px-2 py-0.5 rounded-full shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-700 animate-pulse" />
+                    Live
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-brand-100 mt-0.5">
+                {activeDate ? formatDate(activeDate) : (isToday ? 'Today' : 'Yesterday')}
+              </p>
+            </div>
 
-          {(yesterday.sales || yesterday.purchases?.count > 0) ? (
+            {/* Toggle Switch */}
+            <div className="inline-flex items-center bg-black/20 backdrop-blur-xs p-1 rounded-xl border border-white/20 shadow-inner self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setSummaryPeriod('yesterday')}
+                className={cn(
+                  "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                  summaryPeriod === 'yesterday'
+                    ? "bg-white text-brand-700 shadow-xs"
+                    : "text-brand-100 hover:text-white"
+                )}
+              >
+                Yesterday
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryPeriod('today')}
+                className={cn(
+                  "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                  summaryPeriod === 'today'
+                    ? "bg-white text-brand-700 shadow-xs"
+                    : "text-brand-100 hover:text-white"
+                )}
+              >
+                <span>Today</span>
+                <span className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  summaryPeriod === 'today' ? "bg-emerald-500 animate-pulse" : "bg-white/40"
+                )} />
+              </button>
+            </div>
+          </div>
+
+          {hasSummaryData ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Sales side */}
               <div className="bg-white/10 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-brand-200">Sales</p>
-                  {isViewer && (
-                    <span className="text-[10px] bg-white/20 text-white font-semibold px-1.5 py-0.5 rounded">
-                      Protected
-                    </span>
-                  )}
-                </div>
-                {yesterday.sales ? (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-brand-200">Outlet</span>
-                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.outlet || 0)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-brand-200">Zomato</span>
-                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.zomato || 0)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-brand-200">Fatafat</span>
-                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.fatafat || 0)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm pt-1.5 mt-1.5 border-t border-white/20">
-                      <span className="font-medium">Total</span>
-                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(yesterday.sales.total || 0)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-brand-200">No sales entry was made</p>
-                )}
-              </div>
-
-              {/* Purchases side */}
-              <div className="bg-white/10 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-brand-200">
-                    Purchases {yesterday.purchases?.count > 0 && `(${yesterday.purchases.count})`}
+                  <p className="text-xs text-brand-200 font-medium">
+                    Sales {isToday && '(So Far)'}
                   </p>
                   {isViewer && (
                     <span className="text-[10px] bg-white/20 text-white font-semibold px-1.5 py-0.5 rounded">
@@ -233,9 +256,47 @@ export default function DashboardPage() {
                     </span>
                   )}
                 </div>
-                {yesterday.purchases?.count > 0 ? (
+                {activeSummary.sales ? (
                   <div className="space-y-1">
-                    {yesterday.purchases.entries.slice(0, 3).map((p: any, i: number) => (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-brand-200">Outlet</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(activeSummary.sales.outlet || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-brand-200">Zomato</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(activeSummary.sales.zomato || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-brand-200">Fatafat</span>
+                      <span className="font-semibold">{isViewer ? '••••••' : formatCurrency(activeSummary.sales.fatafat || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm pt-1.5 mt-1.5 border-t border-white/20">
+                      <span className="font-medium">Total</span>
+                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(activeSummary.sales.total || 0)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-brand-200">
+                    {isToday ? 'No sales recorded yet today' : 'No sales entry was made'}
+                  </p>
+                )}
+              </div>
+
+              {/* Purchases side */}
+              <div className="bg-white/10 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-brand-200 font-medium">
+                    Purchases {activeSummary.purchases?.count > 0 && `(${activeSummary.purchases.count})`}
+                  </p>
+                  {isViewer && (
+                    <span className="text-[10px] bg-white/20 text-white font-semibold px-1.5 py-0.5 rounded">
+                      Protected
+                    </span>
+                  )}
+                </div>
+                {activeSummary.purchases?.count > 0 ? (
+                  <div className="space-y-1">
+                    {activeSummary.purchases.entries.slice(0, 3).map((p: any, i: number) => (
                       <div key={i} className="flex justify-between text-xs">
                         <span className="text-brand-200 truncate mr-2">{p.supplier}</span>
                         <span className="font-semibold flex items-center gap-1">
@@ -244,21 +305,27 @@ export default function DashboardPage() {
                         </span>
                       </div>
                     ))}
-                    {yesterday.purchases.entries.length > 3 && (
-                      <p className="text-[10px] text-brand-200">+{yesterday.purchases.entries.length - 3} more</p>
+                    {activeSummary.purchases.entries.length > 3 && (
+                      <p className="text-[10px] text-brand-200">+{activeSummary.purchases.entries.length - 3} more</p>
                     )}
                     <div className="flex justify-between text-sm pt-1.5 mt-1.5 border-t border-white/20">
                       <span className="font-medium">Total</span>
-                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(yesterday.purchases.total)}</span>
+                      <span className="font-bold">{isViewer ? '••••••' : formatCurrency(activeSummary.purchases.total)}</span>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-brand-200">No purchases recorded</p>
+                  <p className="text-xs text-brand-200">
+                    {isToday ? 'No purchases recorded today' : 'No purchases recorded'}
+                  </p>
                 )}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-brand-100">No sales or purchases recorded yesterday.</p>
+            <p className="text-sm text-brand-100">
+              {isToday
+                ? 'No sales or purchases recorded today yet.'
+                : 'No sales or purchases recorded yesterday.'}
+            </p>
           )}
         </div>
 

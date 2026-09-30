@@ -10,7 +10,7 @@
     --brand-light: #fae5d3;
   }
   * { @apply border-gray-200 dark:border-gray-800; }
-  body { @apply antialiased; }
+  body { @apply antialiased; overscroll-behavior-y: none; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { @apply bg-gray-100 dark:bg-gray-900; }
   ::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }

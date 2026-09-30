@@ -8,6 +8,7 @@ const PurchaseEntry = require('../models/PurchaseEntry');
 const SalesEntry = require('../models/SalesEntry');
 const Order = require('../models/Order');
 const ExpenseLeakReview = require('../models/ExpenseLeakReview');
+const AuditLog = require('../models/AuditLog');
 const { auth } = require('../middleware/auth');
 const { getIstDayRange } = require('../utils/date');
 const { analyzeExpenseLeaks } = require('../utils/expenseLeakEngine');
@@ -99,7 +100,7 @@ router.get('/', async (req, res) => {
     const totalQueryStart = baselineRange.start;
     const totalQueryEnd = currentRange.end;
 
-    const [payments, purchases, salesEntries, orders, reviews] = await Promise.all([
+    const [payments, purchases, salesEntries, orders, auditLogs, reviews] = await Promise.all([
       Payment.find({ date: { $gte: totalQueryStart, $lte: totalQueryEnd } })
         .populate('supplier', 'name')
         .lean(),
@@ -111,11 +112,23 @@ router.get('/', async (req, res) => {
         .select('date totalRevenue outletSales zomato fatafat otherSales')
         .lean(),
       Order.find({
-        status: 'paid',
-        paidAt: { $gte: totalQueryStart, $lte: totalQueryEnd }
+        $or: [
+          { paidAt: { $gte: totalQueryStart, $lte: totalQueryEnd } },
+          { createdAt: { $gte: totalQueryStart, $lte: totalQueryEnd } },
+          { updatedAt: { $gte: totalQueryStart, $lte: totalQueryEnd } },
+          { billedAt: { $gte: totalQueryStart, $lte: totalQueryEnd } },
+        ]
       })
-        .select('paidAt total settledAmount')
+        .populate('table', 'tableNumber')
+        .populate('createdBy', 'name')
         .lean(),
+      AuditLog.find({
+        createdAt: { $gte: totalQueryStart, $lte: totalQueryEnd },
+        $or: [
+          { module: 'Orders' },
+          { description: { $regex: /cancel/i } }
+        ]
+      }).sort({ createdAt: -1 }).limit(200).lean(),
       ExpenseLeakReview.find().lean(),
     ]);
 
@@ -134,6 +147,7 @@ router.get('/', async (req, res) => {
       purchases,
       salesEntries,
       orders,
+      auditLogs,
       currentRange,
       baselineRange,
       reviewsMap,
