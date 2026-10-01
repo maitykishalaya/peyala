@@ -1,6 +1,6 @@
 # 🍵 Peyala Business Admin & Dine-In POS
 
-A comprehensive, self-hosted restaurant management and Point-of-Sale (POS) system built specifically for **Peyala Café & Restaurant** (Howrah, West Bengal).
+A comprehensive, self-hosted restaurant management and Point-of-Sale (POS) system built specifically for **Peyala Café & Restaurant** (Midnapore, West Bengal).
 
 Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm thermal receipt printing, daily sales consolidation, inventory costing, supplier dues, expense tracking, staff payroll & attendance, and double-entry style financial reporting.
 

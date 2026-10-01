@@ -9,7 +9,7 @@
 
 ## 1) Mission & Project Intent
 
-Peyala v8 is a production-grade restaurant operations and management system built for **Peyala Café & Restaurant** (Howrah, West Bengal). It unifies:
+Peyala v8 is a production-grade restaurant operations and management system built for **Peyala Café & Restaurant** (Midnapore, West Bengal). It unifies:
 1. **Dine-In POS & Table Management** (live floor status, guest seating, multi-round KOT dispatch, item status tracking, billing, and settlements).
 2. **Thermal Printing Engine** (80mm KOT tickets & customer bills, with seamless toggle between visual preview/PDF in Test Mode and silent printing in Production Mode).
 3. **Consolidated Sales Accounting** (single auto-updating daily sales row in IST + Zomato/Swiggy net settlements).
@@ -755,5 +755,26 @@ Whenever changes are made, run this validation suite before concluding:
   - Added create-windows-desktop-app-shortcut.bat forwarding alias to create-windows-shortcut.bat ensuring backward and forward compatibility for INSTALL-PEYALA-POS.bat.
   - Comprehensive .gitignore filtering out heavy binary toolchains (>1GB portable Android SDK, Gradle, JDK, and setup executables) to keep repository size lean and prevent GitHub 100MB file size rejections.
 
+### 5.13 October 2026 Core Reliability & Analytics Upgrades
+- **Text Box Out-of-Focus / Input Freeze Resolution**:
+  - **Root Cause**: Silent thermal printing via hidden `<iframe>` retained in `document.body` caused Chromium's RenderFrameHost to lock keyboard input routing to the invisible iframe.
+  - **Resolution**:
+    - Converted `frontend/src/lib/thermal-print.ts` and `frontend/src/app/attendance/page.tsx` print engines to strictly ephemeral iframes destroyed upon completion with guaranteed `window.focus()` restoration.
+    - Global watchdog installed in `AppLayout.tsx` capturing focusin/pointerdown events to re-establish window focus and caret navigation.
+    - Desktop Electron IPC bridge `electronAPI.ensureFocus()` handles top-level native OS window refocus.
+- **Global Brand Alignment (Howrah → Midnapore)**:
+  - Replaced all operational and documentation references from "Howrah" to "Midnapore" across `README.md`, `MEMORY_BANK.md`, `scripts/build-apk.js`, `frontend/src/lib/export-utils.ts`, and database seed/supplier records.
+- **Item-Wise Variations & Add-ons Sales Tracking**:
+  - Unified item naming helper `getOrderItemDetails` formats `{ fullName, baseName, variantName, addons }`.
+  - `/api/analytics/menu-performance` groups items by full item configuration (variant + add-ons) so variations (e.g. French Fries vs Peri Peri Fries) are distinctly itemized.
+  - Report previews, item modals, and multi-format exports (CSV, Excel, PDF) now render variant pills and add-on tags.
+- **GST & Tax Filing Discrepancy Breakdown Table**:
+  - Enriched `/api/analytics/gst-report` with complete per-bill discrepancy audit records (`billNumber`, `tableNumber`, `date`, `taxableAmount`, `recordedTax`, `expectedTax`, `variance`, `discrepancyType`, `explanation`, `itemsSummary`).
+  - Rendered interactive Audit Table in `/analytics` GST tab whenever tax discrepancies are detected.
+- **Monthly Inventory Value Comparison Engine**:
+  - Added `InventorySnapshot` model (`monthKey`, `monthLabel`, `cutoffDate`, `cutoffFormatted`, `totalValue`, `itemCount`, `items`).
+  - Added `/api/inventory/month-comparison` dynamically comparing current stock value against the previous month-end baseline (e.g. during October compares against Sep 30 11:59 PM; updates automatically with each passing month).
+  - Rendered high-visibility comparison badge in `/inventory` header displaying difference (`+₹X (+Y%) than prev month`) and direction.
+
 ---
-*Last Updated: September 2026 · Peyala v8 Engineering*
+*Last Updated: October 2026 · Peyala v8 Engineering*

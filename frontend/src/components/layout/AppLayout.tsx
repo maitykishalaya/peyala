@@ -124,6 +124,75 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [dark, mounted]);
 
+  // ── GLOBAL INPUT FOCUS & WINDOW RE-SYNCHRONIZATION GUARD ──────────
+  // Permanently prevents Windows / Chromium focus-loss bug where textboxes
+  // stop taking keyboard inputs until switching tabs.
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && ['INPUT', 'TEXTAREA'].includes(active.tagName)) {
+        try {
+          active.focus();
+        } catch (_) {}
+      }
+    };
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true')) {
+        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
+          try {
+            window.focus();
+            (window as any).electronAPI?.ensureFocus?.();
+          } catch (_) {}
+        }
+        setTimeout(() => {
+          if (document.activeElement !== target && typeof target.focus === 'function') {
+            try {
+              target.focus();
+            } catch (_) {}
+          }
+        }, 0);
+      }
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
+          try {
+            window.focus();
+            (window as any).electronAPI?.ensureFocus?.();
+          } catch (_) {}
+        }
+      }
+    };
+
+    const cleanupStrandedFrames = () => {
+      const frames = document.querySelectorAll('iframe[id*="print"], iframe[id*="thermal"]');
+      frames.forEach((f) => {
+        try {
+          if (f.parentNode) f.parentNode.removeChild(f);
+        } catch (_) {}
+      });
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('mousedown', handlePointerDown as any, true);
+    document.addEventListener('touchstart', handlePointerDown as any, { capture: true, passive: true });
+    document.addEventListener('focusin', handleFocusIn, true);
+
+    const frameCheckInterval = setInterval(cleanupStrandedFrames, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('mousedown', handlePointerDown as any, true);
+      document.removeEventListener('touchstart', handlePointerDown as any, true);
+      document.removeEventListener('focusin', handleFocusIn, true);
+      clearInterval(frameCheckInterval);
+    };
+  }, []);
+
   // ── HOURLY DATABASE SYNC (EXCEPT /tables AND /kds) ─────────────────
   useEffect(() => {
     // Tables POS and Kitchen KDS have their own fast polling intervals and must not be interrupted

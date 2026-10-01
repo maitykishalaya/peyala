@@ -111,49 +111,82 @@ export function printThermalSlip(html: string) {
     return;
   }
 
-  // 2. Web Browser Fallback via Hidden Iframe (For mobile waiter devices on LAN)
-  let iframe = document.getElementById('thermal-print-frame') as HTMLIFrameElement;
-  if (!iframe) {
-    iframe = document.createElement('iframe');
-    iframe.id = 'thermal-print-frame';
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-    iframe.tabIndex = -1;
-    iframe.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(iframe);
+  // 2. Web Browser Fallback via Ephemeral Iframe (Safely isolated and destroyed post-print)
+  const previouslyFocused = typeof document !== 'undefined'
+    ? (document.activeElement as HTMLElement | null)
+    : null;
+
+  // Clean up any stale print frames that might linger in DOM
+  const existingFrame = document.getElementById('thermal-print-frame');
+  if (existingFrame && existingFrame.parentNode) {
+    try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
   }
 
+  const iframe = document.createElement('iframe');
+  iframe.id = 'thermal-print-frame';
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '1px';
+  iframe.style.height = '1px';
+  iframe.style.border = '0';
+  iframe.style.opacity = '0.01';
+  iframe.style.pointerEvents = 'none';
+  iframe.tabIndex = -1;
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+
   const doc = iframe.contentWindow?.document;
-  if (!doc) return;
+  if (!doc) {
+    try { iframe.remove(); } catch (_) {}
+    return;
+  }
+
+  let cleanedUp = false;
+  const restoreFocusAndCleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    try {
+      if (iframe && iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    } catch (_) {}
+
+    // Ensure the top-level window explicitly reclaims focus from the print frame
+    try {
+      window.focus();
+    } catch (_) {}
+
+    // Restore focus to the cashier's active input/textarea if applicable
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function' && document.body.contains(previouslyFocused)) {
+      try {
+        previouslyFocused.focus();
+      } catch (_) {}
+    }
+  };
 
   doc.open();
   doc.write(html);
   doc.close();
 
-  // Preserve currently focused element so background printing never steals active typing focus
-  const previouslyFocused = typeof document !== 'undefined'
-    ? (document.activeElement as HTMLElement | null)
-    : null;
+  // Attach afterprint event listener on iframe window
+  if (iframe.contentWindow) {
+    try {
+      iframe.contentWindow.onafterprint = () => {
+        restoreFocusAndCleanup();
+      };
+    } catch (_) {}
+  }
 
   setTimeout(() => {
     try {
       iframe.contentWindow?.print();
     } catch (err) {
       console.error('Thermal print failed:', err);
-    } finally {
-      // Immediately restore focus back to the user's active input field
-      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
-        try {
-          previouslyFocused.focus();
-        } catch (_) {}
-      }
+      restoreFocusAndCleanup();
     }
+    // Safety fallback: ensure cleanup and focus restoration within 1200ms
+    setTimeout(restoreFocusAndCleanup, 1200);
   }, 150);
 }
 

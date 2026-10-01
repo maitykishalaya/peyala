@@ -45,6 +45,7 @@ export default function ThermalPreviewModal() {
   const handleClose = () => {
     setOpen(false);
     setPayload(null);
+    try { window.focus(); } catch (_) {}
   };
 
   const handlePrintOrPdf = () => {

@@ -14,6 +14,7 @@ const { auth, managerOrAdmin } = require('../middleware/auth');
 const { getIstDayRange, getIstFiscalQuarter } = require('../utils/date');
 const { evaluateSalesSuggestions } = require('../utils/salesSuggestionEngine');
 const { matchesSearch } = require('../utils/search');
+const { getOrderItemDetails } = require('../utils/itemFormat');
 
 router.use(auth);
 
@@ -556,7 +557,8 @@ router.get('/overview', async (req, res) => {
       const orderDiscPct = (Number(o.subtotal) || 0) > 0 ? (Number(o.discount) || 0) / Number(o.subtotal) : 0;
       o.items?.forEach((it) => {
         if (it.status === 'cancelled') return;
-        const key = it.name || 'Unnamed Item';
+        const details = getOrderItemDetails(it);
+        const key = details.fullName;
         const qty = Number(it.quantity) || 1;
         const price = Number(it.price) || 0;
         const lineBase = qty * price;
@@ -568,8 +570,11 @@ router.get('/overview', async (req, res) => {
 
         if (!itemMap.has(key)) {
           itemMap.set(key, {
-            itemId: it.menuItem ? String(it.menuItem) : key,
-            name: key,
+            itemId: it.menuItem ? `${it.menuItem}_${details.variantName || 'standard'}` : key,
+            name: details.fullName,
+            baseName: details.baseName,
+            variantName: details.variantName,
+            addons: details.addons,
             quantitySold: 0,
             grossSales: 0,
             gst: 0,
@@ -783,7 +788,8 @@ router.get('/items', async (req, res) => {
 
       o.items?.forEach((it) => {
         if (it.status === 'cancelled') return;
-        const key = it.name?.trim() || 'Unnamed Item';
+        const details = getOrderItemDetails(it);
+        const key = details.fullName;
         const qty = Number(it.quantity) || 1;
         const price = Number(it.price) || 0;
         const lineBase = qty * price;
@@ -799,8 +805,11 @@ router.get('/items', async (req, res) => {
 
         if (!aggregated.has(key)) {
           aggregated.set(key, {
-            itemId: menuItemId || key,
-            name: key,
+            itemId: menuItemId ? `${menuItemId}_${details.variantName || 'standard'}` : key,
+            name: details.fullName,
+            baseName: details.baseName,
+            variantName: details.variantName,
+            addons: details.addons,
             category: catName,
             isVeg: meta ? Boolean(meta.isVeg) : true,
             quantitySold: 0,
@@ -842,7 +851,7 @@ router.get('/items', async (req, res) => {
 
     // Filter by Search Query
     if (search && String(search).trim()) {
-      items = items.filter((it) => matchesSearch([it.name, it.category], search));
+      items = items.filter((it) => matchesSearch([it.name, it.baseName, it.variantName, it.category], search));
     }
 
     // Sort items
@@ -936,7 +945,9 @@ router.get('/item/:id', async (req, res) => {
       const orderDiscPct = (Number(o.subtotal) || 0) > 0 ? (Number(o.discount) || 0) / Number(o.subtotal) : 0;
 
       o.items?.forEach((it) => {
-        if (it.status === 'cancelled' || it.name !== itemName) return;
+        if (it.status === 'cancelled') return;
+        const details = getOrderItemDetails(it);
+        if (details.fullName !== itemName && details.baseName !== itemName && it.name !== itemName) return;
         const qty = Number(it.quantity) || 1;
         const price = Number(it.price) || 0;
         const lineBase = qty * price;
@@ -1039,7 +1050,7 @@ router.get('/gst', async (req, res) => {
     const orders = await Order.find({
       status: 'paid',
       paidAt: { $gte: currentStart, $lte: currentEnd },
-    }).lean();
+    }).populate('table', 'tableNumber').lean();
 
     // Fetch menu items for category mapping
     const menuItems = await MenuItem.find().populate('category', 'name').lean();
@@ -1162,13 +1173,17 @@ router.get('/gst', async (req, res) => {
         rEntry.invoiceValue += lineInvoice;
 
         // Item breakdown
-        const itKey = it.name?.trim() || 'Item';
+        const details = getOrderItemDetails(it);
+        const itKey = details.fullName;
         const meta = it.menuItem ? itemMap.get(String(it.menuItem)) : null;
         const catName = meta?.category?.name || 'Food';
 
         if (!itemWiseMap.has(itKey)) {
           itemWiseMap.set(itKey, {
-            name: itKey,
+            name: details.fullName,
+            baseName: details.baseName,
+            variantName: details.variantName,
+            addons: details.addons,
             category: catName,
             quantity: 0,
             taxableValue: 0,
@@ -1190,16 +1205,48 @@ router.get('/gst', async (req, res) => {
 
       // Discrepancy check: expected tax vs recorded tax
       const expectedTax = Math.round(((orderTaxable * 0.05) * 100) / 100);
-      if (Math.abs(expectedTax - orderTax) > 1) {
+      const diff = Math.round((orderTax - expectedTax) * 100) / 100;
+      if (Math.abs(diff) > 1) {
+        let discType = 'Tax Calculation Mismatch';
+        let explanation = `Recorded GST ₹${orderTax.toFixed(2)} vs expected 5% GST ₹${expectedTax.toFixed(2)} (${diff > 0 ? '+' : ''}₹${diff.toFixed(2)} variance on ₹${orderTaxable.toFixed(2)} taxable subtotal)`;
+        if (orderTaxable > 0 && orderTax === 0) {
+          discType = 'Untaxed Paid Bill';
+          explanation = `Bill was settled with ₹0 GST on taxable sales of ₹${orderTaxable.toFixed(2)} (Expected ₹${expectedTax.toFixed(2)} GST)`;
+        } else if (diff < 0) {
+          discType = 'Tax Under-Collected';
+        } else if (diff > 0) {
+          discType = 'Tax Over-Collected';
+        }
+
+        const itemsSummary = (o.items || [])
+          .filter(i => i.status !== 'cancelled')
+          .map(i => {
+            const d = getOrderItemDetails(i);
+            return `${i.quantity}x ${d.fullName}`;
+          })
+          .slice(0, 3)
+          .join(', ');
+
         discrepancies.push({
           orderId: o._id,
+          billNumber: o.billNumber != null ? `#${o.billNumber}` : (o.orderNumber != null ? `Order #${o.orderNumber}` : `#${String(o._id).slice(-6)}`),
           orderNumber: o.orderNumber || o.billNumber || 'Order',
+          tableNumber: o.table?.tableNumber || o.tableNumber || (o.tableCategory || 'Dine In'),
+          customerName: o.customerName || null,
           date: dateStr,
+          paidAt: paidDate,
           subtotal: orderSubtotal,
+          discount: orderDiscount,
+          taxableAmount: orderTaxable,
           recordedTax: orderTax,
           expectedTax,
-          difference: Math.round((orderTax - expectedTax) * 100) / 100,
-          reason: 'Tax calculation deviates by > ₹1 from standard 5% restaurant rate',
+          variance: diff,
+          difference: diff,
+          totalAmount: orderTotal,
+          discrepancyType: discType,
+          explanation,
+          reason: explanation,
+          itemsSummary: itemsSummary || 'No items',
         });
       }
     });

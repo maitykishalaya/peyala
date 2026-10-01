@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const InventoryCategory = require('../models/InventoryCategory');
 const InventoryItem = require('../models/InventoryItem');
 const PurchaseEntry = require('../models/PurchaseEntry');
+const InventorySnapshot = require('../models/InventorySnapshot');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
@@ -131,6 +132,91 @@ router.get('/items', async (req, res) => {
     const enriched = await attachLatestPurchases(items);
     res.json(enriched);
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── GET /api/inventory/month-comparison ───────────────────────────
+// Returns comparison between current inventory value and previous month-end value.
+// Dynamically updates with each passing month (e.g., in October compares against
+// Sep 30 11:59 PM; in November compares against Oct 31 11:59 PM).
+router.get('/month-comparison', async (req, res) => {
+  try {
+    const now = new Date();
+    // Previous month end timestamp: e.g. For Oct 2026 -> 30 Sep 2026, 23:59:59.999
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const prevYear = prevMonthEnd.getFullYear();
+    const prevMonth = prevMonthEnd.getMonth() + 1;
+    const prevMonthKey = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+    const prevMonthLabel = prevMonthEnd.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const prevMonthShortCutoff = `${prevMonthEnd.getDate()} ${prevMonthEnd.toLocaleString('en-US', { month: 'short' })}, 11:59 PM`;
+
+    // 1. Current inventory value across all active stock items
+    const activeItems = await InventoryItem.find({ isActive: true });
+    let currentTotalValue = 0;
+    const itemDetails = [];
+
+    for (const item of activeItems) {
+      const cost = Number(item.averageCost) || Number(item.lastPurchasePrice) || 0;
+      const stock = Number(item.currentStock) || 0;
+      const val = Math.round(stock * cost * 100) / 100;
+      currentTotalValue += val;
+      itemDetails.push({
+        itemId: item._id,
+        name: item.name,
+        unit: item.unit,
+        stock,
+        averageCost: cost,
+        value: val,
+      });
+    }
+    currentTotalValue = Math.round(currentTotalValue * 100) / 100;
+
+    // 2. Retrieve or establish previous month-end snapshot
+    let prevSnapshot = await InventorySnapshot.findOne({ monthKey: prevMonthKey });
+    if (!prevSnapshot) {
+      // Create baseline snapshot for previous month end
+      prevSnapshot = await InventorySnapshot.create({
+        monthKey: prevMonthKey,
+        monthLabel: prevMonthLabel,
+        cutoffDate: prevMonthEnd,
+        cutoffFormatted: prevMonthShortCutoff,
+        totalValue: currentTotalValue,
+        itemCount: activeItems.length,
+        items: itemDetails,
+        isAutomatic: true,
+      });
+    }
+
+    const prevValue = prevSnapshot.totalValue || 0;
+    const diff = Math.round((currentTotalValue - prevValue) * 100) / 100;
+    const percentage = prevValue > 0 ? Math.round(((currentTotalValue - prevValue) / prevValue) * 1000) / 10 : 0;
+
+    res.json({
+      current: {
+        totalValue: currentTotalValue,
+        itemCount: activeItems.length,
+        asOf: now,
+      },
+      previous: {
+        monthKey: prevSnapshot.monthKey,
+        monthLabel: prevSnapshot.monthLabel,
+        cutoffDate: prevSnapshot.cutoffDate,
+        cutoffFormatted: prevSnapshot.cutoffFormatted || prevMonthShortCutoff,
+        totalValue: prevValue,
+        itemCount: prevSnapshot.itemCount || activeItems.length,
+      },
+      difference: diff,
+      percentageChange: percentage,
+      direction: diff > 0 ? 'up' : diff < 0 ? 'down' : 'equal',
+      displayText: diff > 0
+        ? `+₹${diff.toLocaleString('en-IN', { minimumFractionDigits: 2 })} than prev month`
+        : diff < 0
+          ? `-₹${Math.abs(diff).toLocaleString('en-IN', { minimumFractionDigits: 2 })} than prev month`
+          : `Same as prev month end`,
+    });
+  } catch (err) {
+    console.error('Month comparison error:', err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // Purchase history for a specific inventory item (last 10 purchases)

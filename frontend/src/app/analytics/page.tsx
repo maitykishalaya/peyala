@@ -264,9 +264,11 @@ export default function AnalyticsPage() {
   // ── EXPORT HANDLERS ───────────────────────────────────────────────
   const handleExportItemsCsv = () => {
     if (!itemsData?.items?.length) return;
-    const headers = ['Item Name', 'Category', 'Qty Sold', 'Base Price (₹)', 'Gross Sales (₹)', 'Discounts (₹)', 'Net Sales (₹)', 'GST (₹)', 'Total with GST (₹)'];
+    const headers = ['Item Name', 'Variant', 'Add-ons', 'Category', 'Qty Sold', 'Base Price (₹)', 'Gross Sales (₹)', 'Discounts (₹)', 'Net Sales (₹)', 'GST (₹)', 'Total with GST (₹)'];
     const rows = itemsData.items.map((it: any) => [
-      it.name,
+      it.baseName || it.name,
+      it.variantName || '—',
+      (it.addons && it.addons.length > 0) ? it.addons.join(', ') : '—',
       it.category,
       it.quantitySold,
       it.averageSellingPrice,
@@ -282,9 +284,11 @@ export default function AnalyticsPage() {
 
   const handleExportItemsExcel = () => {
     if (!itemsData?.items?.length) return;
-    const headers = ['Item Name', 'Category', 'Qty Sold', 'Base Price (₹)', 'Gross Sales (₹)', 'Discounts (₹)', 'Net Sales (₹)', 'GST (₹)', 'Total with GST (₹)'];
+    const headers = ['Item Name', 'Variant', 'Add-ons', 'Category', 'Qty Sold', 'Base Price (₹)', 'Gross Sales (₹)', 'Discounts (₹)', 'Net Sales (₹)', 'GST (₹)', 'Total with GST (₹)'];
     const rows = itemsData.items.map((it: any) => [
-      it.name,
+      it.baseName || it.name,
+      it.variantName || '—',
+      (it.addons && it.addons.length > 0) ? it.addons.join(', ') : '—',
       it.category,
       it.quantitySold,
       it.averageSellingPrice,
@@ -301,16 +305,20 @@ export default function AnalyticsPage() {
   const handlePrintItemsPdf = () => {
     if (!itemsData?.items?.length) return;
     const headers = ['Item Name', 'Category', 'Qty', 'Unit Price', 'Gross Sales', 'Net Sales', 'GST', 'Total'];
-    const rows = itemsData.items.map((it: any) => [
-      it.name,
-      it.category,
-      it.quantitySold,
-      formatCurrency(it.averageSellingPrice),
-      formatCurrency(it.grossSales),
-      formatCurrency(it.netSales),
-      formatCurrency(it.gst),
-      formatCurrency(it.totalWithGst),
-    ]);
+    const rows = itemsData.items.map((it: any) => {
+      const v = it.variantName ? ` (${it.variantName})` : '';
+      const ad = it.addons?.length ? ` + ${it.addons.join(', ')}` : '';
+      return [
+        `${it.baseName || it.name}${v}${ad}`,
+        it.category,
+        it.quantitySold,
+        formatCurrency(it.averageSellingPrice),
+        formatCurrency(it.grossSales),
+        formatCurrency(it.netSales),
+        formatCurrency(it.gst),
+        formatCurrency(it.totalWithGst),
+      ];
+    });
     const summary = [
       { label: 'Total Items Sold', value: String(itemsData.summary.totalQuantitySold) },
       { label: 'Gross Sales', value: formatCurrency(itemsData.summary.totalGrossSales) },
@@ -1312,15 +1320,31 @@ export default function AnalyticsPage() {
                           key={it.name}
                           className="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition"
                         >
-                          <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                            <span
-                              className={cn(
-                                'w-2 h-2 rounded-full shrink-0',
-                                it.isVeg ? 'bg-emerald-500' : 'bg-rose-500'
-                              )}
-                              title={it.isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
-                            />
-                            <span className="truncate">{it.name}</span>
+                          <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  'w-2 h-2 rounded-full shrink-0',
+                                  it.isVeg ? 'bg-emerald-500' : 'bg-rose-500'
+                                )}
+                                title={it.isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
+                              />
+                              <span className="font-semibold text-gray-900 dark:text-white">{it.baseName || it.name}</span>
+                            </div>
+                            {(it.variantName || (it.addons && it.addons.length > 0)) && (
+                              <div className="flex flex-wrap gap-1 mt-1 pl-4">
+                                {it.variantName && (
+                                  <span className="inline-flex items-center text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 px-1.5 py-0.5 rounded">
+                                    Variant: {it.variantName}
+                                  </span>
+                                )}
+                                {it.addons && it.addons.length > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-1.5 py-0.5 rounded">
+                                    Add-ons: {it.addons.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2.5 px-3 text-gray-600 dark:text-gray-300">
                             {it.category}
@@ -1529,6 +1553,100 @@ export default function AnalyticsPage() {
                         : 'Review discrepancies below where recorded invoice tax deviates by > ₹1 from 5%.'}
                     </p>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* AUDIT TABLE FOR TAX DISCREPANCIES */}
+            {gstData?.reconciliation?.discrepancies && gstData.reconciliation.discrepancies.length > 0 && (
+              <div className="card p-4 sm:p-5 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-900/60 shadow-sm rounded-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                        Detected Tax Discrepancies ({gstData.reconciliation.discrepancies.length} Bills)
+                      </h4>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Detailed breakdown of bills where recorded GST diverges from statutory 5% restaurant rate.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-96 border border-gray-200 dark:border-gray-800 rounded-lg">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-amber-50/70 dark:bg-amber-950/30 text-amber-900 dark:text-amber-300 uppercase font-bold border-b border-amber-200 dark:border-amber-900/40 sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-3">Bill / Order #</th>
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Table / Customer</th>
+                        <th className="py-2.5 px-3">Items Summary</th>
+                        <th className="py-2.5 px-3 text-right">Taxable Subtotal</th>
+                        <th className="py-2.5 px-3 text-right">Expected GST (5%)</th>
+                        <th className="py-2.5 px-3 text-right">Recorded GST</th>
+                        <th className="py-2.5 px-3 text-right">Variance</th>
+                        <th className="py-2.5 px-3 text-left">Discrepancy Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {gstData.reconciliation.discrepancies.map((disc: any, idx: number) => {
+                        const variance = disc.variance ?? disc.difference ?? 0;
+                        const isUnder = variance < 0;
+                        return (
+                          <tr key={disc.orderId || idx} className="hover:bg-amber-50/30 dark:hover:bg-amber-950/20 transition">
+                            <td className="py-2.5 px-3 font-bold text-gray-900 dark:text-white whitespace-nowrap">
+                              {disc.billNumber || disc.orderNumber || '—'}
+                            </td>
+                            <td className="py-2.5 px-3 text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                              {disc.date || '—'}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span className="font-medium text-gray-800 dark:text-gray-200">
+                                {disc.tableNumber ? `Table ${disc.tableNumber}` : 'Takeaway'}
+                              </span>
+                              {disc.customerName && (
+                                <span className="block text-[11px] text-gray-500">{disc.customerName}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 max-w-[200px] truncate text-gray-600 dark:text-gray-400" title={disc.itemsSummary}>
+                              {disc.itemsSummary || '—'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-medium text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                              {formatCurrency(disc.taxableAmount ?? disc.subtotal ?? 0)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                              {formatCurrency(disc.expectedTax ?? 0)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-semibold text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                              {formatCurrency(disc.recordedTax ?? 0)}
+                            </td>
+                            <td className={cn(
+                              'py-2.5 px-3 text-right font-bold whitespace-nowrap',
+                              isUnder ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+                            )}>
+                              {variance > 0 ? `+${formatCurrency(variance)}` : `-${formatCurrency(Math.abs(variance))}`}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className={cn(
+                                'inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5',
+                                disc.discrepancyType === 'Untaxed Paid Bill'
+                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
+                                  : isUnder
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300'
+                              )}>
+                                {disc.discrepancyType || 'Mismatch'}
+                              </span>
+                              <span className="text-gray-600 dark:text-gray-400 text-[11px]">
+                                {disc.explanation || disc.reason}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}

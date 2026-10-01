@@ -500,7 +500,16 @@ function setupTray() {
   } catch (err) {
     console.error('[Peyala Tray Init Error]', err);
   }
-}
+ipcMain.handle('ensure-window-focus', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.focus();
+    }
+  } catch (_) {}
+  return true;
+});
 
 // ── Native Hardware Silent Thermal Printing IPC Handlers ──────────────
 ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent = true }) => {

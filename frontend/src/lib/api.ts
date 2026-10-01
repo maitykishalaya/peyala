@@ -103,6 +103,7 @@ export const inventoryApi = {
   updateItem: (id: string, data: any) => api.put(`/inventory/items/${id}`, data),
   deleteItem: (id: string) => api.delete(`/inventory/items/${id}`),
   itemPurchases: (id: string) => api.get(`/inventory/items/${id}/purchase-history`),
+  monthComparison: () => api.get('/inventory/month-comparison'),
 };
 
 // Purchases

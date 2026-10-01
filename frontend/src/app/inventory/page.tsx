@@ -7,7 +7,7 @@ import { formatCurrency, formatDate, UNITS, cn } from '@/lib/utils';
 import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
-import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw, Clock, Calendar, Receipt, Store } from 'lucide-react';
+import { Plus, AlertTriangle, Package, Pencil, Trash2, ChevronDown, Search, History, RefreshCw, Clock, Calendar, Receipt, Store, TrendingUp, TrendingDown } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_inventory_cache_v2';
 
@@ -51,6 +51,7 @@ export default function InventoryPage() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState('');
   const [logsSearch, setLogsSearch] = useState('');
+  const [monthComparison, setMonthComparison] = useState<any>(null);
 
   // Last purchase history modal state
   const [historyItem, setHistoryItem] = useState<any>(null);
@@ -85,6 +86,7 @@ export default function InventoryPage() {
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       // Only cache the unfiltered "All" view, so cached data is always the full picture
       if (!selectedCat && !lowStockOnly) writeCache({ items: i.data, categories: c.data, suppliers: s.data });
+      inventoryApi.monthComparison().then(res => setMonthComparison(res.data)).catch(() => {});
     } catch (err) {
       console.error('Failed to load inventory:', err);
     } finally {
@@ -105,10 +107,12 @@ export default function InventoryPage() {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
         setLoading(false);
+        inventoryApi.monthComparison().then(res => setMonthComparison(res.data)).catch(() => {});
         return;
       }
     }
     load();
+    inventoryApi.monthComparison().then(res => setMonthComparison(res.data)).catch(() => {});
   }, [selectedCat, lowStockOnly]);
 
   const openEdit = (item: any) => {
@@ -242,7 +246,43 @@ export default function InventoryPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Inventory</h1>
-            <p className="text-sm text-gray-500">{items.length} items · Value: <strong>{formatCurrency(totalValue)}</strong> · {lowCount > 0 && <span className="text-yellow-600">{lowCount} low stock</span>}</p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-sm text-gray-500">
+              <span>{items.length} items</span>
+              <span>·</span>
+              <span>
+                Value: <strong className="text-gray-900 dark:text-white">{formatCurrency(totalValue)}</strong>
+              </span>
+              {monthComparison && (
+                <>
+                  <span>·</span>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold shadow-xs transition-colors',
+                      monthComparison.direction === 'up'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                        : monthComparison.direction === 'down'
+                          ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
+                    )}
+                    title={`Previous month-end (${monthComparison.previous?.cutoffFormatted}): ${formatCurrency(monthComparison.previous?.totalValue || 0)}`}
+                  >
+                    {monthComparison.direction === 'up' && <TrendingUp className="w-3.5 h-3.5" />}
+                    {monthComparison.direction === 'down' && <TrendingDown className="w-3.5 h-3.5" />}
+                    <span>
+                      {monthComparison.direction === 'up' ? '+' : ''}{formatCurrency(monthComparison.difference)}
+                      {monthComparison.previous?.totalValue > 0 && ` (${monthComparison.percentageChange > 0 ? '+' : ''}${monthComparison.percentageChange}%)`}
+                      {' '}<span className="font-normal opacity-85">than prev month</span>
+                    </span>
+                  </span>
+                </>
+              )}
+              {lowCount > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="text-yellow-600 font-medium">{lowCount} low stock</span>
+                </>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {lastUpdated && (

@@ -526,7 +526,15 @@ export default function ReportsPage() {
       const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
       const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
       const itemsDetail = (o.items || [])
-        .map((it: any) => `${it.quantity}x ${it.name}${it.status === 'cancelled' ? ' [CANCELLED]' : ''}${it.notes ? ` (${it.notes})` : ''}`)
+        .map((it: any) => {
+          const parts = [];
+          if (it.variant?.name) parts.push(it.variant.name);
+          if (it.selectedAddons && it.selectedAddons.length > 0) {
+            parts.push(`+ ${it.selectedAddons.map((a: any) => (typeof a === 'string' ? a : a.name)).join(', ')}`);
+          }
+          const mod = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+          return `${it.quantity}x ${it.name}${mod}${it.status === 'cancelled' ? ' [CANCELLED]' : ''}${it.notes ? ` [${it.notes}]` : ''}`;
+        })
         .join('; ');
       const settled = o.settledAmount !== null && o.settledAmount !== undefined ? o.settledAmount : o.total;
 
@@ -1376,9 +1384,17 @@ export default function ReportsPage() {
                                   <td className="py-3 px-3 max-w-xs">
                                     <div
                                       className="truncate text-gray-700 dark:text-gray-300 font-medium"
-                                      title={o.items?.map((i: any) => `${i.quantity}x ${i.name}`).join(', ')}
+                                      title={o.items?.map((i: any) => {
+                                        const v = i.variant?.name || i.variantName;
+                                        const ad = i.addons?.length ? ` + ${i.addons.map((a: any) => typeof a === 'string' ? a : a.name).join(', ')}` : '';
+                                        return `${i.quantity}x ${i.name}${v ? ` (${v})` : ''}${ad}`;
+                                      }).join(', ')}
                                     >
-                                      {o.items?.slice(0, 2).map((i: any) => `${i.quantity}x ${i.name}`).join(', ')}
+                                      {o.items?.slice(0, 2).map((i: any) => {
+                                        const v = i.variant?.name || i.variantName;
+                                        const ad = i.addons?.length ? ` + ${i.addons.map((a: any) => typeof a === 'string' ? a : a.name).join(', ')}` : '';
+                                        return `${i.quantity}x ${i.name}${v ? ` (${v})` : ''}${ad}`;
+                                      }).join(', ')}
                                       {(o.items?.length || 0) > 2 && ` +${o.items.length - 2} more`}
                                     </div>
                                     {cancelledItemsCount > 0 && (
@@ -1611,9 +1627,23 @@ export default function ReportsPage() {
                                                   return (
                                                     <tr key={idx} className={isCancelled ? 'bg-red-50/50 dark:bg-red-950/20 text-gray-400' : ''}>
                                                       <td className="py-2 px-3 font-semibold">
-                                                        <span className={isCancelled ? 'line-through text-red-500' : 'text-gray-900 dark:text-white'}>
+                                                        <div className={isCancelled ? 'line-through text-red-500' : 'text-gray-900 dark:text-white'}>
                                                           {it.name}
-                                                        </span>
+                                                        </div>
+                                                        {((it.variant?.name || it.variantName) || (it.addons && it.addons.length > 0)) && (
+                                                          <div className="flex flex-wrap gap-1 mt-0.5">
+                                                            {(it.variant?.name || it.variantName) && (
+                                                              <span className="text-[10px] font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                                                                Variant: {it.variant?.name || it.variantName}
+                                                              </span>
+                                                            )}
+                                                            {it.addons && it.addons.length > 0 && (
+                                                              <span className="text-[10px] font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                                                                Addons: {it.addons.map((a: any) => typeof a === 'string' ? a : a.name).join(', ')}
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                        )}
                                                       </td>
                                                       <td className="py-2 px-3 text-center font-bold">
                                                         {it.quantity}

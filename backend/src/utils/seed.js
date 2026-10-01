@@ -38,11 +38,11 @@ async function seed() {
 
   // Suppliers
   const suppliers = await Supplier.insertMany([
-    { name: 'Gate Bazaar', phone: '9800000001', address: 'Howrah Market', category: 'Vegetables & General' },
-    { name: 'Bajrang Store', phone: '9800000002', address: 'Howrah', category: 'Dry Goods & Spices' },
+    { name: 'Gate Bazaar', phone: '9800000001', address: 'Midnapore Market', category: 'Vegetables & General' },
+    { name: 'Bajrang Store', phone: '9800000002', address: 'Midnapore', category: 'Dry Goods & Spices' },
     { name: 'Bunty Chicken', phone: '9800000003', address: 'Local Market', category: 'Poultry & Meat' },
-    { name: 'Fresh Fish Market', phone: '9800000004', address: 'Howrah Ghat', category: 'Fish & Seafood' },
-    { name: 'Amul Distributor', phone: '9800000005', address: 'Howrah', category: 'Dairy' },
+    { name: 'Fresh Fish Market', phone: '9800000004', address: 'Midnapore Ghat', category: 'Fish & Seafood' },
+    { name: 'Amul Distributor', phone: '9800000005', address: 'Midnapore', category: 'Dairy' },
     { name: 'Packaging Supplies Co', phone: '9800000006', address: 'Kolkata', category: 'Packaging' },
   ]);
   console.log('✅ Suppliers created');

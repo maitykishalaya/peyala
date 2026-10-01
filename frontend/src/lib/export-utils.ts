@@ -222,7 +222,7 @@ export function printReport(
   </table>
 
   <div style="margin-top: 24px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px;">
-    Confidential Internal Business Report · Peyala Café & Restaurant (Howrah, West Bengal)
+    Confidential Internal Business Report · Peyala Café & Restaurant (Midnapore, West Bengal)
   </div>
 
   <script>

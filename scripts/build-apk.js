@@ -104,7 +104,7 @@ console.log('\n[3/5] Generating Enterprise Release Signing Keystore...');
 const keystorePath = path.join(APP_DIR, 'peyala-release.jks');
 if (!fs.existsSync(keystorePath)) {
   console.log('    Creating new release keystore (peyala-release.jks)...');
-  const genCmd = `"${keytoolBin}" -genkey -v -keystore "${keystorePath}" -alias peyala -keyalg RSA -keysize 2048 -validity 10000 -storepass peyala2024 -keypass peyala2024 -dname "CN=Peyala POS, OU=Operations, O=Peyala, L=Howrah, ST=West Bengal, C=IN"`;
+  const genCmd = `"${keytoolBin}" -genkey -v -keystore "${keystorePath}" -alias peyala -keyalg RSA -keysize 2048 -validity 10000 -storepass peyala2024 -keypass peyala2024 -dname "CN=Peyala POS, OU=Operations, O=Peyala, L=Midnapore, ST=West Bengal, C=IN"`;
   execSync(genCmd, { stdio: 'inherit' });
   console.log('    ✅ Enterprise keystore generated successfully.');
 } else {

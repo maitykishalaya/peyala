@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
   selectProjectFolder: () => ipcRenderer.invoke('select-project-folder'),
+  ensureFocus: () => ipcRenderer.invoke('ensure-window-focus'),
   restartServers: () => ipcRenderer.invoke('restart-local-servers'),
   onServerStatus: (callback) => {
     const subscription = (event, status) => callback(status);

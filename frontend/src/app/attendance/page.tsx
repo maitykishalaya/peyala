@@ -538,6 +538,628 @@ function generateSummaryPdfHtml(params: {
   `;
 }
 
+function generateIndividualStaffPdfHtml(params: {
+  mode: 'day' | 'month';
+  member: any;
+  dateStr: string;
+  monthName: string;
+  year: number;
+  month: number;
+  dayRowData?: any;
+  monthRowData?: any;
+  timeSlots?: Array<{ entry: string; exit: string }>;
+  monthDayRecords?: Array<{
+    day: number;
+    date: Date;
+    dateFormatted: string;
+    dayName: string;
+    status: string | null;
+    isFuture: boolean;
+    hasRecord: boolean;
+    timeSlotsStr: string;
+    targetDutyHours: number;
+    totalPresentHours: number;
+    deficitHours: number;
+    penaltyAmount: number;
+    penaltyReason: string;
+    totalDeductions: number;
+    payableAmount: number;
+    note: string;
+  }>;
+  isViewer: boolean;
+}): string {
+  const { mode, member, dateStr, monthName, year, month, dayRowData, monthRowData, timeSlots = [], monthDayRecords = [], isViewer } = params;
+  const isDay = mode === 'day';
+  const isLoggable = member.logDutyHours !== false;
+  const reportTitle = isDay
+    ? 'STAFF DAILY ATTENDANCE & DUTY REPORT'
+    : 'STAFF MONTHLY ATTENDANCE & DUTY REPORT';
+  const periodStr = isDay ? dateStr : `${monthName} ${year}`;
+  const printTimestamp = `${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} at ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+
+  const baseSalaryStr = isViewer
+    ? '••••••'
+    : member.monthlySalary
+    ? `₹${member.monthlySalary.toLocaleString('en-IN')}/mo`
+    : member.dailySalary
+    ? `₹${member.dailySalary.toLocaleString('en-IN')}/day`
+    : 'Not Specified';
+
+  const defaultShiftStr = `${member.defaultDutyHours || 10} hrs/day`;
+
+  // Status badge config for day mode
+  const dayStatusKey = dayRowData?.status as StatusKey | undefined;
+  const dayStatusMeta = dayStatusKey ? STATUS_CONFIG[dayStatusKey] : null;
+  const dayStatusLabel = dayStatusMeta ? dayStatusMeta.text : (dayRowData?.hasRecord ? 'Recorded' : 'Unmarked');
+  const dayStatusClass = dayRowData?.status === 'present' ? 'badge-green' : dayRowData?.status === 'absent' ? 'badge-red' : dayRowData?.status === 'leave' ? 'badge-amber' : dayRowData?.status === 'halfday' ? 'badge-blue' : 'badge-gray';
+
+  const staffCardHtml = `
+    <div class="staff-card">
+      <div class="staff-info-col">
+        <div class="staff-name">${escapeHtml(member.name)}</div>
+        <div class="staff-sub">
+          Designation: <b>${escapeHtml(member.position || 'Staff')}</b> &bull;
+          Contact: <b>${escapeHtml(member.phone || 'N/A')}</b> &bull;
+          Status: <span style="color: #047857; font-weight: bold;">Active</span>
+        </div>
+      </div>
+      <div class="staff-meta-col">
+        <div>Duty System: <b>${isLoggable ? 'Duty Tracking (Logged)' : 'Attendance Only'}</b></div>
+        <div>Standard Shift: <b>${escapeHtml(defaultShiftStr)}</b></div>
+        <div>Base Salary: <b>${baseSalaryStr}</b></div>
+      </div>
+    </div>
+  `;
+
+  let kpisHtml = '';
+  let contentHtml = '';
+
+  if (isDay) {
+    const targetHours = dayRowData?.targetDutyHours ?? (isLoggable ? (member.defaultDutyHours || 10) : 0);
+    const presentHours = dayRowData?.totalPresentHours ?? 0;
+    const deficitHours = dayRowData?.deficitHours ?? 0;
+    const penaltyAmount = dayRowData?.penaltyAmount ?? 0;
+    const totalDeductions = dayRowData?.totalDeductions ?? 0;
+    const payableAmount = dayRowData?.payableAmount ?? 0;
+
+    kpisHtml = `
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Day Status</div>
+          <div class="kpi-value"><span class="badge ${dayStatusClass}">${escapeHtml(dayStatusLabel)}</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Target Shift</div>
+          <div class="kpi-value">${isLoggable ? `${targetHours}h` : '—'}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Hours Worked</div>
+          <div class="kpi-value" style="color: #4338ca;">${isLoggable ? formatHoursMinutes(presentHours) : '—'}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Duty Shortage</div>
+          <div class="kpi-value" style="color: ${deficitHours > 0 ? '#b91c1c' : '#047857'};">
+            ${!isLoggable ? '—' : (deficitHours > 0 ? `-${formatHoursMinutes(deficitHours)}` : 'Full Duty')}
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Penalties</div>
+          <div class="kpi-value" style="color: #c2410c;">${isViewer ? '••••••' : formatCurrency(penaltyAmount)}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Deductions</div>
+          <div class="kpi-value" style="color: #b91c1c;">${isViewer ? '••••••' : (totalDeductions > 0 ? '-' + formatCurrency(totalDeductions) : '₹0')}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Net Day Payable</div>
+          <div class="kpi-value" style="color: #047857;">${isViewer ? '••••••' : formatCurrency(payableAmount)}</div>
+        </div>
+      </div>
+    `;
+
+    // Time slots breakdown for the day
+    let slotsRows = '';
+    const validSlots = (timeSlots || []).filter((s) => s && (s.entry || s.exit));
+    if (validSlots.length > 0) {
+      slotsRows = validSlots.map((slot, idx) => {
+        const slotMin = calculateShiftMinutes(slot.entry, slot.exit);
+        const slotHours = slotMin / 60;
+        return `
+          <tr>
+            <td style="text-align: center; font-weight: bold; color: #6b7280;">Slot ${idx + 1}</td>
+            <td style="text-align: center; font-weight: 600; color: #111827;">${escapeHtml(slot.entry || '—')}</td>
+            <td style="text-align: center; font-weight: 600; color: #111827;">${escapeHtml(slot.exit || '—')}</td>
+            <td style="text-align: center; font-weight: 700; color: #4338ca;">${formatHoursMinutes(slotHours)}</td>
+            <td style="font-size: 9px; color: #4b5563;">Recorded Shift Slot</td>
+          </tr>
+        `;
+      }).join('');
+    } else {
+      slotsRows = `
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 12px; color: #6b7280; font-style: italic;">
+            ${dayRowData?.status === 'present'
+              ? `Standard shift attendance logged (${formatHoursMinutes(presentHours)} worked)`
+              : (dayRowData?.status === 'absent' ? 'Staff was marked Absent on this date' : (dayRowData?.status === 'leave' ? 'Approved Leave on this date' : 'No explicit shift clock-in/out slots recorded'))}
+          </td>
+        </tr>
+      `;
+    }
+
+    contentHtml = `
+      <div style="margin-top: 12px; margin-bottom: 12px;">
+        <div style="font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #374151; margin-bottom: 5px;">
+          Shift Clock-In &amp; Clock-Out Tracking
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 60px; text-align: center;">Session</th>
+              <th style="width: 130px; text-align: center;">Entry Time (Clock In)</th>
+              <th style="width: 130px; text-align: center;">Exit Time (Clock Out)</th>
+              <th style="width: 120px; text-align: center;">Hours Logged</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${slotsRows}
+          </tbody>
+        </table>
+      </div>
+
+      ${(dayRowData?.penaltyAmount > 0 || dayRowData?.note) ? `
+        <div style="display: grid; grid-template-columns: ${dayRowData?.penaltyAmount > 0 && dayRowData?.note ? '1fr 1fr' : '1fr'}; gap: 10px; margin-top: 10px;">
+          ${dayRowData?.penaltyAmount > 0 ? `
+            <div style="border: 1px solid #fecaca; background: #fef2f2; border-radius: 6px; padding: 8px 10px;">
+              <div style="font-weight: 800; font-size: 9.5px; text-transform: uppercase; color: #991b1b;">Penalty Infraction Recorded</div>
+              <div style="font-size: 11px; font-weight: bold; color: #b91c1c; margin-top: 2px;">
+                ${isViewer ? '••••••' : formatCurrency(dayRowData.penaltyAmount)}
+              </div>
+              <div style="font-size: 9.5px; color: #4b5563; margin-top: 1px;">
+                Reason: <b>${escapeHtml(dayRowData.penaltyReason || 'Disciplinary / Late / Performance')}</b>
+              </div>
+            </div>
+          ` : ''}
+          ${dayRowData?.note ? `
+            <div style="border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 6px; padding: 8px 10px;">
+              <div style="font-weight: 800; font-size: 9.5px; text-transform: uppercase; color: #1e40af;">Attendance Note</div>
+              <div style="font-size: 10px; color: #1f2937; margin-top: 2px; line-height: 1.4;">
+                ${escapeHtml(dayRowData.note)}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+
+      ${monthRowData ? `
+        <div style="margin-top: 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 12px;">
+          <div style="font-weight: 800; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px; color: #4b5563; margin-bottom: 5px;">
+            Current Month Performance Snapshot (${monthName} ${year})
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; font-size: 9.5px; text-align: center;">
+            <div style="border-right: 1px solid #e5e7eb; padding-right: 4px;">
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Present</div>
+              <div style="font-weight: 800; color: #047857; font-size: 12px;">${monthRowData.presentCount || 0}d</div>
+            </div>
+            <div style="border-right: 1px solid #e5e7eb; padding-right: 4px;">
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Absent</div>
+              <div style="font-weight: 800; color: #b91c1c; font-size: 12px;">${monthRowData.absentCount || 0}d</div>
+            </div>
+            <div style="border-right: 1px solid #e5e7eb; padding-right: 4px;">
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Leave / Half</div>
+              <div style="font-weight: 800; color: #d97706; font-size: 12px;">${(monthRowData.leaveCount || 0) + (monthRowData.halfDayCount || 0)}d</div>
+            </div>
+            <div style="border-right: 1px solid #e5e7eb; padding-right: 4px;">
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Deficit Hours</div>
+              <div style="font-weight: 800; color: ${(monthRowData.totalDeficitHours || 0) > 0 ? '#b91c1c' : '#047857'}; font-size: 12px;">
+                ${!isLoggable ? '—' : formatHoursMinutes(monthRowData.totalDeficitHours || 0)}
+              </div>
+            </div>
+            <div style="border-right: 1px solid #e5e7eb; padding-right: 4px;">
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Penalties</div>
+              <div style="font-weight: 800; color: #c2410c; font-size: 12px;">${isViewer ? '••••••' : formatCurrency(monthRowData.totalPenalties || 0)}</div>
+            </div>
+            <div>
+              <div style="color: #6b7280; font-size: 8px; text-transform: uppercase; font-weight: 700;">Month Net Payable</div>
+              <div style="font-weight: 800; color: #047857; font-size: 12px;">${isViewer ? '••••••' : formatCurrency(monthRowData.totalPayable || 0)}</div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+    `;
+  } else {
+    // Monthly report
+    const pCount = monthRowData?.presentCount || 0;
+    const aCount = monthRowData?.absentCount || 0;
+    const hCount = monthRowData?.halfDayCount || 0;
+    const lCount = monthRowData?.leaveCount || 0;
+
+    kpisHtml = `
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Present Days</div>
+          <div class="kpi-value" style="color: #047857;">${pCount}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Absent Days</div>
+          <div class="kpi-value" style="color: #b91c1c;">${aCount}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Half / Leaves</div>
+          <div class="kpi-value" style="color: #d97706;">${hCount + lCount} <span style="font-size: 9px; font-weight: 600;">(${hCount}H / ${lCount}L)</span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Hours Worked</div>
+          <div class="kpi-value" style="color: #4338ca;">${isLoggable ? formatHoursMinutes(monthRowData?.totalPresentHours || 0) : '—'}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Deficit Shortage</div>
+          <div class="kpi-value" style="color: ${(monthRowData?.totalDeficitHours || 0) > 0 ? '#b91c1c' : '#047857'};">
+            ${!isLoggable ? '—' : ((monthRowData?.totalDeficitHours || 0) > 0 ? `-${formatHoursMinutes(monthRowData.totalDeficitHours)}` : '0 hrs')}
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Deductions</div>
+          <div class="kpi-value" style="color: #b91c1c;">${isViewer ? '••••••' : ((monthRowData?.totalDeductions || 0) > 0 ? '-' + formatCurrency(monthRowData.totalDeductions) : '₹0')}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Net Month Payable</div>
+          <div class="kpi-value" style="color: #047857;">${isViewer ? '••••••' : formatCurrency(monthRowData?.totalPayable || 0)}</div>
+        </div>
+      </div>
+    `;
+
+    // 31-day table rows
+    const dayRowsHtml = (monthDayRecords || []).map((d) => {
+      let statusBadge = '<span class="badge badge-gray">Unmarked</span>';
+      let rowBgStyle = '';
+
+      if (d.isFuture) {
+        statusBadge = '<span class="badge" style="background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb;">Upcoming</span>';
+        rowBgStyle = 'color: #9ca3af;';
+      } else if (d.status === 'present') {
+        statusBadge = '<span class="badge badge-green">Present</span>';
+      } else if (d.status === 'absent') {
+        statusBadge = '<span class="badge badge-red">Absent</span>';
+        rowBgStyle = 'background-color: #fef2f2;';
+      } else if (d.status === 'leave') {
+        statusBadge = '<span class="badge badge-amber">Leave</span>';
+        rowBgStyle = 'background-color: #fffbeb;';
+      } else if (d.status === 'halfday') {
+        statusBadge = '<span class="badge badge-blue">Half Day</span>';
+      }
+
+      const targetStr = d.isFuture ? '—' : isLoggable ? `${d.targetDutyHours}h` : '—';
+      const workedStr = d.isFuture ? '—' : isLoggable ? (d.hasRecord ? formatHoursMinutes(d.totalPresentHours) : '0 hrs') : '—';
+      const deficitStr = d.isFuture
+        ? '—'
+        : !isLoggable
+        ? '—'
+        : d.deficitHours > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatHoursMinutes(d.deficitHours)}</span>`
+        : `<span style="color: #059669; font-weight: bold;">Full Duty</span>`;
+
+      const penaltyStr = d.isFuture
+        ? '—'
+        : d.penaltyAmount > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">${isViewer ? '••••••' : formatCurrency(d.penaltyAmount)}</span>${d.penaltyReason ? `<div style="font-size: 8px; color: #6b7280;">${escapeHtml(d.penaltyReason)}</div>` : ''}`
+        : '<span style="color: #9ca3af;">₹0</span>';
+
+      const deductionStr = d.isFuture
+        ? '—'
+        : isViewer
+        ? '••••••'
+        : d.totalDeductions > 0
+        ? `<span style="color: #dc2626; font-weight: bold;">-${formatCurrency(d.totalDeductions)}</span>`
+        : '<span style="color: #059669;">₹0</span>';
+
+      const payableStr = d.isFuture
+        ? '—'
+        : isViewer
+        ? '••••••'
+        : `<span style="color: #047857; font-weight: bold;">${formatCurrency(d.payableAmount)}</span>`;
+
+      const noteStr = d.note ? escapeHtml(d.note) : '<span style="color: #9ca3af;">—</span>';
+
+      return `
+        <tr style="${rowBgStyle}">
+          <td style="text-align: center; color: #6b7280; font-size: 9px; font-weight: bold;">${d.day}</td>
+          <td style="font-weight: 600; white-space: nowrap;">${escapeHtml(d.dateFormatted)}</td>
+          <td style="text-align: center;">${statusBadge}</td>
+          <td style="text-align: center; font-size: 9px; color: #374151;">${escapeHtml(d.timeSlotsStr)}</td>
+          <td style="text-align: center;">${targetStr}</td>
+          <td style="text-align: center; font-weight: 600;">${workedStr}</td>
+          <td style="text-align: center;">${deficitStr}</td>
+          <td style="text-align: right;">${penaltyStr}</td>
+          <td style="text-align: right;">${deductionStr}</td>
+          <td style="text-align: right;">${payableStr}</td>
+          <td style="font-size: 9px; max-width: 140px; color: #374151;">${noteStr}</td>
+        </tr>
+      `;
+    }).join('');
+
+    contentHtml = `
+      <table style="margin-top: 6px;">
+        <thead>
+          <tr>
+            <th style="width: 22px; text-align: center;">#</th>
+            <th style="width: 80px;">Date &amp; Day</th>
+            <th style="width: 65px; text-align: center;">Status</th>
+            <th style="width: 110px; text-align: center;">Shift In/Out Slots</th>
+            <th style="width: 48px; text-align: center;">Target</th>
+            <th style="width: 55px; text-align: center;">Worked</th>
+            <th style="width: 65px; text-align: center;">Deficit</th>
+            <th style="width: 75px; text-align: right;">Penalty</th>
+            <th style="width: 75px; text-align: right;">Deduction</th>
+            <th style="width: 75px; text-align: right;">Net Day</th>
+            <th>Notes / Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dayRowsHtml}
+        </tbody>
+      </table>
+
+      ${(monthRowData?.penaltiesList && monthRowData.penaltiesList.length > 0) ? `
+        <div class="no-break" style="margin-top: 10px; border: 1px solid #fecaca; background: #fef2f2; border-radius: 6px; padding: 6px 10px;">
+          <div style="font-weight: 800; font-size: 9px; text-transform: uppercase; color: #991b1b; margin-bottom: 4px;">
+            Month Penalties &amp; Deductions Log (${monthRowData.penaltiesList.length})
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${monthRowData.penaltiesList.map((p: any) => `
+              <div style="background: #fff; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-size: 8.5px;">
+                <span style="font-weight: bold; color: #b91c1c;">${escapeHtml(p.date)}:</span>
+                <span style="font-weight: bold; color: #111827;">${isViewer ? '••••••' : formatCurrency(p.amount)}</span>
+                <span style="color: #4b5563;">(${escapeHtml(p.reason)})</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${(monthRowData?.notesList && monthRowData.notesList.length > 0) ? `
+        <div class="no-break" style="margin-top: 8px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 6px; padding: 6px 10px;">
+          <div style="font-weight: 800; font-size: 9px; text-transform: uppercase; color: #1e40af; margin-bottom: 4px;">
+            Recorded Attendance Remarks &amp; Notes (${monthRowData.notesList.length})
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${monthRowData.notesList.map((n: any) => `
+              <div style="background: #fff; border: 1px solid #93c5fd; padding: 2px 6px; border-radius: 4px; font-size: 8.5px;">
+                <span style="font-weight: bold; color: #1d4ed8;">${escapeHtml(n.date)}:</span>
+                <span style="color: #1f2937;">${escapeHtml(n.note)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${escapeHtml(reportTitle)} - ${escapeHtml(member.name)}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          @page {
+            size: A4 portrait;
+            margin: 7mm 8mm;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .no-break {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+          }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #111827;
+            background: #fff;
+            padding: 4px;
+            font-size: 9.5px;
+            line-height: 1.35;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #111827;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+          }
+          .brand-title {
+            font-size: 17px;
+            font-weight: 900;
+            letter-spacing: 0.5px;
+            color: #111827;
+          }
+          .brand-sub {
+            font-size: 9.5px;
+            color: #4b5563;
+            margin-top: 2px;
+          }
+          .report-meta {
+            text-align: right;
+          }
+          .report-badge {
+            display: inline-block;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .report-title {
+            font-size: 13px;
+            font-weight: 800;
+            margin-top: 3px;
+            color: #1f2937;
+          }
+          .report-period {
+            font-size: 10px;
+            color: #4b5563;
+            font-weight: 600;
+          }
+          .staff-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f9fafb;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 6px 12px;
+            margin-bottom: 8px;
+          }
+          .staff-name {
+            font-size: 14px;
+            font-weight: 900;
+            color: #111827;
+          }
+          .staff-sub {
+            font-size: 9.5px;
+            color: #4b5563;
+            margin-top: 1px;
+          }
+          .staff-meta-col {
+            text-align: right;
+            font-size: 9.5px;
+            color: #374151;
+            line-height: 1.4;
+          }
+          .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            margin-bottom: 10px;
+          }
+          .kpi-card {
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            padding: 4px 6px;
+            border-radius: 6px;
+            text-align: center;
+          }
+          .kpi-label {
+            font-size: 7.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #6b7280;
+            letter-spacing: 0.3px;
+          }
+          .kpi-value {
+            font-size: 11.5px;
+            font-weight: 800;
+            margin-top: 1px;
+            color: #111827;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+          }
+          th {
+            background: #f3f4f6;
+            border-top: 1px solid #d1d5db;
+            border-bottom: 2px solid #9ca3af;
+            padding: 4px 4px;
+            text-align: left;
+            font-size: 8px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #374151;
+          }
+          td {
+            padding: 3.5px 4px;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: middle;
+          }
+          tr:nth-child(even) td {
+            background-color: #fafafa;
+          }
+          .badge {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 9999px;
+            font-size: 8px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .badge-green { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+          .badge-red { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+          .badge-amber { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+          .badge-blue { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+          .badge-gray { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+          .signatures {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 18px;
+            page-break-inside: avoid;
+          }
+          .sign-line {
+            border-top: 1px dashed #6b7280;
+            width: 150px;
+            padding-top: 4px;
+            text-align: center;
+            font-size: 8.5px;
+            font-weight: 600;
+            color: #4b5563;
+          }
+          .footer {
+            margin-top: 14px;
+            padding-top: 6px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            font-size: 8px;
+            color: #6b7280;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="brand-title">PEYALA CAFE &amp; RESTAURANT</div>
+            <div class="brand-sub">L-1, Saratpally, Midnapore &bull; Ph: 7749802811 &bull; GSTIN: 19DGOPM1101F1ZL &bull; FSSAI: 22822149000119</div>
+          </div>
+          <div class="report-meta">
+            <span class="report-badge">${isDay ? 'Staff Daily Report' : 'Staff Monthly Report'}</span>
+            <div class="report-title">${escapeHtml(reportTitle)}</div>
+            <div class="report-period">Period / Date: <b>${escapeHtml(periodStr)}</b></div>
+          </div>
+        </div>
+
+        ${staffCardHtml}
+
+        ${kpisHtml}
+
+        ${contentHtml}
+
+        <div class="signatures">
+          <div class="sign-line">Staff Signature (${escapeHtml(member.name)})</div>
+          <div class="sign-line">Prepared By (Shift Supervisor)</div>
+          <div class="sign-line">Authorized Signatory / Manager</div>
+        </div>
+
+        <div class="footer">
+          <div>Individual report generated automatically via Peyala POS &amp; Attendance System</div>
+          <div>Printed on: ${escapeHtml(printTimestamp)}</div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export default function AttendancePage() {
   const { user, isViewer } = useAuth();
   const userRole = user?.role || 'default';
@@ -562,6 +1184,7 @@ export default function AttendancePage() {
   const summarySectionRef = useRef<HTMLDivElement>(null);
   const [summaryMode, setSummaryMode] = useState<'day' | 'month'>('day');
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [staffPdfGeneratingId, setStaffPdfGeneratingId] = useState<string | null>(null);
 
   const scrollToToday = () => {
     if (todayColRef.current) {
@@ -1054,26 +1677,48 @@ export default function AttendancePage() {
         isViewer,
       });
 
-      let iframe = document.getElementById('attendance-summary-print-frame') as HTMLIFrameElement;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'attendance-summary-print-frame';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        iframe.style.opacity = '0';
-        iframe.style.pointerEvents = 'none';
-        document.body.appendChild(iframe);
+      const existingFrame = document.getElementById('attendance-summary-print-frame');
+      if (existingFrame && existingFrame.parentNode) {
+        try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
       }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'attendance-summary-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '1px';
+      iframe.style.height = '1px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
 
       const doc = iframe.contentWindow?.document;
       if (!doc) {
+        try { iframe.remove(); } catch (_) {}
         toast.error('Could not access print window');
         setPdfGenerating(false);
         return;
+      }
+
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        try {
+          if (iframe && iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+          }
+        } catch (_) {}
+        try { window.focus(); } catch (_) {}
+        setPdfGenerating(false);
+      };
+
+      if (iframe.contentWindow) {
+        try {
+          iframe.contentWindow.onafterprint = cleanup;
+        } catch (_) {}
       }
 
       doc.open();
@@ -1082,19 +1727,184 @@ export default function AttendancePage() {
 
       setTimeout(() => {
         try {
-          iframe.contentWindow?.focus();
           iframe.contentWindow?.print();
         } catch (err) {
           console.error('Print failed:', err);
           toast.error('Failed to open PDF print dialog');
-        } finally {
-          setPdfGenerating(false);
+          cleanup();
         }
+        setTimeout(cleanup, 1200);
       }, 250);
     } catch (err) {
       console.error('Failed to generate PDF:', err);
       toast.error('Error generating PDF report');
       setPdfGenerating(false);
+    }
+  };
+
+  const downloadStaffPdfReport = (staffId: string, requestedMode?: 'day' | 'month') => {
+    if (isViewer) {
+      toast.error('Viewers are not permitted to download staff attendance reports');
+      return;
+    }
+    const targetMode = requestedMode || summaryMode;
+    setStaffPdfGeneratingId(staffId);
+    try {
+      const member = activeStaff.find((s) => s._id === staffId);
+      if (!member) {
+        toast.error('Staff member not found');
+        setStaffPdfGeneratingId(null);
+        return;
+      }
+
+      const formattedDateStr = formatDate(new Date(selectedLogDate + 'T00:00:00'));
+      const dayRowData = daySummaryData.find((d) => d.member._id === staffId);
+      const monthRowData = monthSummaryData.find((m) => m.member._id === staffId);
+
+      // Get time slots for this staff if available on selectedLogDate
+      const staffTimeLog = timeLogs.find((l) => {
+        const sId = l.staff?._id ? l.staff._id.toString() : l.staff.toString();
+        return sId === staffId.toString();
+      });
+      const dayTimeSlots = staffTimeLog?.record?.timeSlots || [];
+
+      // Construct days list for month view
+      const daysCount = getDaysInMonth(year, month);
+      const monthDayRecords = Array.from({ length: daysCount }, (_, i) => {
+        const dNum = i + 1;
+        const date = new Date(year, month - 1, dNum);
+        date.setHours(0, 0, 0, 0);
+        const isFuture = date > today;
+        const rec = attendanceMap[staffId]?.[dNum] || null;
+        const hasRecord = !!rec;
+        const isLoggable = member.logDutyHours !== false;
+        const status = rec?.status ? normalizeStatusValue(rec.status) : null;
+
+        const targetDutyHours = rec?.dutyHours ?? (isLoggable ? (member.defaultDutyHours || 10) : 0);
+        const totalPresentHours = rec?.totalPresentHours ?? (hasRecord && status === 'present' ? targetDutyHours : 0);
+        const deficitHours = isLoggable
+          ? (rec?.absentHours !== undefined
+              ? rec.absentHours
+              : (hasRecord && status !== 'present' ? targetDutyHours : Math.max(0, targetDutyHours - totalPresentHours)))
+          : 0;
+
+        const dailySalary = rec?.dailySalary ?? member.dailySalary ?? (member.monthlySalary ? Math.round(member.monthlySalary / 30) : 0);
+        const deductionAmount = rec?.deductionAmount ?? 0;
+        const penaltyAmount = rec?.penaltyAmount ?? 0;
+        const penaltyReason = rec?.penaltyReason ? String(rec.penaltyReason).trim() : '';
+        const totalDeductions = deductionAmount + penaltyAmount;
+        const payableAmount = rec?.payableAmount !== undefined
+          ? rec.payableAmount
+          : (hasRecord && status === 'present' ? Math.max(0, +(dailySalary - totalDeductions).toFixed(2)) : 0);
+        const note = rec?.note ? String(rec.note).trim() : '';
+
+        let timeSlotsStr = '—';
+        if (rec?.timeSlots && Array.isArray(rec.timeSlots) && rec.timeSlots.length > 0) {
+          const validSlots = rec.timeSlots.filter((s: any) => s && (s.entry || s.exit));
+          if (validSlots.length > 0) {
+            timeSlotsStr = validSlots.map((s: any) => `${s.entry || '?'} - ${s.exit || '?'}`).join(', ');
+          }
+        }
+
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+        const dateFormatted = `${pad(dNum)} ${MONTHS[month - 1].slice(0, 3)} (${dayName})`;
+
+        return {
+          day: dNum,
+          date,
+          dateFormatted,
+          dayName,
+          status,
+          isFuture,
+          hasRecord,
+          timeSlotsStr,
+          targetDutyHours,
+          totalPresentHours,
+          deficitHours,
+          penaltyAmount,
+          penaltyReason,
+          totalDeductions,
+          payableAmount,
+          note,
+        };
+      });
+
+      const printHtml = generateIndividualStaffPdfHtml({
+        mode: targetMode,
+        member,
+        dateStr: formattedDateStr,
+        monthName: MONTHS[month - 1],
+        year,
+        month,
+        dayRowData,
+        monthRowData,
+        timeSlots: dayTimeSlots,
+        monthDayRecords,
+        isViewer,
+      });
+
+      const existingFrame = document.getElementById('attendance-staff-print-frame');
+      if (existingFrame && existingFrame.parentNode) {
+        try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'attendance-staff-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '1px';
+      iframe.style.height = '1px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (!doc) {
+        try { iframe.remove(); } catch (_) {}
+        toast.error('Could not access print window');
+        setStaffPdfGeneratingId(null);
+        return;
+      }
+
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        try {
+          if (iframe && iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+          }
+        } catch (_) {}
+        try { window.focus(); } catch (_) {}
+        setStaffPdfGeneratingId(null);
+      };
+
+      if (iframe.contentWindow) {
+        try {
+          iframe.contentWindow.onafterprint = cleanup;
+        } catch (_) {}
+      }
+
+      doc.open();
+      doc.write(printHtml);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.print();
+        } catch (err) {
+          console.error('Print failed:', err);
+          toast.error('Failed to open PDF print dialog');
+          cleanup();
+        }
+        setTimeout(cleanup, 1200);
+      }, 250);
+    } catch (err) {
+      console.error('Failed to generate staff PDF:', err);
+      toast.error('Error generating staff PDF report');
+      setStaffPdfGeneratingId(null);
     }
   };
 
@@ -1435,8 +2245,21 @@ export default function AttendancePage() {
                             {getInitials(member.name)}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="font-bold text-xs sm:text-sm text-gray-900 dark:text-white truncate leading-tight">
-                              {member.name}
+                            <div className="flex items-center justify-between gap-1">
+                              <div className="font-bold text-xs sm:text-sm text-gray-900 dark:text-white truncate leading-tight">
+                                {member.name}
+                              </div>
+                              {!isViewer && (
+                                <button
+                                  type="button"
+                                  onClick={() => downloadStaffPdfReport(member._id, 'month')}
+                                  disabled={staffPdfGeneratingId === member._id}
+                                  title={`Download monthly PDF attendance report for ${member.name}`}
+                                  className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300 transition-colors shrink-0"
+                                >
+                                  <Printer className={cn("w-3.5 h-3.5", staffPdfGeneratingId === member._id && "animate-spin text-indigo-600")} />
+                                </button>
+                              )}
                             </div>
                             <div className="text-[10px] sm:text-xs font-semibold text-gray-500 dark:text-gray-400 truncate hidden sm:block">
                               {member.position}
@@ -1515,6 +2338,18 @@ export default function AttendancePage() {
                             </span>
                           </div>
                         </div>
+                        {!isViewer && (
+                          <button
+                            type="button"
+                            onClick={() => downloadStaffPdfReport(member._id, 'month')}
+                            disabled={staffPdfGeneratingId === member._id}
+                            className="mt-1.5 w-full text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline flex items-center justify-center gap-1 transition-colors pt-1 border-t border-gray-100 dark:border-gray-800"
+                            title={`Download monthly PDF attendance report for ${member.name}`}
+                          >
+                            <Printer className={cn("w-2.5 h-2.5", staffPdfGeneratingId === member._id && "animate-spin")} />
+                            <span>{staffPdfGeneratingId === member._id ? 'Preparing...' : 'PDF Report'}</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -2097,6 +2932,7 @@ export default function AttendancePage() {
                   <th className="py-3 px-3 text-right">Penalty &amp; Reason</th>
                   <th className="py-3 px-3 text-right">Total Deductions</th>
                   <th className="py-3 px-3 text-right">Net Payable</th>
+                  <th className="py-3 px-3 text-center">Report</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
@@ -2104,13 +2940,28 @@ export default function AttendancePage() {
                   daySummaryData.map((row) => (
                     <tr key={row.member._id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
                       <td className="py-3 px-3">
-                        <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                          <span>{row.member.position || 'Staff'}</span>
-                          {!row.isLoggable && (
-                            <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
-                              Attendance Only
-                            </span>
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div>
+                            <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                              <span>{row.member.position || 'Staff'}</span>
+                              {!row.isLoggable && (
+                                <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
+                                  Attendance Only
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'day')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 dark:hover:text-indigo-300 transition-colors shrink-0"
+                              title={`Download Day PDF report for ${row.member.name}`}
+                            >
+                              <Printer className={cn("w-3.5 h-3.5", staffPdfGeneratingId === row.member._id && "animate-spin text-indigo-600")} />
+                            </button>
                           )}
                         </div>
                       </td>
@@ -2181,19 +3032,61 @@ export default function AttendancePage() {
                       <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
                         {isViewer ? '••••••' : formatCurrency(row.payableAmount)}
                       </td>
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        {!isViewer ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'day')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="btn-primary py-1 px-2 text-[11px] font-bold inline-flex items-center gap-1 shadow-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-all"
+                              title={`Download detailed Day Attendance & Duty PDF report for ${row.member.name}`}
+                            >
+                              <Printer className={cn("w-3 h-3", staffPdfGeneratingId === row.member._id && "animate-spin")} />
+                              <span>{staffPdfGeneratingId === row.member._id ? 'Preparing...' : 'Day PDF'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'month')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="py-1 px-1.5 text-[10.5px] font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md border border-gray-300 dark:border-gray-700 transition-colors"
+                              title={`Download full Monthly Attendance & Duty PDF report for ${row.member.name}`}
+                            >
+                              Month PDF
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-[11px]">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))
                 ) : (
                   monthSummaryData.map((row) => (
                     <tr key={row.member._id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
                       <td className="py-3 px-3">
-                        <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                          <span>{row.member.position || 'Staff'}</span>
-                          {!row.isLoggable && (
-                            <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
-                              Attendance Only
-                            </span>
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div>
+                            <div className="font-bold text-gray-900 dark:text-white text-xs">{row.member.name}</div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                              <span>{row.member.position || 'Staff'}</span>
+                              {!row.isLoggable && (
+                                <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800/50">
+                                  Attendance Only
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'month')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 dark:hover:text-indigo-300 transition-colors shrink-0"
+                              title={`Download Month PDF report for ${row.member.name}`}
+                            >
+                              <Printer className={cn("w-3.5 h-3.5", staffPdfGeneratingId === row.member._id && "animate-spin text-indigo-600")} />
+                            </button>
                           )}
                         </div>
                       </td>
@@ -2275,6 +3168,33 @@ export default function AttendancePage() {
                       </td>
                       <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-300">
                         {isViewer ? '••••••' : formatCurrency(row.totalPayable)}
+                      </td>
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        {!isViewer ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'month')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="btn-primary py-1 px-2 text-[11px] font-bold inline-flex items-center gap-1 shadow-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-all"
+                              title={`Download full Monthly Attendance & Duty PDF report for ${row.member.name}`}
+                            >
+                              <Printer className={cn("w-3 h-3", staffPdfGeneratingId === row.member._id && "animate-spin")} />
+                              <span>{staffPdfGeneratingId === row.member._id ? 'Preparing...' : 'Month PDF'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadStaffPdfReport(row.member._id, 'day')}
+                              disabled={staffPdfGeneratingId === row.member._id}
+                              className="py-1 px-1.5 text-[10.5px] font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md border border-gray-300 dark:border-gray-700 transition-colors"
+                              title={`Download single Day Attendance & Duty PDF report for ${row.member.name}`}
+                            >
+                              Day PDF
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-[11px]">—</span>
+                        )}
                       </td>
                     </tr>
                   ))
