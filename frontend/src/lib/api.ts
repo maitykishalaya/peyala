@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { enqueueRequest, buildOptimisticResponse } from './offline-sync';
+import { toast } from './toast';
 
 const getInitialBaseUrl = () => {
   if (typeof window !== 'undefined') {
@@ -46,6 +48,26 @@ api.interceptors.response.use(
     if (err.code === 'ECONNABORTED' && err.message?.includes('timeout')) {
       console.warn('[Peyala API] Request timed out after 12s. Released UI wait lock.');
     }
+
+    const config = err.config;
+    const method = (config?.method || 'get').toLowerCase();
+    const isMutation = ['post', 'put', 'patch', 'delete'].includes(method);
+    const isConnectionError =
+      !err.response ||
+      err.response.status >= 500 ||
+      err.code === 'ERR_NETWORK' ||
+      err.code === 'ECONNABORTED' ||
+      (typeof navigator !== 'undefined' && !navigator.onLine);
+
+    // Queue mutation locally on connection or DB error so user can continue uninterrupted
+    if (isMutation && isConnectionError && typeof window !== 'undefined' && config) {
+      const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      enqueueRequest(config, tempId);
+
+      toast.warning('⚠️ Network/DB connection error. Changes queued locally and will auto-sync when restored.');
+      return Promise.resolve(buildOptimisticResponse(config, tempId));
+    }
+
     return Promise.reject(err);
   }
 );

@@ -1100,7 +1100,8 @@ export default function TablesPage() {
             };
           });
 
-          const kotNumberStr = `KOT-${updatedOrder.orderNumber || updatedOrder._id.slice(-4)}-R${roundNum}`;
+          const newRound = updatedOrder.kotRounds?.[updatedOrder.kotRounds.length - 1];
+          const kotNumberStr = newRound?.kotNumber ? String(newRound.kotNumber) : `KOT-${updatedOrder.orderNumber || updatedOrder._id.slice(-4)}-R${roundNum}`;
           const tokenNoStr = updatedOrder.orderNumber
             ? String(updatedOrder.orderNumber).slice(-2)
             : updatedOrder._id.slice(-2);
@@ -1116,7 +1117,6 @@ export default function TablesPage() {
             items: printableItems,
           });
 
-          const newRound = updatedOrder.kotRounds?.[updatedOrder.kotRounds.length - 1];
           if (newRound?._id) {
             inFlightKotsRef.current.add(`${updatedOrder._id}-${newRound._id}`);
             if (isPrintStation) {
@@ -1152,7 +1152,8 @@ export default function TablesPage() {
             };
           });
 
-          const kotNumberStr = `KOT-${createdOrder.orderNumber || createdOrder._id.slice(-4)}-R1`;
+          const firstRound = createdOrder.kotRounds?.[0];
+          const kotNumberStr = firstRound?.kotNumber ? String(firstRound.kotNumber) : `KOT-${createdOrder.orderNumber || createdOrder._id.slice(-4)}-R1`;
           const tokenNoStr = createdOrder.orderNumber
             ? String(createdOrder.orderNumber).slice(-2)
             : createdOrder._id.slice(-2);
@@ -1168,7 +1169,6 @@ export default function TablesPage() {
             items: printableItems,
           });
 
-          const firstRound = createdOrder.kotRounds?.[0];
           if (firstRound?._id) {
             inFlightKotsRef.current.add(`${createdOrder._id}-${firstRound._id}`);
             if (isPrintStation) {

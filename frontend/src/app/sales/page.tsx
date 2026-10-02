@@ -99,7 +99,7 @@ export default function SalesPage() {
   const blank = (): any => ({
     date: today(),
     // Outlet payment breakdown — user fills these individually
-    paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0 },
+    paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0 },
     // Platform sections — only filled after payout received
     zomato: { ...emptyPlatform, receivedIn: '' },
     fatafat: { ...emptyPlatform, receivedIn: '' },
@@ -117,7 +117,8 @@ export default function SalesPage() {
     (form.paymentBreakdown?.cash || 0) +
     (form.paymentBreakdown?.upi || 0) +
     (form.paymentBreakdown?.card || 0) +
-    (form.paymentBreakdown?.bankTransfer || 0);
+    (form.paymentBreakdown?.bankTransfer || 0) +
+    (form.paymentBreakdown?.due || 0);
 
   // Total revenue preview
   const totalRevenueCalc =
@@ -198,7 +199,7 @@ export default function SalesPage() {
     setSelected(s);
     setForm({
       date: s.date?.split('T')[0] || today(),
-      paymentBreakdown: s.paymentBreakdown || { cash: 0, upi: 0, card: 0, bankTransfer: 0 },
+      paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0, ...s.paymentBreakdown },
       zomato: { ...(s.zomato || { ...emptyPlatform }), receivedIn: s.zomato?.receivedIn?._id || s.zomato?.receivedIn || '' },
       fatafat: { ...(s.fatafat || { ...emptyPlatform }), receivedIn: s.fatafat?.receivedIn?._id || s.fatafat?.receivedIn || '' },
       otherSales: s.otherSales || 0,
@@ -509,7 +510,36 @@ export default function SalesPage() {
                       </div>
                     ) : <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="table-td">{isViewer ? '••••••' : (s.otherSales > 0 ? formatCurrency(s.otherSales) : <span className="text-gray-300">—</span>)}</td>
+                  <td className="table-td">
+                    {isViewer ? (
+                      '••••••'
+                    ) : (() => {
+                      const dueAmt = s.paymentBreakdown?.due || 0;
+                      const otherAmt = s.otherSales || 0;
+                      const combined = dueAmt + otherAmt;
+                      if (combined <= 0) return <span className="text-gray-300">—</span>;
+                      return (
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">{formatCurrency(combined)}</div>
+                          {dueAmt > 0 && otherAmt > 0 ? (
+                            <div className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5">
+                              <span className="text-amber-600 dark:text-amber-400 font-semibold">Due: {formatCurrency(dueAmt)}</span>
+                              <span>•</span>
+                              <span>Other: {formatCurrency(otherAmt)}</span>
+                            </div>
+                          ) : dueAmt > 0 ? (
+                            <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                              Due: {formatCurrency(dueAmt)}
+                            </div>
+                          ) : otherAmt > 0 ? (
+                            <div className="text-[10px] text-gray-400 mt-0.5">
+                              Other: {formatCurrency(otherAmt)}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="table-td font-bold text-brand-600 text-base">{isViewer ? '••••••' : formatCurrency(s.totalRevenue || 0)}</td>
                   <td className="table-td">
                     {canWrite && (
@@ -600,6 +630,14 @@ export default function SalesPage() {
                 <input type="number" className="input"
                   value={form.paymentBreakdown?.bankTransfer || ''}
                   onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, bankTransfer: +e.target.value } })}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="label">📋 Due / Khata (₹)</label>
+                <input type="number" className="input"
+                  value={form.paymentBreakdown?.due || ''}
+                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, due: +e.target.value } })}
                   placeholder="0"
                 />
               </div>

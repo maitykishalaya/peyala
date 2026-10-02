@@ -99,18 +99,33 @@ function resolveDateRanges(period = 'this_month', startDate, endDate) {
   };
 }
 
+// In-memory cache for analytics overview to protect Atlas from heavy repetitive aggregation scans
+const overviewCache = new Map();
+const OVERVIEW_CACHE_TTL_MS = 20000; // 20 seconds TTL
+
+function invalidateAnalyticsCache() {
+  overviewCache.clear();
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 1. GET /api/analytics/overview
 // ─────────────────────────────────────────────────────────────────
 router.get('/overview', async (req, res) => {
   try {
     const { period = 'this_month', startDate, endDate } = req.query;
+    const cacheKey = `${period}_${startDate || ''}_${endDate || ''}`;
+    const cached = overviewCache.get(cacheKey);
+    const nowMs = Date.now();
+    if (cached && cached.expiresAt > nowMs) {
+      return res.json(cached.data);
+    }
+
     const { currentStart, currentEnd, previousStart, previousEnd, currentDays } = resolveDateRanges(period, startDate, endDate);
 
     const now = new Date();
     const todayRange = getIstDayRange(now);
 
-    // Run parallel aggregation queries
+    // Run parallel aggregation queries with slim field projections
     const [
       config,
       currentSalesEntries,
@@ -128,15 +143,21 @@ router.get('/overview', async (req, res) => {
       Order.find({
         status: 'paid',
         paidAt: { $gte: currentStart, $lte: currentEnd },
-      }).lean(),
+      })
+        .select('status paidAt createdAt subtotal taxAmount discount settledAmount total items.name items.quantity items.price items.status items.menuItem')
+        .lean(),
       Order.find({
         status: 'paid',
         paidAt: { $gte: previousStart, $lte: previousEnd },
-      }).lean(),
+      })
+        .select('status paidAt subtotal taxAmount discount settledAmount total')
+        .lean(),
       Order.find({
         status: 'paid',
         paidAt: { $gte: todayRange.start, $lte: todayRange.end },
-      }).lean(),
+      })
+        .select('status paidAt settledAmount total')
+        .lean(),
       SalesEntry.findOne({ date: { $gte: todayRange.start, $lte: todayRange.end } }).lean(),
       SalesEntry.find({ date: { $lt: todayRange.start } }).sort({ date: -1 }).limit(90).lean(),
       MenuCategory.find({ isActive: true }).lean(),
@@ -712,7 +733,7 @@ router.get('/overview', async (req, res) => {
       hasItemLevelData: currentPaidOrders.length > 0,
     };
 
-    res.json({
+    const payload = {
       period: {
         startDate: currentStart,
         endDate: currentEnd,
@@ -752,7 +773,10 @@ router.get('/overview', async (req, res) => {
         weakDayThresholdPct: config.weakDayThresholdPct,
         deliveryDeductionThresholdPct: config.deliveryDeductionThresholdPct,
       },
-    });
+    };
+
+    overviewCache.set(cacheKey, { data: payload, expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS });
+    res.json(payload);
   } catch (err) {
     console.error('Analytics overview error:', err);
     res.status(500).json({ message: err.message });

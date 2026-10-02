@@ -39,7 +39,7 @@ router.get('/summary', async (req, res) => {
           status: 'paid',
           $or: [
             { paidAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
-            { updatedAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+            { paidAt: { $exists: false }, createdAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
           ],
         },
       },
@@ -122,7 +122,7 @@ router.get('/summary', async (req, res) => {
           status: 'paid',
           $or: [
             { paidAt: { $gte: todayRange.start, $lte: todayRange.end } },
-            { updatedAt: { $gte: todayRange.start, $lte: todayRange.end } },
+            { paidAt: { $exists: false }, createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
           ],
         },
       },

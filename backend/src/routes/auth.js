@@ -2,7 +2,7 @@ const router = require('express').Router();
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('../models/User');
-const { auth, adminOnly } = require('../middleware/auth');
+const { auth, adminOnly, invalidateUserCache } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 
 // Ensure standard demo accounts exist in database with password peyala123
@@ -25,6 +25,11 @@ async function ensureDefaultAccounts() {
           hasSeenWalkthrough: true,
         });
         console.log(`✅ Default account initialized: ${acc.email} (${acc.role})`);
+      } else if (!user.isActive) {
+        user.isActive = true;
+        await user.save();
+        invalidateUserCache(user._id);
+        console.log(`✅ Default account re-activated: ${acc.email} (${acc.role})`);
       }
     } catch (err) {
       // Ignore duplicate key or startup errors
@@ -115,6 +120,7 @@ router.put('/users/:id', auth, adminOnly, async (req, res) => {
       update.password = await bcrypt.hash(password, 10);
     }
     const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
+    invalidateUserCache(req.params.id);
     await log({ user: req.user, action: 'UPDATE', module: 'Users', description: `Updated user account: ${user.name}`, metadata: { role, isActive } });
     res.json(user);
   } catch (err) { res.status(400).json({ message: err.message }); }
@@ -125,6 +131,7 @@ router.delete('/users/:id', auth, adminOnly, async (req, res) => {
   try {
     if (req.params.id === req.user._id.toString()) return res.status(400).json({ message: 'Cannot deactivate your own account' });
     const user = await User.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    invalidateUserCache(req.params.id);
     await log({ user: req.user, action: 'DELETE', module: 'Users', description: `Deactivated user: ${user.name}` });
     res.json({ message: 'User deactivated' });
   } catch (err) { res.status(500).json({ message: err.message }); }

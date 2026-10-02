@@ -156,6 +156,7 @@ router.get('/', async (req, res) => {
               upi: null,
               card: null,
               bankTransfer: null,
+              due: null,
             },
             zomato: obj.zomato ? {
               ...obj.zomato,

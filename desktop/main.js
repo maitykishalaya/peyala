@@ -252,13 +252,6 @@ async function startLocalEngines() {
   if (!p3000) killPort(3000);
   if (!p4000) killPort(4000);
 
-function logEngine(msg) {
-  try {
-    const logPath = path.join(app.getPath('userData'), 'peyala_engine.log');
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch (_) {}
-}
-
   const nodeBin = getNodeExecutable();
   logEngine(`Starting engines using nodeBin: ${nodeBin}, ROOT_DIR: ${ROOT_DIR}`);
 
@@ -500,6 +493,8 @@ function setupTray() {
   } catch (err) {
     console.error('[Peyala Tray Init Error]', err);
   }
+}
+
 ipcMain.handle('ensure-window-focus', () => {
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {

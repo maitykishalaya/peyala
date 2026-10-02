@@ -7,6 +7,7 @@ import { cn, getInitials } from '@/lib/utils';
 import Walkthrough from '@/components/ui/Walkthrough';
 import ThermalPreviewModal from '@/components/ui/ThermalPreviewModal';
 import WastagePromptBanner from '@/components/ui/WastagePromptBanner';
+import OfflineSyncBanner from '@/components/ui/OfflineSyncBanner';
 import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
@@ -458,6 +459,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             })}
           </div>
         </footer>
+        <OfflineSyncBanner />
+        <ThermalPreviewModal />
+        <WastagePromptBanner />
       </div>
     </div>
   );

@@ -27,6 +27,7 @@ const orderItemSchema = new mongoose.Schema({
 
 const kotRoundSchema = new mongoose.Schema({
   roundNumber: { type: Number, required: true },
+  kotNumber: { type: Number, index: true },
   roundTag: { type: String, default: '[INITIAL ORDER]' },
   items: [{
     name: { type: String, required: true },
@@ -98,8 +99,11 @@ const orderSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
-orderSchema.index({ billPrintQueued: 1 });
+orderSchema.index({ billPrintQueued: 1, billPrintQueuedAt: 1, updatedAt: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
+orderSchema.index({ status: 1, paidAt: -1 });
+orderSchema.index({ status: 1, 'kotRounds.printed': 1, createdAt: 1 });
+orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ customer: 1, dueSettled: 1 });
 orderSchema.index({ paymentMethod: 1, dueSettled: 1 });
 orderSchema.index({ fiscalQuarter: 1, billNumber: 1 });

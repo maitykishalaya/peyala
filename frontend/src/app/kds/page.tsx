@@ -561,7 +561,8 @@ export default function KitchenDisplayPage() {
           }, getItemPunchTime(order, unserved[0]));
 
       const roundTag = matchedRound?.roundTag || (minRound > 1 ? `[ROUND ${minRound} - ADD-ON]` : '[INITIAL ORDER]');
-      return { punchTime: roundPunchTime, roundNumber: minRound, roundTag, hasUnserved: true };
+      const kotNumber = matchedRound?.kotNumber;
+      return { punchTime: roundPunchTime, roundNumber: minRound, roundTag, kotNumber, hasUnserved: true };
     }
 
     const latestRound = order.kotRounds && order.kotRounds.length > 0
@@ -572,8 +573,9 @@ export default function KitchenDisplayPage() {
       : new Date(order.foodServedAt || order.effectiveActiveTime || order.createdAt);
     const roundTag = latestRound?.roundTag || (order.kotRounds && order.kotRounds.length > 1 ? `Round ${order.kotRounds.length}` : 'Round 1');
     const roundNumber = latestRound?.roundNumber || (order.kotRounds ? order.kotRounds.length : 1);
+    const kotNumber = latestRound?.kotNumber;
 
-    return { punchTime: roundPunchTime, roundNumber, roundTag, hasUnserved: false };
+    return { punchTime: roundPunchTime, roundNumber, roundTag, kotNumber, hasUnserved: false };
   };
 
   // Color urgency helper

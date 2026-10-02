@@ -64,6 +64,7 @@ export interface OrderItem {
 export interface KotRound {
   _id: string;
   roundNumber: number;
+  kotNumber?: number;
   roundTag?: string;
   items: Array<{
     name: string;

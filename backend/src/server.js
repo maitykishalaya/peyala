@@ -1,3 +1,5 @@
+// Expand libuv thread pool so bcrypt/crypto cannot starve async I/O under concurrent logins
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

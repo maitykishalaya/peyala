@@ -418,15 +418,21 @@ router.get('/', async (req, res) => {
           { path: 'createdBy', select: 'name' },
         ],
       })
-      .sort({ tableNumber: 1 });
+      .sort({ tableNumber: 1 })
+      .lean();
 
     // Check if any legacy tables need their default category persisted
     const uncatTables = tables.filter((t) => !t.category);
     if (uncatTables.length > 0) {
-      for (const t of uncatTables) {
+      uncatTables.forEach((t) => {
         t.category = inferDefaultCategory(t.tableNumber);
-        await Table.updateOne({ _id: t._id }, { $set: { category: t.category } });
-      }
+      });
+      // Persist in background asynchronously without stalling HTTP response
+      Promise.all(
+        uncatTables.map((t) =>
+          Table.updateOne({ _id: t._id }, { $set: { category: t.category } })
+        )
+      ).catch(() => {});
     }
 
     res.json(tables);

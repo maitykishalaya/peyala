@@ -18,12 +18,12 @@ import { ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft } from 'lucide-r
 
 // Colour and label for each transaction type
 const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  purchase:     { label: 'Purchase',     color: 'badge-red' },
-  payment:      { label: 'Payment',      color: 'badge-red' },
-  receipt:      { label: 'Receipt',      color: 'badge-green' },
+  purchase: { label: 'Purchase', color: 'badge-red' },
+  payment: { label: 'Payment', color: 'badge-red' },
+  receipt: { label: 'Receipt', color: 'badge-green' },
   transfer_out: { label: 'Transfer Out', color: 'badge-yellow' },
-  transfer_in:  { label: 'Transfer In',  color: 'badge-blue' },
-  sale_credit:  { label: 'Sales',        color: 'badge-green' },
+  transfer_in: { label: 'Transfer In', color: 'badge-blue' },
+  sale_credit: { label: 'Sales', color: 'badge-green' },
 };
 
 interface AccountLedgerProps {

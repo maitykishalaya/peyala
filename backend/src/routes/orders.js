@@ -10,6 +10,8 @@ const { auth, adminOnly, managerOrAdmin, staffOrAdmin } = require('../middleware
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
 const { ensureOrderBillNumber } = require('../utils/billingSequence');
+const { getNextOrderNumber } = require('../utils/orderSequence');
+const { getNextDailyKotNumber } = require('../utils/kotSequence');
 
 router.use(auth);
 
@@ -114,7 +116,7 @@ router.get('/pending-kots', async (req, res) => {
             roundId: round._id,
             tableNumber: order.table ? order.table.tableNumber : 'N/A',
             orderNumber: order.orderNumber,
-            kotNumber: `${order.orderNumber}-${round.roundNumber}`,
+            kotNumber: round.kotNumber ? String(round.kotNumber) : `${order.orderNumber}-${round.roundNumber}`,
             roundNumber: round.roundNumber,
             roundTag: round.roundTag || (round.roundNumber === 1 ? '[INITIAL ORDER]' : `[ROUND ${round.roundNumber} - ADD-ON]`),
             billerName: order.createdBy ? order.createdBy.name : 'Staff',
@@ -680,6 +682,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/orders — open a new order for a table (KOT)
 // ─────────────────────────────────────────────────────────────────
 router.post('/', staffOrAdmin, async (req, res) => {
+  let claimedTableId = null;
   try {
     const { tableId, items, shouldPrint } = req.body;
 
@@ -690,15 +693,21 @@ router.post('/', staffOrAdmin, async (req, res) => {
       return res.status(400).json({ message: 'At least one menu item is required to open an order' });
     }
 
-    const table = await Table.findById(tableId);
-    if (!table) {
-      return res.status(404).json({ message: 'Table not found' });
-    }
+    // Atomically claim table to prevent double-booking race condition
+    const table = await Table.findOneAndUpdate(
+      { _id: tableId, status: { $ne: 'occupied' }, activeOrder: null },
+      { $set: { status: 'occupied' } },
+      { new: true }
+    );
 
-    // Reject if table is already occupied
-    if (table.status === 'occupied' || table.activeOrder) {
-      return res.status(400).json({ message: `Table ${table.tableNumber} is already occupied with an active order` });
+    if (!table) {
+      const existing = await Table.findById(tableId);
+      if (!existing) {
+        return res.status(404).json({ message: 'Table not found' });
+      }
+      return res.status(400).json({ message: `Table ${existing.tableNumber} is already occupied with an active order` });
     }
+    claimedTableId = table._id;
 
     // Fetch and snapshot MenuItem details
     const itemIds = items.map((i) => i.menuItemId);
@@ -767,14 +776,15 @@ router.post('/', staffOrAdmin, async (req, res) => {
     // Calculate totals server-side
     const totals = Order.calcTotals(snapshottedItems, 0);
 
-    // Sequential 4-digit order number (e.g. 4501, 4510...)
-    const orderCount = await Order.countDocuments();
-    const orderNumber = 4500 + orderCount + 1;
+    // Sequential 4-digit order number (atomic and collision-free)
+    const orderNumber = await getNextOrderNumber();
 
     const isAutoPrint = shouldPrint !== false;
     const orderNow = new Date();
+    const dailyKotNumber = await getNextDailyKotNumber(orderNow);
     const initialKotRound = {
       roundNumber: 1,
+      kotNumber: dailyKotNumber,
       roundTag: '[INITIAL ORDER]',
       items: snapshottedItems.map((i) => ({
         name: i.name,
@@ -809,6 +819,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
     table.status = 'occupied';
     table.activeOrder = order._id;
     await table.save();
+    claimedTableId = null; // Successfully bound to order
 
     await log({
       user: req.user,
@@ -820,6 +831,10 @@ router.post('/', staffOrAdmin, async (req, res) => {
     const populated = await populateOrder(Order.findById(order._id));
     res.status(201).json(populated);
   } catch (err) {
+    if (claimedTableId) {
+      // Revert table occupancy claim if order creation failed
+      await Table.findByIdAndUpdate(claimedTableId, { $set: { status: 'available', activeOrder: null } }).catch(() => {});
+    }
     res.status(400).json({ message: err.message });
   }
 });
@@ -944,11 +959,13 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     }
 
     const isAutoPrint = shouldPrint !== false;
+    const dailyKotNumber = await getNextDailyKotNumber(now);
     const sortedRoundItems = [...newRoundItems].sort(
       (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
     );
     order.kotRounds.push({
       roundNumber: nextKotCount,
+      kotNumber: dailyKotNumber,
       roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
       items: sortedRoundItems.map((i) => ({
         name: i.name,
@@ -1313,35 +1330,38 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       order.dueSettledAmount = 0;
     }
 
-    // 1. Upsert TODAY's single SalesEntry using Indian Standard Time calendar range
+    // 1. Atomically accumulate TODAY's single SalesEntry using Indian Standard Time calendar range
     const { start, end, canonicalDate } = getIstDayRange(new Date());
 
-    let salesEntry = await SalesEntry.findOne({ date: { $gte: start, $lte: end } });
+    const incFields = {
+      'paymentBreakdown.cash': orderPaymentBreakdown.cash,
+      'paymentBreakdown.upi': orderPaymentBreakdown.upi,
+      'paymentBreakdown.card': orderPaymentBreakdown.card,
+      'paymentBreakdown.due': orderPaymentBreakdown.due || 0,
+      'paymentBreakdown.bankTransfer': orderPaymentBreakdown.other || 0,
+      outletSales: finalSettled,
+      totalRevenue: finalSettled,
+    };
+
+    let salesEntry = await SalesEntry.findOneAndUpdate(
+      { date: { $gte: start, $lte: end } },
+      { $inc: incFields },
+      { new: true }
+    );
+
     if (!salesEntry) {
-      salesEntry = new SalesEntry({
-        date: canonicalDate,
-        paymentBreakdown: { cash: 0, upi: 0, card: 0, due: 0, bankTransfer: 0 },
-        outletSales: 0,
-        totalRevenue: 0,
-        createdBy: req.user._id,
-      });
+      salesEntry = await SalesEntry.findOneAndUpdate(
+        { date: canonicalDate },
+        {
+          $inc: incFields,
+          $setOnInsert: {
+            date: canonicalDate,
+            createdBy: req.user._id,
+          },
+        },
+        { new: true, upsert: true }
+      );
     }
-
-    if (!salesEntry.paymentBreakdown) {
-      salesEntry.paymentBreakdown = { cash: 0, upi: 0, card: 0, due: 0, bankTransfer: 0 };
-    }
-
-    // Accumulate the collected breakdown amounts into the single daily row
-    salesEntry.paymentBreakdown.cash = (salesEntry.paymentBreakdown.cash || 0) + orderPaymentBreakdown.cash;
-    salesEntry.paymentBreakdown.upi = (salesEntry.paymentBreakdown.upi || 0) + orderPaymentBreakdown.upi;
-    salesEntry.paymentBreakdown.card = (salesEntry.paymentBreakdown.card || 0) + orderPaymentBreakdown.card;
-    salesEntry.paymentBreakdown.due = (salesEntry.paymentBreakdown.due || 0) + (orderPaymentBreakdown.due || 0);
-    salesEntry.paymentBreakdown.bankTransfer = (salesEntry.paymentBreakdown.bankTransfer || 0) + orderPaymentBreakdown.other;
-
-    const { outletSales, totalRevenue } = SalesEntry.calcTotals(salesEntry);
-    salesEntry.outletSales = outletSales;
-    salesEntry.totalRevenue = totalRevenue;
-    await salesEntry.save();
 
     // 2. Credit the matching real Account documents
     if (orderPaymentBreakdown.cash > 0) {
@@ -1362,7 +1382,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       }
     }
 
-    // 3. GST liability & gstLog on BalanceSheet
+    // 3. GST liability & gstLog on BalanceSheet (Atomic update)
     const gstToAdd = order.taxAmount > 0
       ? order.taxAmount
       : Math.round(finalSettled * 0.0477 * 100) / 100;
@@ -1371,18 +1391,26 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     const tableNum = tableDoc ? tableDoc.tableNumber : '';
 
     if (gstToAdd > 0) {
-      const bs = await BalanceSheet.getSingleton();
-      bs.gstLiability = Math.max(0, bs.gstLiability + gstToAdd);
-      bs.gstLog.push({
-        date: new Date(),
-        salesEntryId: salesEntry._id,
-        outletSales: finalSettled,
-        gstAdded: gstToAdd,
-        note: `Auto: GST on ₹${finalSettled} POS Dine-in Order (Table ${tableNum})${waivedAmount > 0 ? ` [Waived: ₹${waivedAmount}]` : ''}`,
-      });
-      bs.lastUpdated = new Date();
-      bs.lastUpdatedBy = req.user.name;
-      await bs.save();
+      await BalanceSheet.findOneAndUpdate(
+        {},
+        {
+          $inc: { gstLiability: gstToAdd },
+          $push: {
+            gstLog: {
+              date: new Date(),
+              salesEntryId: salesEntry?._id,
+              outletSales: finalSettled,
+              gstAdded: gstToAdd,
+              note: `Auto: GST on ₹${finalSettled} POS Dine-in Order (Table ${tableNum})${waivedAmount > 0 ? ` [Waived: ₹${waivedAmount}]` : ''}`,
+            },
+          },
+          $set: {
+            lastUpdated: new Date(),
+            lastUpdatedBy: req.user.name,
+          },
+        },
+        { upsert: true }
+      );
     }
 
     // 4. Record settled amount, waived amount, payment breakdown, mark order paid, free the table
@@ -1410,10 +1438,10 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
 
     await order.save();
 
-    if (tableDoc) {
-      tableDoc.status = 'available';
-      tableDoc.activeOrder = null;
-      await tableDoc.save();
+    if (order.table) {
+      await Table.findByIdAndUpdate(order.table, {
+        $set: { status: 'available', activeOrder: null },
+      });
     }
 
     const methodDesc = paymentMethod === 'part'
@@ -1709,8 +1737,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
       await sourceOrder.save();
 
       if (!targetTable.activeOrder) {
-        const orderCount = await Order.countDocuments();
-        const orderNumber = 4500 + orderCount + 1;
+        const orderNumber = await getNextOrderNumber();
         const tgtTotals = Order.calcTotals(movedItems, 0, 'flat');
 
         const newTargetOrder = await Order.create({
@@ -1828,8 +1855,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
       await sourceOrder.save();
 
       if (!targetTable.activeOrder) {
-        const orderCount = await Order.countDocuments();
-        const orderNumber = 4500 + orderCount + 1;
+        const orderNumber = await getNextOrderNumber();
         const tgtTotals = Order.calcTotals(movedItems, 0, 'flat');
 
         const newTargetOrder = await Order.create({
