@@ -139,11 +139,11 @@ async function runTestSuite(serverInfo) {
   console.log('='.repeat(80));
 
   // Step 0: Login and obtain token
-  console.log('\n[SETUP] Logging in as admin@peyala.com...');
+  console.log('\n[SETUP] Logging in as loadtest@peyala.com...');
   const loginRes = await request({
     method: 'POST',
     path: '/api/auth/login',
-    body: { email: 'admin@peyala.com', password: 'peyala123' },
+    body: { email: 'loadtest@peyala.com', password: 'testadmin123' },
   });
 
   if (loginRes.status !== 200 || !loginRes.data.token) {

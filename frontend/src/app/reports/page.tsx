@@ -5,7 +5,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import { reportsApi } from '@/lib/api';
 import { ordersApi, menuApi, MenuItem } from '@/lib/pos-api';
 import { useAuth } from '@/lib/auth';
-import { formatCurrency, monthStart, today, cn } from '@/lib/utils';
+import { formatCurrency, monthStart, today, cn, clearFinancialCaches } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { printCustomerBill, BillItem } from '@/lib/thermal-print';
 import {
@@ -90,20 +90,7 @@ export default function ReportsPage() {
   const [addItemQty, setAddItemQty] = useState<number>(1);
 
   const invalidateFinancialCaches = () => {
-    try {
-      const keys = [
-        SALES_CACHE_KEY,
-        DAILY_CACHE_KEY,
-        PNL_CACHE_KEY,
-        'peyala_sales_list_cache_v1',
-        'peyala_accounts_cache_v1',
-        'peyala_balancesheet_cache_v1',
-        'peyala_dashboard_cache_v1',
-      ];
-      keys.forEach((k) => localStorage.removeItem(k));
-    } catch (e) {
-      console.error('Failed to invalidate financial caches:', e);
-    }
+    clearFinancialCaches();
   };
 
   // Print Customer Bill from Detailed Sales Report
@@ -132,7 +119,7 @@ export default function ReportsPage() {
         tokenNo: orderToPrint.orderNumber ? String(orderToPrint.orderNumber).slice(-2) : orderToPrint._id?.slice(-2),
         tableNumber: orderToPrint.table?.tableNumber ? String(orderToPrint.table.tableNumber) : 'Takeaway',
         billerName: billerDisplayName,
-        createdAt: new Date(orderToPrint.createdAt || Date.now()),
+        createdAt: new Date(orderToPrint.billPrintedAt || orderToPrint.billedAt || orderToPrint.paidAt || orderToPrint.createdAt || Date.now()),
         items: printableBillItems,
         subtotal: orderToPrint.subtotal || 0,
         taxAmount: orderToPrint.taxAmount || 0,
@@ -522,9 +509,10 @@ export default function ReportsPage() {
     ];
 
     const rows = salesData.orders.map((o: any) => {
-      const d = new Date(o.createdAt);
-      const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-      const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const effectiveBillDate = o.billPrintedAt || o.billedAt || o.paidAt || o.createdAt;
+      const d = new Date(effectiveBillDate);
+      const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+      const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
       const itemsDetail = (o.items || [])
         .map((it: any) => {
           const parts = [];
@@ -1309,7 +1297,7 @@ export default function ReportsPage() {
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="bg-gray-50 dark:bg-gray-800/80 text-gray-500 font-semibold border-b border-gray-200 dark:border-gray-700">
-                            <th className="py-3 px-3 text-left">Time & Date</th>
+                            <th className="py-3 px-3 text-left">Bill Time & Date</th>
                             <th className="py-3 px-3 text-left">Bill / Order #</th>
                             <th className="py-3 px-3 text-left">Table</th>
                             <th className="py-3 px-3 text-center">KOTs</th>
@@ -1324,9 +1312,10 @@ export default function ReportsPage() {
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                           {salesData.orders.map((o: any) => {
-                            const d = new Date(o.createdAt);
-                            const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-                            const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                            const effectiveBillDate = o.billPrintedAt || o.billedAt || o.paidAt || o.createdAt;
+                            const d = new Date(effectiveBillDate);
+                            const dateStr = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+                            const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
                             const isExpanded = expandedOrderId === o._id;
                             const settled = o.settledAmount !== null && o.settledAmount !== undefined ? o.settledAmount : o.total;
                             const waived = o.waivedAmount || 0;

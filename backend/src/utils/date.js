@@ -35,7 +35,10 @@ function getIstDayRange(dateInput = new Date()) {
 
   const start = new Date(startMs);
   const end = new Date(endMs);
-  const canonicalDate = new Date(startMs);
+  // Canonical date sits at noon IST (12:00:00 IST = 06:30:00 UTC).
+  // This guarantees that the UTC ISO date (YYYY-MM-DD) matches istDateStr,
+  // preventing client date-split and timezone truncation bugs.
+  const canonicalDate = new Date(startMs + (12 * 3600 * 1000));
 
   return {
     istDateStr,

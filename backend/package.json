@@ -1,6 +1,6 @@
 {
   "name": "peyala-backend",
-  "version": "1.0.0",
+  "version": "9.0.0",
   "description": "Peyala Business Admin - Backend API",
   "main": "src/server.js",
   "scripts": {

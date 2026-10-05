@@ -12,6 +12,7 @@ const { getIstDayRange } = require('../utils/date');
 const { ensureOrderBillNumber } = require('../utils/billingSequence');
 const { getNextOrderNumber } = require('../utils/orderSequence');
 const { getNextDailyKotNumber } = require('../utils/kotSequence');
+const { reconcileDailySales } = require('../utils/salesReconciler');
 
 router.use(auth);
 
@@ -188,7 +189,7 @@ router.get('/pending-bills', async (req, res) => {
         tokenNo: order.orderNumber ? String(order.orderNumber).slice(-2) : String(order._id).slice(-2),
         tableNumber: order.table ? order.table.tableNumber : 'Takeaway',
         billerName: order.createdBy ? order.createdBy.name : 'Staff',
-        createdAt: order.createdAt,
+        createdAt: order.billPrintedAt || order.billedAt || order.paidAt || order.createdAt,
         items: activeItems,
         subtotal: order.subtotal,
         taxAmount: order.taxAmount,
@@ -1183,14 +1184,18 @@ router.post('/:id/bill', staffOrAdmin, async (req, res) => {
       return res.status(400).json({ message: `Cannot bill an order with status "${order.status}"` });
     }
 
+    const billTime = new Date();
     order.status = 'billed';
     order.billPrinted = false;
     order.billPrintQueued = true;
-    order.billPrintQueuedAt = new Date();
+    order.billPrintQueuedAt = billTime;
     order.billPrintSeq = (order.billPrintSeq || 0) + 1;
+    if (!order.billedAt) {
+      order.billedAt = billTime;
+    }
 
     // Allocate official sequential quarterly bill number if not already assigned
-    await ensureOrderBillNumber(order);
+    await ensureOrderBillNumber(order, order.billedAt);
 
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
@@ -1330,40 +1335,42 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       order.dueSettledAmount = 0;
     }
 
-    // 1. Atomically accumulate TODAY's single SalesEntry using Indian Standard Time calendar range
-    const { start, end, canonicalDate } = getIstDayRange(new Date());
+    // 1. Record settled amount, waived amount, payment breakdown, mark order paid
+    const payTime = new Date();
+    order.status = 'paid';
+    order.paidAt = payTime;
+    if (!order.billedAt) {
+      order.billedAt = payTime;
+    }
+    if (!order.billPrintedAt) {
+      order.billPrintedAt = payTime;
+    }
+    order.paymentMethod = paymentMethod;
+    order.paymentBreakdown = orderPaymentBreakdown;
+    order.settledAmount = finalSettled;
+    order.waivedAmount = waivedAmount;
 
-    const incFields = {
-      'paymentBreakdown.cash': orderPaymentBreakdown.cash,
-      'paymentBreakdown.upi': orderPaymentBreakdown.upi,
-      'paymentBreakdown.card': orderPaymentBreakdown.card,
-      'paymentBreakdown.due': orderPaymentBreakdown.due || 0,
-      'paymentBreakdown.bankTransfer': orderPaymentBreakdown.other || 0,
-      outletSales: finalSettled,
-      totalRevenue: finalSettled,
-    };
+    // Allocate official sequential quarterly bill number if settled directly without prior billing
+    await ensureOrderBillNumber(order, order.billedAt);
 
-    let salesEntry = await SalesEntry.findOneAndUpdate(
-      { date: { $gte: start, $lte: end } },
-      { $inc: incFields },
-      { new: true }
-    );
-
-    if (!salesEntry) {
-      salesEntry = await SalesEntry.findOneAndUpdate(
-        { date: canonicalDate },
-        {
-          $inc: incFields,
-          $setOnInsert: {
-            date: canonicalDate,
-            createdBy: req.user._id,
-          },
-        },
-        { new: true, upsert: true }
-      );
+    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
+    if (!order.foodServedAt) {
+      order.foodServedAt = new Date();
+    }
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item) => {
+        if (['pending', 'preparing'].includes(item.status)) {
+          item.status = 'served';
+        }
+      });
     }
 
-    // 2. Credit the matching real Account documents
+    await order.save();
+
+    // 2. Reconcile TODAY's single SalesEntry strictly from settled orders
+    const salesEntry = await reconcileDailySales(order.paidAt, req.user._id);
+
+    // 3. Credit the matching real Account documents
     if (orderPaymentBreakdown.cash > 0) {
       const cashAccount = await Account.findOne({ type: 'cash', isActive: true }).sort('name');
       if (cashAccount) {
@@ -1382,7 +1389,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       }
     }
 
-    // 3. GST liability & gstLog on BalanceSheet (Atomic update)
+    // 4. GST liability & gstLog on BalanceSheet (Atomic update)
     const gstToAdd = order.taxAmount > 0
       ? order.taxAmount
       : Math.round(finalSettled * 0.0477 * 100) / 100;
@@ -1412,31 +1419,6 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
         { upsert: true }
       );
     }
-
-    // 4. Record settled amount, waived amount, payment breakdown, mark order paid, free the table
-    order.status = 'paid';
-    order.paidAt = new Date();
-    order.paymentMethod = paymentMethod;
-    order.paymentBreakdown = orderPaymentBreakdown;
-    order.settledAmount = finalSettled;
-    order.waivedAmount = waivedAmount;
-
-    // Allocate official sequential quarterly bill number if settled directly without prior billing
-    await ensureOrderBillNumber(order);
-
-    // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
-    if (!order.foodServedAt) {
-      order.foodServedAt = new Date();
-    }
-    if (order.items && order.items.length > 0) {
-      order.items.forEach((item) => {
-        if (['pending', 'preparing'].includes(item.status)) {
-          item.status = 'served';
-        }
-      });
-    }
-
-    await order.save();
 
     if (order.table) {
       await Table.findByIdAndUpdate(order.table, {
@@ -2048,14 +2030,18 @@ router.post('/:orderId/mark-bill-printed', async (req, res) => {
     if (!seq || Number(seq) >= currentSeq) {
       order.billPrintQueued = false;
     }
+    const printTime = new Date();
     order.billPrinted = true;
-    order.billPrintedAt = new Date();
+    order.billPrintedAt = printTime;
+    if (!order.billedAt) {
+      order.billedAt = printTime;
+    }
     if (!['paid', 'cancelled'].includes(order.status)) {
       order.status = 'billed';
     }
 
     // Allocate official sequential quarterly bill number if not already assigned
-    await ensureOrderBillNumber(order);
+    await ensureOrderBillNumber(order, order.billPrintedAt);
 
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
@@ -2087,10 +2073,14 @@ router.post('/:orderId/queue-bill-print', async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    const queueTime = new Date();
     order.billPrintQueued = true;
-    order.billPrintQueuedAt = new Date();
+    order.billPrintQueuedAt = queueTime;
     order.billPrintSeq = (order.billPrintSeq || 0) + 1;
     order.billPrinted = false;
+    if (!order.billedAt) {
+      order.billedAt = queueTime;
+    }
 
     // Advance open table orders to billed status as the bill is being presented to the customer
     if (!['paid', 'cancelled'].includes(order.status)) {
@@ -2098,7 +2088,7 @@ router.post('/:orderId/queue-bill-print', async (req, res) => {
     }
 
     // Allocate official sequential quarterly bill number if not already assigned
-    await ensureOrderBillNumber(order);
+    await ensureOrderBillNumber(order, order.billedAt);
 
     // Stage 3 (Food Served) is optional: auto-set foodServedAt and mark pending items served if skipped
     if (!order.foodServedAt) {
@@ -2180,22 +2170,22 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
       }
     }
 
-    // 2. Reverse Daily Sales Register (SalesEntry for the calendar date in IST)
-    const orderDate = order.paidAt || order.createdAt || new Date();
-    const { start, end } = getIstDayRange(orderDate);
-    const salesEntry = await SalesEntry.findOne({ date: { $gte: start, $lte: end } });
-    if (salesEntry && salesEntry.paymentBreakdown) {
-      salesEntry.paymentBreakdown.cash = Math.max(0, (salesEntry.paymentBreakdown.cash || 0) - oldCash);
-      salesEntry.paymentBreakdown.upi = Math.max(0, (salesEntry.paymentBreakdown.upi || 0) - oldUpi);
-      salesEntry.paymentBreakdown.card = Math.max(0, (salesEntry.paymentBreakdown.card || 0) - oldCard);
-      salesEntry.paymentBreakdown.bankTransfer = Math.max(0, (salesEntry.paymentBreakdown.bankTransfer || 0) - oldOther);
-      const { outletSales, totalRevenue } = SalesEntry.calcTotals(salesEntry);
-      salesEntry.outletSales = outletSales;
-      salesEntry.totalRevenue = totalRevenue;
-      await salesEntry.save();
+    // 2. Free table if still attached (edge case)
+    const tableDoc = await Table.findById(order.table);
+    if (tableDoc && tableDoc.activeOrder && tableDoc.activeOrder.toString() === order._id.toString()) {
+      tableDoc.activeOrder = null;
+      tableDoc.status = 'available';
+      await tableDoc.save();
     }
 
-    // 3. Reverse GST Liability on BalanceSheet
+    // 3. Permanently remove the order document
+    await Order.findByIdAndDelete(order._id);
+
+    // 4. Reconcile Daily Sales Register for the calendar date in IST
+    const orderDate = order.paidAt || order.createdAt || new Date();
+    const salesEntry = await reconcileDailySales(orderDate, req.user._id);
+
+    // 5. Reverse GST Liability on BalanceSheet
     const gstToRemove = order.taxAmount > 0
       ? order.taxAmount
       : Math.round(settledAmt * 0.0477 * 100) / 100;
@@ -2214,17 +2204,6 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
       bs.lastUpdatedBy = req.user.name;
       await bs.save();
     }
-
-    // 4. Free table if still attached (edge case)
-    const tableDoc = await Table.findById(order.table);
-    if (tableDoc && tableDoc.activeOrder && tableDoc.activeOrder.toString() === order._id.toString()) {
-      tableDoc.activeOrder = null;
-      tableDoc.status = 'available';
-      await tableDoc.save();
-    }
-
-    // 5. Permanently remove the order document
-    await Order.findByIdAndDelete(order._id);
 
     // 6. Audit Logging
     await log({
@@ -2390,22 +2369,24 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       }
     }
 
-    // 6. Reconcile Daily Sales Register
-    const orderDate = order.paidAt || order.createdAt || new Date();
-    const { start, end } = getIstDayRange(orderDate);
-    const salesEntry = await SalesEntry.findOne({ date: { $gte: start, $lte: end } });
-    if (salesEntry && salesEntry.paymentBreakdown) {
-      salesEntry.paymentBreakdown.cash = Math.max(0, (salesEntry.paymentBreakdown.cash || 0) + (newCash - oldCash));
-      salesEntry.paymentBreakdown.upi = Math.max(0, (salesEntry.paymentBreakdown.upi || 0) + (newUpi - oldUpi));
-      salesEntry.paymentBreakdown.card = Math.max(0, (salesEntry.paymentBreakdown.card || 0) + (newCard - oldCard));
-      salesEntry.paymentBreakdown.bankTransfer = Math.max(0, (salesEntry.paymentBreakdown.bankTransfer || 0) + (newOther - oldOther));
-      const { outletSales, totalRevenue } = SalesEntry.calcTotals(salesEntry);
-      salesEntry.outletSales = outletSales;
-      salesEntry.totalRevenue = totalRevenue;
-      await salesEntry.save();
-    }
+    // 6. Update Order
+    order.subtotal = newSubtotal;
+    order.taxAmount = newTaxAmount;
+    order.discountType = discountType;
+    order.discountValue = discountValue;
+    order.discount = newDiscount;
+    order.total = newTotal;
+    order.settledAmount = newSettled;
+    order.waivedAmount = newWaived;
+    order.paymentMethod = newMethod;
+    order.paymentBreakdown = { cash: newCash, upi: newUpi, card: newCard, due: newDue, other: newOther };
+    await order.save();
 
-    // 7. Reconcile GST Liability on BalanceSheet
+    // 7. Reconcile Daily Sales Register strictly from all settled orders for this IST day
+    const orderDate = order.paidAt || order.createdAt || new Date();
+    const salesEntry = await reconcileDailySales(orderDate, req.user._id);
+
+    // 8. Reconcile GST Liability on BalanceSheet
     const effectiveNewGst = newTaxAmount > 0
       ? newTaxAmount
       : Math.round(newSettled * 0.0477 * 100) / 100;
@@ -2425,19 +2406,6 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       bs.lastUpdatedBy = req.user.name;
       await bs.save();
     }
-
-    // 8. Update Order
-    order.subtotal = newSubtotal;
-    order.taxAmount = newTaxAmount;
-    order.discountType = discountType;
-    order.discountValue = discountValue;
-    order.discount = newDiscount;
-    order.total = newTotal;
-    order.settledAmount = newSettled;
-    order.waivedAmount = newWaived;
-    order.paymentMethod = newMethod;
-    order.paymentBreakdown = { cash: newCash, upi: newUpi, card: newCard, due: newDue, other: newOther };
-    await order.save();
 
     // 9. Audit Logging
     await log({

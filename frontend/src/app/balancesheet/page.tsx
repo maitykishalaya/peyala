@@ -473,7 +473,7 @@ export default function BalanceSheetPage() {
               <div className="p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl border border-orange-100 dark:border-orange-900/30">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm sm:text-base font-bold text-orange-700 dark:text-orange-400">
-                    GST Liability <span className="text-xs font-normal">(4.77% of outlet sales)</span>
+                    GST Liability <span className="text-xs font-normal">(Auto-calculated from POS orders)</span>
                   </span>
                   {/* Action buttons for GST */}
                   <div className="flex gap-1.5">
@@ -661,7 +661,7 @@ export default function BalanceSheetPage() {
               <div className="p-4 bg-orange-50 dark:bg-orange-900/10 rounded-xl">
                 <p className="text-xs sm:text-sm text-orange-700 font-bold mb-1">GST Liability Summary</p>
                 <p className="text-xl sm:text-2xl font-black text-orange-600">{formatCurrency(liabilities.gst)}</p>
-                <p className="text-xs text-gray-500 mt-1">Accumulates 4.77% on every outlet sale · Resets when you pay GST</p>
+                <p className="text-xs text-gray-500 mt-1">Accumulates from settled POS orders · Resets when you pay GST</p>
               </div>
             </div>
           </div>

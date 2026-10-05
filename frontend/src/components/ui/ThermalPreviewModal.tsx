@@ -43,9 +43,21 @@ export default function ThermalPreviewModal() {
   }, []);
 
   const handleClose = () => {
+    try {
+      const iframe = document.querySelector('iframe[title="Receipt Preview"]') as HTMLIFrameElement | null;
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.blur();
+      }
+    } catch (_) {}
+    try {
+      window.focus();
+      document.body.focus?.();
+    } catch (_) {}
+    try {
+      (window as any).electronAPI?.ensureFocus?.();
+    } catch (_) {}
     setOpen(false);
     setPayload(null);
-    try { window.focus(); } catch (_) {}
   };
 
   const handlePrintOrPdf = () => {
@@ -139,6 +151,7 @@ export default function ThermalPreviewModal() {
             <iframe
               srcDoc={payload.html}
               title="Receipt Preview"
+              tabIndex={-1}
               className="w-full h-[460px] border-none bg-white"
               sandbox="allow-same-origin"
             />

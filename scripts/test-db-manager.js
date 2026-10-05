@@ -89,6 +89,26 @@ async function cloneLiveToTestDb() {
       }
     }
 
+    // Seed an ephemeral load test admin user in the isolated sandbox only
+    try {
+      const bcrypt = require(path.join(backendDir, 'node_modules/bcryptjs'));
+      const hashedPassword = await bcrypt.hash('testadmin123', 10);
+      await testDb.collection('users').updateOne(
+        { email: 'loadtest@peyala.com' },
+        {
+          $set: {
+            name: 'Ephemeral Load Test Admin',
+            email: 'loadtest@peyala.com',
+            password: hashedPassword,
+            role: 'admin',
+            isActive: true,
+            isFirstLogin: false,
+          }
+        },
+        { upsert: true }
+      );
+    } catch (_) {}
+
     console.log(`[TestDbManager] ✅ Successfully cloned ${totalClonedDocs} documents into "${TEST_DB_NAME}".`);
     return { testUri: TEST_URI, dbName: TEST_DB_NAME, totalClonedDocs };
   } finally {

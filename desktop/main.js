@@ -345,6 +345,9 @@ function createMainWindow() {
     },
   });
 
+  Menu.setApplicationMenu(null);
+  mainWindow.setMenu(null);
+
   mainWindow.maximize();
   mainWindow.show();
   mainWindow.focus();
@@ -523,17 +526,20 @@ ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent =
 
       try {
         if (printWindow && !printWindow.isDestroyed()) {
-          printWindow.destroy();
+          printWindow.close();
         }
       } catch (_) {}
 
       // CRITICAL: Ensure mainWindow maintains or restores focus so cashiers never lose typing focus
-      try {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.focus();
-          mainWindow.webContents.focus();
-        }
-      } catch (_) {}
+      // Defer focus slightly so Windows OS completes destruction of child window HWND
+      setTimeout(() => {
+        try {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.focus();
+            mainWindow.webContents.focus();
+          }
+        } catch (_) {}
+      }, 60);
 
       resolve(res);
     };

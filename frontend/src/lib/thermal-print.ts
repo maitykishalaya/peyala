@@ -94,6 +94,31 @@ export interface BillPrintData {
   isReprint?: boolean;
 }
 
+// ── Helper: Get or create single permanent hidden print iframe ────
+// NEVER remove this iframe from the DOM: in Chromium/Windows, removing an iframe
+// that held print focus permanently detaches the browser process's input router,
+// causing all textboxes to stop accepting keyboard input until switching tabs.
+function getOrCreateThermalPrintIframe(): HTMLIFrameElement | null {
+  if (typeof document === 'undefined') return null;
+  let iframe = document.getElementById('peyala-permanent-thermal-frame') as HTMLIFrameElement | null;
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'peyala-permanent-thermal-frame';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = '0';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.tabIndex = -1;
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+  }
+  return iframe;
+}
+
 // ── Print Trigger (Native Electron Silent Print or Hidden Iframe Fallback) ──
 export function printThermalSlip(html: string) {
   if (typeof window === 'undefined') return;
@@ -111,45 +136,24 @@ export function printThermalSlip(html: string) {
     return;
   }
 
-  // 2. Web Browser Fallback via Ephemeral Iframe (Safely isolated and destroyed post-print)
+  // 2. Web Browser Fallback via Permanent Reusable Iframe (Never destroyed post-print)
   const previouslyFocused = typeof document !== 'undefined'
     ? (document.activeElement as HTMLElement | null)
     : null;
 
-  // Clean up any stale print frames that might linger in DOM
-  const existingFrame = document.getElementById('thermal-print-frame');
-  if (existingFrame && existingFrame.parentNode) {
-    try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
-  }
-
-  const iframe = document.createElement('iframe');
-  iframe.id = 'thermal-print-frame';
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '1px';
-  iframe.style.height = '1px';
-  iframe.style.border = '0';
-  iframe.style.opacity = '0.01';
-  iframe.style.pointerEvents = 'none';
-  iframe.tabIndex = -1;
-  iframe.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(iframe);
+  const iframe = getOrCreateThermalPrintIframe();
+  if (!iframe) return;
 
   const doc = iframe.contentWindow?.document;
-  if (!doc) {
-    try { iframe.remove(); } catch (_) {}
-    return;
-  }
+  if (!doc) return;
 
-  let cleanedUp = false;
-  const restoreFocusAndCleanup = () => {
-    if (cleanedUp) return;
-    cleanedUp = true;
+  let restored = false;
+  const restoreFocus = () => {
+    if (restored) return;
+    restored = true;
+
     try {
-      if (iframe && iframe.parentNode) {
-        iframe.parentNode.removeChild(iframe);
-      }
+      iframe.contentWindow?.blur();
     } catch (_) {}
 
     // Ensure the top-level window explicitly reclaims focus from the print frame
@@ -163,6 +167,10 @@ export function printThermalSlip(html: string) {
         previouslyFocused.focus();
       } catch (_) {}
     }
+
+    try {
+      (window as any).electronAPI?.ensureFocus?.();
+    } catch (_) {}
   };
 
   doc.open();
@@ -173,7 +181,7 @@ export function printThermalSlip(html: string) {
   if (iframe.contentWindow) {
     try {
       iframe.contentWindow.onafterprint = () => {
-        restoreFocusAndCleanup();
+        restoreFocus();
       };
     } catch (_) {}
   }
@@ -183,10 +191,9 @@ export function printThermalSlip(html: string) {
       iframe.contentWindow?.print();
     } catch (err) {
       console.error('Thermal print failed:', err);
-      restoreFocusAndCleanup();
     }
-    // Safety fallback: ensure cleanup and focus restoration within 1200ms
-    setTimeout(restoreFocusAndCleanup, 1200);
+    // Safety fallback: ensure focus restoration without removing iframe
+    setTimeout(restoreFocus, 800);
   }, 150);
 }
 

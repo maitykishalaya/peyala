@@ -3,86 +3,35 @@
 //
 // Key behaviours:
 //
-// 1. OUTLET SALES AUTO-CALCULATION
-//    outletSales = cash + upi + card + bankTransfer (from paymentBreakdown)
-//    totalRevenue = outletSales + zomato.netSettlement + fatafat.netSettlement + otherSales
-//    Both calculated BEFORE saving so totalRevenue is never 0.
+// 1. OUTLET SALES FROM ORDERS ONLY
+//    Outlet sales and paymentBreakdown (cash, upi, card, due, bankTransfer)
+//    can ONLY be added/updated through settled POS Orders.
+//    reconcileDailySales() automatically synchronizes the daily SalesEntry
+//    with all settled orders in Indian Standard Time (IST).
 //
-// 2. AUTO ACCOUNT CREDIT ON OUTLET SALES
-//    When outlet sales are entered:
-//      cash portion   → credited to the Cash account (type='cash')
-//      upi/card/bank  → credited to the Bank/Digital account (type='bank' or 'digital')
-//    We find accounts by type automatically — no manual account selection needed.
-//    On UPDATE we reverse the old credits first, then apply new ones.
-//    On DELETE we reverse all credits.
+// 2. NO MANUAL 4.77% GST CALCULATION
+//    GST is calculated and logged strictly at the order level when orders
+//    are settled or modified. Sales routes do not add 4.77% GST.
 //
-// 3. AUTO GST
-//    4.77% of outletSales added to balance sheet GST liability (same as before).
-//
-// 4. Swiggy renamed to Fatafat throughout.
+// 3. NON-OUTLET CHANNELS (Zomato, Fatafat, Other Sales)
+//    Entered when payouts/receipts arrive.
+//    Net settlements credit the designated accounts.
 // ─────────────────────────────────────────────────────────────────
 
 const router = require('express').Router();
 const SalesEntry = require('../models/SalesEntry');
+const Order = require('../models/Order');
 const Account = require('../models/Account');
-const BalanceSheet = require('../models/BalanceSheet');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
+const { reconcileDailySales } = require('../utils/salesReconciler');
 
 router.use(auth);
 
 
-// ── Helper: apply GST delta to balance sheet ──────────────────────
-// positive delta = add to GST, negative = reverse/reduce GST
-async function applyGstDelta(delta, salesEntryId, date, userName, note) {
-  if (delta === 0) return;
-  const bs = await BalanceSheet.getSingleton();
-  bs.gstLiability = Math.max(0, bs.gstLiability + delta);
-  bs.gstLog.push({
-    date: date ? new Date(date) : new Date(),
-    salesEntryId,
-    gstAdded: delta,
-    note: note || `GST ${delta >= 0 ? 'added' : 'reversed'}: ₹${Math.abs(delta)}`,
-  });
-  bs.lastUpdated = new Date();
-  bs.lastUpdatedBy = userName;
-  await bs.save();
-}
-
-
-// ── Helper: credit outlet sales amounts to the right accounts ─────
-// cash → first active 'cash' type account (Cash Counter)
-// upi + card + bankTransfer → first active 'bank' or 'digital' account (Current Account)
-// multiplier = +1 for credit (new sale), -1 for reversal (edit/delete)
-async function applyAccountCredits(paymentBreakdown, multiplier) {
-  const pb = paymentBreakdown || {};
-  const cashAmount = (pb.cash || 0) * multiplier;
-  const digitalAmount = ((pb.upi || 0) + (pb.card || 0) + (pb.bankTransfer || 0)) * multiplier;
-
-  // Credit cash to the Cash Counter (first cash-type account)
-  if (cashAmount !== 0) {
-    const cashAccount = await Account.findOne({ type: 'cash', isActive: true }).sort('name');
-    if (cashAccount) {
-      await Account.findByIdAndUpdate(cashAccount._id, {
-        $inc: { currentBalance: cashAmount }
-      });
-    }
-  }
-
-  // Credit UPI/Card/Bank to Current Account (first bank or digital account)
-  if (digitalAmount !== 0) {
-    const bankAccount = await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
-    if (bankAccount) {
-      await Account.findByIdAndUpdate(bankAccount._id, {
-        $inc: { currentBalance: digitalAmount }
-      });
-    }
-  }
-}
-
-
 // ── Helper: credit Zomato/Fatafat/other sales to chosen accounts ───
+// multiplier = +1 for credit (new sale), -1 for reversal (edit/delete)
 async function applyNonOutletCredits(sale, multiplier) {
   if (!sale) return;
 
@@ -94,14 +43,14 @@ async function applyNonOutletCredits(sale, multiplier) {
   for (const credit of platformCredits) {
     if (credit.amount !== 0 && credit.accountId) {
       await Account.findByIdAndUpdate(credit.accountId, {
-        $inc: { currentBalance: credit.amount * multiplier }
+        $inc: { currentBalance: credit.amount * multiplier },
       });
     }
   }
 
   if ((sale.otherSales || 0) !== 0 && sale.otherSalesReceivedIn) {
     await Account.findByIdAndUpdate(sale.otherSalesReceivedIn, {
-      $inc: { currentBalance: (sale.otherSales || 0) * multiplier }
+      $inc: { currentBalance: (sale.otherSales || 0) * multiplier },
     });
   }
 }
@@ -130,8 +79,8 @@ router.get('/', async (req, res) => {
     const filter = {};
     if (startDate || endDate) {
       filter.date = {};
-      if (startDate) filter.date.$gte = new Date(startDate);
-      if (endDate) filter.date.$lte = new Date(endDate + 'T23:59:59');
+      if (startDate) filter.date.$gte = getIstDayRange(startDate).start;
+      if (endDate) filter.date.$lte = getIstDayRange(endDate).end;
     }
     const total = await SalesEntry.countDocuments(filter);
     const sales = await SalesEntry.find(filter)
@@ -142,6 +91,7 @@ router.get('/', async (req, res) => {
       .sort('-date')
       .skip((page - 1) * limit)
       .limit(Number(limit));
+
     const isViewer = req.user?.role === 'viewer';
     const safeSales = isViewer
       ? sales.map(s => {
@@ -191,6 +141,10 @@ router.get('/', async (req, res) => {
 router.get('/today', async (req, res) => {
   try {
     const { start, end } = getIstDayRange(new Date());
+
+    // Keep today's SalesEntry freshly synchronized with today's orders
+    await reconcileDailySales(new Date(), req.user?._id);
+
     const sales = await SalesEntry.findOne({ date: { $gte: start, $lte: end } })
       .populate('createdBy', 'name')
       .populate({ path: 'zomato.receivedIn', select: 'name' })
@@ -208,95 +162,88 @@ router.get('/today', async (req, res) => {
 
 
 // ── POST /api/sales ───────────────────────────────────────────────
-// Create or update a sales entry for a given day.
-// Auto-calculates outletSales and totalRevenue before saving.
-// Consolidates all sales into ONE row per calendar day.
+// Create or update non-outlet sales channels for a day (Zomato, Fatafat, Other sales).
+// Outlet sales can ONLY come from orders.
 router.post('/', async (req, res) => {
   try {
     const targetDate = req.body.date || new Date();
     const { start, end, canonicalDate } = getIstDayRange(targetDate);
 
-    // Check if a sales row already exists for this day
+    // Synchronize outlet sales and breakdown from orders for this calendar day
+    await reconcileDailySales(targetDate, req.user._id);
+
+    // Locate the entry for this day
     const existingEntry = await SalesEntry.findOne({ date: { $gte: start, $lte: end } });
+    const payload = normalizeSaleAccountIds(req.body);
 
     if (existingEntry) {
-      // Step 1: Reverse old credits from existing entry
-      const oldOutletSales = existingEntry.outletSales || 0;
-      if (existingEntry.paymentBreakdown) {
-        await applyAccountCredits(existingEntry.paymentBreakdown, -1);
-      }
+      // Reverse old non-outlet credits
       await applyNonOutletCredits(existingEntry, -1);
 
-      // Step 2: Recalculate totals
-      const payload = normalizeSaleAccountIds(req.body);
-      const { outletSales, totalRevenue } = SalesEntry.calcTotals(payload);
+      const outletSales = existingEntry.outletSales || 0;
+      const totalRevenue = Math.round(
+        (outletSales
+          + (payload.zomato?.netSettlement || 0)
+          + (payload.fatafat?.netSettlement || 0)
+          + (payload.otherSales || 0)) * 100
+      ) / 100;
 
-      // Step 3: Update existing entry
       const updated = await SalesEntry.findByIdAndUpdate(
         existingEntry._id,
-        { ...payload, date: canonicalDate, outletSales, totalRevenue },
+        {
+          zomato: payload.zomato,
+          fatafat: payload.fatafat,
+          otherSales: payload.otherSales || 0,
+          otherSalesReceivedIn: payload.otherSalesReceivedIn,
+          otherSalesDescription: payload.otherSalesDescription,
+          notes: payload.notes,
+          date: canonicalDate,
+          totalRevenue,
+        },
         { new: true, runValidators: true }
       );
 
-      // Step 4: Apply new account credits
-      await applyAccountCredits(req.body.paymentBreakdown, +1);
-      await applyNonOutletCredits({
-        zomato: req.body.zomato,
-        fatafat: req.body.fatafat,
-        otherSales: req.body.otherSales,
-        otherSalesReceivedIn: req.body.otherSalesReceivedIn,
-      }, +1);
-
-      // Step 5: Adjust GST liability
-      const oldGst = Math.round(oldOutletSales * 0.0477 * 100) / 100;
-      const newGst = Math.round(outletSales * 0.0477 * 100) / 100;
-      const gstDelta = newGst - oldGst;
-      if (gstDelta !== 0) {
-        await applyGstDelta(gstDelta, updated._id, req.body.date, req.user.name,
-          `Auto: GST adjusted by ₹${gstDelta.toFixed(2)} on consolidated sales (${req.body.date})`);
-      }
+      // Apply new non-outlet credits
+      await applyNonOutletCredits(payload, +1);
 
       await log({
         user: req.user,
         action: 'UPDATE',
         module: 'Sales',
-        description: `${req.user.name} consolidated sales entry for ${req.body.date} — Total: ₹${totalRevenue} (Outlet: ₹${outletSales})`,
+        description: `${req.user.name} updated sales entry for ${req.body.date} — Total: ₹${totalRevenue} (Outlet: ₹${outletSales})`,
       });
 
       return res.status(200).json(updated);
     }
 
     // No existing entry for this day -> create new
-    const payload = normalizeSaleAccountIds(req.body);
-    const { outletSales, totalRevenue } = SalesEntry.calcTotals(payload);
+    const totalRevenue = Math.round(
+      ((payload.zomato?.netSettlement || 0)
+        + (payload.fatafat?.netSettlement || 0)
+        + (payload.otherSales || 0)) * 100
+    ) / 100;
 
     const sale = await SalesEntry.create({
-      ...payload,
       date: canonicalDate,
-      outletSales,
+      outletSales: 0,
+      paymentBreakdown: { cash: 0, upi: 0, card: 0, due: 0, bankTransfer: 0 },
+      zomato: payload.zomato,
+      fatafat: payload.fatafat,
+      otherSales: payload.otherSales || 0,
+      otherSalesReceivedIn: payload.otherSalesReceivedIn,
+      otherSalesDescription: payload.otherSalesDescription,
+      notes: payload.notes,
       totalRevenue,
       createdBy: req.user._id,
     });
 
-    await applyAccountCredits(req.body.paymentBreakdown, +1);
-    await applyNonOutletCredits({
-      zomato: req.body.zomato,
-      fatafat: req.body.fatafat,
-      otherSales: req.body.otherSales,
-      otherSalesReceivedIn: req.body.otherSalesReceivedIn,
-    }, +1);
-
-    if (outletSales > 0) {
-      const gstToAdd = Math.round(outletSales * 0.0477 * 100) / 100;
-      await applyGstDelta(gstToAdd, sale._id, req.body.date, req.user.name,
-        `Auto: 4.77% GST on ₹${outletSales} outlet sales (${req.body.date})`);
-    }
+    await applyNonOutletCredits(payload, +1);
 
     await log({
       user: req.user,
       action: 'CREATE',
       module: 'Sales',
-      description: `${req.user.name} added sales entry for ${req.body.date} — Total: ₹${totalRevenue} (Outlet: ₹${outletSales})`,
+      description: `${req.user.name} added sales entry for ${req.body.date} — Total: ₹${totalRevenue}`,
     });
 
     res.status(201).json(sale);
@@ -307,54 +254,57 @@ router.post('/', async (req, res) => {
 
 
 // ── PUT /api/sales/:id ────────────────────────────────────────────
-// Update an existing sales entry.
-// Reverses old account credits and GST, applies new ones.
+// Update an existing sales entry (Zomato, Fatafat, Other sales, Notes).
+// Outlet sales are preserved from orders.
 router.put('/:id', async (req, res) => {
   try {
-    // Fetch the OLD entry before updating so we can reverse its effects
     const oldSale = await SalesEntry.findById(req.params.id);
-    const oldOutletSales = oldSale?.outletSales || 0;
-
-    // STEP 1: Reverse OLD account credits
-    if (oldSale?.paymentBreakdown) {
-      await applyAccountCredits(oldSale.paymentBreakdown, -1);
+    if (!oldSale) {
+      return res.status(404).json({ message: 'Sales entry not found' });
     }
+
+    // Reverse old non-outlet credits
     await applyNonOutletCredits(oldSale, -1);
 
-    // STEP 2: Calculate new totals
-    const payload = normalizeSaleAccountIds(req.body);
-    const { outletSales, totalRevenue } = SalesEntry.calcTotals(payload);
+    // Reconcile outlet sales from orders for this entry's date
+    await reconcileDailySales(oldSale.date, req.user._id);
+    const freshSale = await SalesEntry.findById(req.params.id);
 
-    // STEP 3: Save updated entry with recalculated totals
+    const payload = normalizeSaleAccountIds(req.body);
+    const outletSales = freshSale ? freshSale.outletSales : (oldSale.outletSales || 0);
+    const paymentBreakdown = freshSale ? freshSale.paymentBreakdown : oldSale.paymentBreakdown;
+
+    const totalRevenue = Math.round(
+      (outletSales
+        + (payload.zomato?.netSettlement || 0)
+        + (payload.fatafat?.netSettlement || 0)
+        + (payload.otherSales || 0)) * 100
+    ) / 100;
+
     const sale = await SalesEntry.findByIdAndUpdate(
       req.params.id,
-      { ...payload, outletSales, totalRevenue },
+      {
+        zomato: payload.zomato,
+        fatafat: payload.fatafat,
+        otherSales: payload.otherSales || 0,
+        otherSalesReceivedIn: payload.otherSalesReceivedIn,
+        otherSalesDescription: payload.otherSalesDescription,
+        notes: payload.notes,
+        outletSales,
+        paymentBreakdown,
+        totalRevenue,
+      },
       { new: true, runValidators: true }
     );
 
-    // STEP 4: Apply NEW account credits
-    await applyAccountCredits(req.body.paymentBreakdown, +1);
-    await applyNonOutletCredits({
-      zomato: req.body.zomato,
-      fatafat: req.body.fatafat,
-      otherSales: req.body.otherSales,
-      otherSalesReceivedIn: req.body.otherSalesReceivedIn,
-    }, +1);
-
-    // STEP 5: Adjust GST for difference in outlet sales
-    const oldGst = Math.round(oldOutletSales * 0.0477 * 100) / 100;
-    const newGst = Math.round(outletSales * 0.0477 * 100) / 100;
-    const gstDelta = newGst - oldGst;
-    if (gstDelta !== 0) {
-      await applyGstDelta(gstDelta, sale._id, req.body.date, req.user.name,
-        `Edit: GST adjusted ₹${gstDelta > 0 ? '+' : ''}${gstDelta} (outlet: ₹${oldOutletSales}→₹${outletSales})`);
-    }
+    // Apply new non-outlet credits
+    await applyNonOutletCredits(payload, +1);
 
     await log({
       user: req.user,
       action: 'UPDATE',
       module: 'Sales',
-      description: `${req.user.name} updated sales — Total: ₹${totalRevenue} (Outlet: ₹${oldOutletSales}→₹${outletSales})`,
+      description: `${req.user.name} updated sales entry — Total: ₹${totalRevenue} (Outlet: ₹${outletSales})`,
     });
 
     res.json(sale);
@@ -365,36 +315,49 @@ router.put('/:id', async (req, res) => {
 
 
 // ── DELETE /api/sales/:id ─────────────────────────────────────────
-// Delete a sales entry.
-// Reverses account credits and GST.
+// Cleans up non-outlet sales for this entry.
+// If POS orders exist for this day, outlet sales are retained.
 router.delete('/:id', async (req, res) => {
   try {
     const sale = await SalesEntry.findById(req.params.id);
-    const outletSales = sale?.outletSales || 0;
+    if (!sale) return res.status(404).json({ message: 'Entry not found' });
 
-    // Reverse account credits
-    if (sale?.paymentBreakdown) {
-      await applyAccountCredits(sale.paymentBreakdown, -1);
-    }
+    // Reverse non-outlet credits
     await applyNonOutletCredits(sale, -1);
 
-    await SalesEntry.findByIdAndDelete(req.params.id);
+    // Check if orders exist for this day
+    const { start, end } = getIstDayRange(sale.date);
+    const orderCount = await Order.countDocuments({
+      status: 'paid',
+      $or: [
+        { paidAt: { $gte: start, $lte: end } },
+        { paidAt: null, createdAt: { $gte: start, $lte: end } },
+        { paidAt: { $exists: false }, createdAt: { $gte: start, $lte: end } },
+      ],
+    });
 
-    // Reverse GST
-    if (outletSales > 0) {
-      const gstToReverse = -(Math.round(outletSales * 0.0477 * 100) / 100);
-      await applyGstDelta(gstToReverse, req.params.id, sale.date, req.user.name,
-        `Reversal: sales entry deleted (outlet was ₹${outletSales})`);
+    if (orderCount > 0) {
+      // Re-sync with orders and reset non-outlet channels
+      sale.zomato = undefined;
+      sale.fatafat = undefined;
+      sale.otherSales = 0;
+      sale.otherSalesReceivedIn = undefined;
+      sale.otherSalesDescription = '';
+      sale.notes = '';
+      sale.totalRevenue = sale.outletSales;
+      await sale.save();
+    } else {
+      await SalesEntry.findByIdAndDelete(req.params.id);
     }
 
     await log({
       user: req.user,
       action: 'DELETE',
       module: 'Sales',
-      description: `${req.user.name} deleted sales entry. GST reversed by ₹${Math.round(outletSales * 0.0477 * 100) / 100}`,
+      description: `${req.user.name} removed non-outlet sales channels for ${sale.date}`,
     });
 
-    res.json({ message: 'Sales entry deleted, accounts reversed, GST reversed' });
+    res.json({ message: 'Sales entry updated/deleted successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

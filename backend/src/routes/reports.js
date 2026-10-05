@@ -295,17 +295,27 @@ router.get('/sales', async (req, res) => {
 
     const filter = {};
 
-    // Date range filter on createdAt
+    // Date range filter using effective billing/settlement timestamp
     if (startDate || endDate) {
-      filter.createdAt = {};
+      let startRange = null;
+      let endRange = null;
       if (startDate) {
-        const [y, m, d] = startDate.split('-').map(Number);
-        filter.createdAt.$gte = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - (5.5 * 3600 * 1000));
+        startRange = getIstDayRange(startDate).start;
       }
       if (endDate) {
-        const [y, m, d] = endDate.split('-').map(Number);
-        filter.createdAt.$lte = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - (5.5 * 3600 * 1000));
+        endRange = getIstDayRange(endDate).end;
       }
+
+      filter.$or = [
+        // 1. Order with billedAt timestamp
+        { billedAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
+        // 2. Order with billPrintedAt timestamp
+        { billedAt: null, billPrintedAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
+        // 3. Order with paidAt timestamp
+        { billedAt: null, billPrintedAt: null, paidAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
+        // 4. Legacy order fallback to createdAt
+        { billedAt: null, billPrintedAt: null, paidAt: null, createdAt: { ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } }
+      ];
     }
 
     // Status filter (default: show paid, but allow user to filter all, billed, cancelled, etc.)
@@ -320,11 +330,11 @@ router.get('/sales', async (req, res) => {
       filter.paymentMethod = paymentMethod;
     }
 
-    // Populate order details
+    // Populate order details - sort by billNumber descending, then billing/creation time
     const allMatchingOrders = await Order.find(filter)
       .populate('table', 'tableNumber capacity')
       .populate('createdBy', 'name')
-      .sort({ createdAt: -1 })
+      .sort({ billNumber: -1, billedAt: -1, billPrintedAt: -1, paidAt: -1, createdAt: -1 })
       .lean();
 
     // In-memory search for order number / table number / staff / items

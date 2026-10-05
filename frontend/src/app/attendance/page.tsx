@@ -1658,6 +1658,27 @@ export default function AttendancePage() {
     });
   }, [activeStaff, attendance, month]);
 
+  const getOrCreateAttendancePrintIframe = (): HTMLIFrameElement | null => {
+    if (typeof document === 'undefined') return null;
+    let iframe = document.getElementById('peyala-permanent-attendance-frame') as HTMLIFrameElement | null;
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'peyala-permanent-attendance-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0px';
+      iframe.style.height = '0px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+      iframe.tabIndex = -1;
+      iframe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(iframe);
+    }
+    return iframe;
+  };
+
   const downloadPdfReport = () => {
     if (isViewer) {
       toast.error('Viewers are not permitted to download attendance summaries');
@@ -1677,47 +1698,33 @@ export default function AttendancePage() {
         isViewer,
       });
 
-      const existingFrame = document.getElementById('attendance-summary-print-frame');
-      if (existingFrame && existingFrame.parentNode) {
-        try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
-      }
-
-      const iframe = document.createElement('iframe');
-      iframe.id = 'attendance-summary-print-frame';
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '1px';
-      iframe.style.height = '1px';
-      iframe.style.border = '0';
-      iframe.style.opacity = '0.01';
-      iframe.style.pointerEvents = 'none';
-      document.body.appendChild(iframe);
-
-      const doc = iframe.contentWindow?.document;
-      if (!doc) {
-        try { iframe.remove(); } catch (_) {}
+      const iframe = getOrCreateAttendancePrintIframe();
+      if (!iframe) {
         toast.error('Could not access print window');
         setPdfGenerating(false);
         return;
       }
 
-      let cleanedUp = false;
-      const cleanup = () => {
-        if (cleanedUp) return;
-        cleanedUp = true;
-        try {
-          if (iframe && iframe.parentNode) {
-            iframe.parentNode.removeChild(iframe);
-          }
-        } catch (_) {}
+      const doc = iframe.contentWindow?.document;
+      if (!doc) {
+        toast.error('Could not access print window');
+        setPdfGenerating(false);
+        return;
+      }
+
+      let restored = false;
+      const restoreFocus = () => {
+        if (restored) return;
+        restored = true;
+        try { iframe.contentWindow?.blur(); } catch (_) {}
         try { window.focus(); } catch (_) {}
+        try { (window as any).electronAPI?.ensureFocus?.(); } catch (_) {}
         setPdfGenerating(false);
       };
 
       if (iframe.contentWindow) {
         try {
-          iframe.contentWindow.onafterprint = cleanup;
+          iframe.contentWindow.onafterprint = restoreFocus;
         } catch (_) {}
       }
 
@@ -1731,9 +1738,9 @@ export default function AttendancePage() {
         } catch (err) {
           console.error('Print failed:', err);
           toast.error('Failed to open PDF print dialog');
-          cleanup();
+          restoreFocus();
         }
-        setTimeout(cleanup, 1200);
+        setTimeout(restoreFocus, 1000);
       }, 250);
     } catch (err) {
       console.error('Failed to generate PDF:', err);
@@ -1843,47 +1850,33 @@ export default function AttendancePage() {
         isViewer,
       });
 
-      const existingFrame = document.getElementById('attendance-staff-print-frame');
-      if (existingFrame && existingFrame.parentNode) {
-        try { existingFrame.parentNode.removeChild(existingFrame); } catch (_) {}
-      }
-
-      const iframe = document.createElement('iframe');
-      iframe.id = 'attendance-staff-print-frame';
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '1px';
-      iframe.style.height = '1px';
-      iframe.style.border = '0';
-      iframe.style.opacity = '0.01';
-      iframe.style.pointerEvents = 'none';
-      document.body.appendChild(iframe);
-
-      const doc = iframe.contentWindow?.document;
-      if (!doc) {
-        try { iframe.remove(); } catch (_) {}
+      const iframe = getOrCreateAttendancePrintIframe();
+      if (!iframe) {
         toast.error('Could not access print window');
         setStaffPdfGeneratingId(null);
         return;
       }
 
-      let cleanedUp = false;
-      const cleanup = () => {
-        if (cleanedUp) return;
-        cleanedUp = true;
-        try {
-          if (iframe && iframe.parentNode) {
-            iframe.parentNode.removeChild(iframe);
-          }
-        } catch (_) {}
+      const doc = iframe.contentWindow?.document;
+      if (!doc) {
+        toast.error('Could not access print window');
+        setStaffPdfGeneratingId(null);
+        return;
+      }
+
+      let restored = false;
+      const restoreFocus = () => {
+        if (restored) return;
+        restored = true;
+        try { iframe.contentWindow?.blur(); } catch (_) {}
         try { window.focus(); } catch (_) {}
+        try { (window as any).electronAPI?.ensureFocus?.(); } catch (_) {}
         setStaffPdfGeneratingId(null);
       };
 
       if (iframe.contentWindow) {
         try {
-          iframe.contentWindow.onafterprint = cleanup;
+          iframe.contentWindow.onafterprint = restoreFocus;
         } catch (_) {}
       }
 
@@ -1897,9 +1890,9 @@ export default function AttendancePage() {
         } catch (err) {
           console.error('Print failed:', err);
           toast.error('Failed to open PDF print dialog');
-          cleanup();
+          restoreFocus();
         }
-        setTimeout(cleanup, 1200);
+        setTimeout(restoreFocus, 1000);
       }, 250);
     } catch (err) {
       console.error('Failed to generate staff PDF:', err);

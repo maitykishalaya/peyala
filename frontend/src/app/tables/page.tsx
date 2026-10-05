@@ -1258,6 +1258,7 @@ export default function TablesPage() {
       if (shouldPrintBill) {
         if (isPrintStation || printMode === 'test') {
           handlePrintCustomerBill(finalOrder);
+          ordersApi.markBillPrinted(finalOrder._id).catch(() => {});
           toast.success(`Printing customer bill for Table ${tableLabel}`);
         } else {
           await ordersApi.queueBillPrint(finalOrder._id);
@@ -1309,7 +1310,7 @@ export default function TablesPage() {
       tokenNo: targetOrder.orderNumber ? String(targetOrder.orderNumber).slice(-2) : targetOrder._id.slice(-2),
       tableNumber: selectedTable?.tableNumber || (targetOrder.table as any)?.tableNumber || 'Takeaway',
       billerName: billerDisplayName,
-      createdAt: new Date(targetOrder.createdAt || Date.now()),
+      createdAt: new Date((targetOrder as any).billPrintedAt || (targetOrder as any).billedAt || (targetOrder as any).paidAt || targetOrder.createdAt || Date.now()),
       items: printableBillItems,
       subtotal: targetOrder.subtotal,
       taxAmount: targetOrder.taxAmount,

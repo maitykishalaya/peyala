@@ -756,12 +756,6 @@ Whenever changes are made, run this validation suite before concluding:
   - Comprehensive .gitignore filtering out heavy binary toolchains (>1GB portable Android SDK, Gradle, JDK, and setup executables) to keep repository size lean and prevent GitHub 100MB file size rejections.
 
 ### 5.13 October 2026 Core Reliability & Analytics Upgrades
-- **Text Box Out-of-Focus / Input Freeze Resolution**:
-  - **Root Cause**: Silent thermal printing via hidden `<iframe>` retained in `document.body` caused Chromium's RenderFrameHost to lock keyboard input routing to the invisible iframe.
-  - **Resolution**:
-    - Converted `frontend/src/lib/thermal-print.ts` and `frontend/src/app/attendance/page.tsx` print engines to strictly ephemeral iframes destroyed upon completion with guaranteed `window.focus()` restoration.
-    - Global watchdog installed in `AppLayout.tsx` capturing focusin/pointerdown events to re-establish window focus and caret navigation.
-    - Desktop Electron IPC bridge `electronAPI.ensureFocus()` handles top-level native OS window refocus.
 - **Global Brand Alignment (Howrah → Midnapore)**:
   - Replaced all operational and documentation references from "Howrah" to "Midnapore" across `README.md`, `MEMORY_BANK.md`, `scripts/build-apk.js`, `frontend/src/lib/export-utils.ts`, and database seed/supplier records.
 - **Item-Wise Variations & Add-ons Sales Tracking**:
@@ -776,5 +770,64 @@ Whenever changes are made, run this validation suite before concluding:
   - Added `/api/inventory/month-comparison` dynamically comparing current stock value against the previous month-end baseline (e.g. during October compares against Sep 30 11:59 PM; updates automatically with each passing month).
   - Rendered high-visibility comparison badge in `/inventory` header displaying difference (`+₹X (+Y%) than prev month`) and direction.
 
+### 5.14 Keyboard Input Freeze Elimination & Automated Sales Reconciliation
+- **Keyboard Input Freeze ("Only Corrected After Switching Tabs")**:
+  - **Root Cause 1 (Chromium Destroyed Subframe Focus Routing Lock)**:
+    - In Chromium / Blink (`RenderWidgetHostViewAura` on Windows), when an ephemeral print `<iframe>` (`thermal-print-frame`, `attendance-summary-print-frame`) called `print()` and was immediately destroyed via `removeChild()`, Chromium's native input router retained the destroyed subframe's routing ID.
+    - Physical keystrokes (`WM_KEYDOWN`, `WM_CHAR`) were discarded until switching tabs forced `WebContentsImpl::DidBecomeActive()` and `SetFocusedFrame(main_frame)`.
+    - A 15-second watchdog in `AppLayout.tsx` (`cleanupStrandedFrames`) was actively finding print iframes and removing them via `removeChild()`, repeatedly triggering this bug.
+    - `ThermalPreviewModal` unmounted `<iframe srcDoc={...}>` on modal close without transferring focus to the main window first, and was mounted twice in `AppLayout.tsx`.
+  - **Root Cause 2 (Electron Menu Bar Focus Trap on Windows)**:
+    - In `desktop/main.js`, `autoHideMenuBar: true` without `Menu.setApplicationMenu(null)` caused Windows OS to activate the hidden native menu bar whenever the `Alt` key was pressed (or in `Alt+Tab`), intercepting all keyboard strokes until switching windows/tabs.
+  - **Definitive Multi-Layer Resolution**:
+    1. **Permanent Reusable Print Iframes**: Converted `frontend/src/lib/thermal-print.ts` and `frontend/src/app/attendance/page.tsx` to singleton hidden iframes (`peyala-permanent-thermal-frame`, `peyala-permanent-attendance-frame`). They are created once and **NEVER** removed from the DOM.
+    2. **Purged Destructive Interval**: Removed `cleanupStrandedFrames` and `frameCheckInterval` from `AppLayout.tsx`.
+    3. **Unconditional Focus Watchdog**: Updated `handlePointerDown` and `handleFocusIn` in `AppLayout.tsx` to unconditionally ensure `window.focus()`, native `electronAPI.ensureFocus()`, and `target.focus({ preventScroll: true })` whenever an input or textarea is interacted with.
+    4. **Electron Native Menu Disabled**: Added `Menu.setApplicationMenu(null)` and `mainWindow.setMenu(null)` in `desktop/main.js`, completely preventing Windows menu bar focus traps.
+    5. **Deferred Focus in Silent Print IPC**: In `print-thermal-slip`, deferred `mainWindow.focus()` by 60ms after closing `printWindow` to prevent Windows OS HWND destruction race conditions.
+    6. **Thermal Preview Modal Focus Safety**: In `ThermalPreviewModal.tsx`, explicitly blurs the preview iframe and refocuses `window` before modal dismissal, adds `tabIndex={-1}`, and removed duplicate modal mounts in `AppLayout.tsx`.
+- **Automated Outlet Sales Reconciliation & Elimination of Manual 4.77% GST**:
+  - Removed manual outlet sales entry and 4.77% GST calculation from `/sales`. Outlet sales strictly originate from settled POS orders.
+  - Created `backend/src/utils/salesReconciler.js` with `reconcileDailySales(date, userId)` to aggregate all settled orders for an IST day into `SalesEntry`.
+  - Fixed canonical date alignment in `backend/src/utils/date.js` using noon IST (`06:30:00.000Z`) so UTC ISO dates (`split('T')[0]`) accurately match the IST calendar date.
+
+### 5.15 Version 9.0 Release: Billing Time Ordering, Security Purge & High-Concurrency Validation
+- **Versioning Strategy**:
+  - Point releases (e.g. `8.1`, `8.2`) are reserved for minor bug fixes.
+  - Major releases (e.g. `9.0`, `10.0`) are triggered on any core business logic, schema, or functional capability updates.
+  - Upgraded codebase across all surfaces to **v9.0** (`9.0.0`):
+    - `package.json` (root): `9.0.0`
+    - `backend/package.json`: `9.0.0`
+    - `frontend/package.json`: `9.0.0`
+    - `desktop/package.json`: `9.0.0`
+    - `android/app/build.gradle`: `versionCode 9`, `versionName "9.0.0"`
+    - `frontend/src/app/login/page.tsx`: Updated mobile badge, footer status, and APK download badge to `v9.0`.
+- **Billing Sequence & Timestamp Order**:
+  - **Sequential Bill Generation by Billing Time**:
+    - Previously, bills were assigned numbers or displayed using `createdAt` (when the customer table was opened).
+    - If Table 5 was seated at 12:00 PM and billed at 1:30 PM (Bill #4), while Table 8 was seated at 1:00 PM and billed at 1:10 PM (Bill #3), the sales audit log previously rendered Table 8 before Table 5 with out-of-order timestamps.
+    - Updated `POST /:id/bill`, `POST /:id/pay`, `POST /:orderId/mark-bill-printed`, and `POST /:orderId/queue-bill-print` to set `billedAt = new Date()` and allocate sequential bill numbers strictly at billing/print time.
+    - The first printed bill receives the earlier sequential bill number.
+  - **Detailed Sales Report Alignment**:
+    - In `backend/src/routes/reports.js` (`GET /sales`), date filtering and sorting operate on effective billing timestamp (`billedAt || billPrintedAt || paidAt || createdAt`) and sort by `{ billNumber: -1, billedAt: -1, billPrintedAt: -1, paidAt: -1, createdAt: -1 }`.
+    - In `frontend/src/app/reports/page.tsx`, the table row and CSV export format `effectiveBillDate` in `Asia/Kolkata` time zone, ensuring bill numbers and displayed bill times increment in perfect unison.
+    - Thermal bill receipts pass `effectiveBillDate` so printed receipts reflect the actual billing time.
+- **Security Hardening (Purge of Default Testing User Accounts)**:
+  - Removed auto-seeding of default admin, manager, and staff testing accounts (`admin@peyala.com`, `manager@peyala.com`, `staff@peyala.com` with `peyala123`) from `backend/src/routes/auth.js`.
+  - Executed automated database cleanup purging testing accounts from the active MongoDB database.
+  - Retained only the read-only Demo Viewer (`viewer@peyala.com` / `peyala123`, role: `viewer`) for safe public product exploration.
+  - Removed Admin, Manager, and Staff 1-tap autofill buttons and the "Default: peyala123" password label from `frontend/src/app/login/page.tsx`.
+- **Load Testing & Verification (`scripts/test-billing-load.js`)**:
+  - Executed automated concurrency and race-condition validation in an isolated database sandbox:
+    1. Verified `admin@peyala.com`, `manager@peyala.com`, and `staff@peyala.com` return `401 Unauthorized`.
+    2. Verified `viewer@peyala.com` cannot mutate orders (`403 Forbidden`).
+    3. Created 3 tables at different times and billed in reverse order; confirmed earlier billed order received the earlier bill number (`#93 < #94 < #95`).
+    4. Verified sales report sorting and billing timestamp accuracy.
+    5. Fired 15 simultaneous concurrent payment settlements; verified 15 unique, zero duplicate, strictly sequential bill numbers (`96` to `110`).
+    6. All 20 tests passed with 0 failures.
+- **Enterprise Android APK v9.0.0**:
+  - Built release APK with Gradle (`versionCode 9`, `versionName "9.0.0"`).
+  - Distributed to `Peyala-POS.apk`, `dist/Peyala-POS.apk`, and `frontend/public/Peyala-POS.apk` (5.09 MB).
+
 ---
-*Last Updated: October 2026 · Peyala v8 Engineering*
+*Last Updated: October 2026 · Peyala v9.0 Engineering*

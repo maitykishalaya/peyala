@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { salesApi, accountsApi } from '@/lib/api';
-import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateInput, today, cn, clearFinancialCaches } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Info, RefreshCw } from 'lucide-react';
@@ -98,7 +98,7 @@ export default function SalesPage() {
   // ── Form state ──────────────────────────────────────────────────
   const blank = (): any => ({
     date: today(),
-    // Outlet payment breakdown — user fills these individually
+    outletSales: 0,
     paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0 },
     // Platform sections — only filled after payout received
     zomato: { ...emptyPlatform, receivedIn: '' },
@@ -112,13 +112,14 @@ export default function SalesPage() {
   const [form, setForm] = useState<any>(blank());
 
   // ── Computed values from form (live preview) ─────────────────────
-  // Outlet sales = sum of all payment mode amounts
+  // Outlet sales come exclusively from orders
   const outletSalesCalc =
-    (form.paymentBreakdown?.cash || 0) +
-    (form.paymentBreakdown?.upi || 0) +
-    (form.paymentBreakdown?.card || 0) +
-    (form.paymentBreakdown?.bankTransfer || 0) +
-    (form.paymentBreakdown?.due || 0);
+    Number(form.outletSales) ||
+    ((form.paymentBreakdown?.cash || 0) +
+      (form.paymentBreakdown?.upi || 0) +
+      (form.paymentBreakdown?.card || 0) +
+      (form.paymentBreakdown?.bankTransfer || 0) +
+      (form.paymentBreakdown?.due || 0));
 
   // Total revenue preview
   const totalRevenueCalc =
@@ -126,6 +127,28 @@ export default function SalesPage() {
     (form.zomato?.netSettlement || 0) +
     (form.fatafat?.netSettlement || 0) +
     (form.otherSales || 0);
+
+  // When creating a sales entry, check if orders/outlet sales exist for the selected date
+  useEffect(() => {
+    if (modal === 'create' && form.date) {
+      salesApi.list({ startDate: form.date, endDate: form.date }).then(res => {
+        const entry = res.data?.sales?.[0];
+        if (entry) {
+          setForm((prev: any) => ({
+            ...prev,
+            outletSales: entry.outletSales || 0,
+            paymentBreakdown: entry.paymentBreakdown || { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0 },
+          }));
+        } else {
+          setForm((prev: any) => ({
+            ...prev,
+            outletSales: 0,
+            paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0 },
+          }));
+        }
+      }).catch(() => {});
+    }
+  }, [modal, form.date]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -198,7 +221,8 @@ export default function SalesPage() {
   const openEdit = (s: any) => {
     setSelected(s);
     setForm({
-      date: s.date?.split('T')[0] || today(),
+      date: formatDateInput(s.date) || today(),
+      outletSales: s.outletSales || 0,
       paymentBreakdown: { cash: 0, upi: 0, card: 0, bankTransfer: 0, due: 0, ...s.paymentBreakdown },
       zomato: { ...(s.zomato || { ...emptyPlatform }), receivedIn: s.zomato?.receivedIn?._id || s.zomato?.receivedIn || '' },
       fatafat: { ...(s.fatafat || { ...emptyPlatform }), receivedIn: s.fatafat?.receivedIn?._id || s.fatafat?.receivedIn || '' },
@@ -222,11 +246,15 @@ export default function SalesPage() {
   };
 
   const normalizeSaleFormPayload = (payload: any) => {
-    const normalized = { ...payload };
-    normalized.zomato = { ...(normalized.zomato || {}), receivedIn: normalized.zomato?.receivedIn || undefined };
-    normalized.fatafat = { ...(normalized.fatafat || {}), receivedIn: normalized.fatafat?.receivedIn || undefined };
-    normalized.otherSalesReceivedIn = normalized.otherSalesReceivedIn || undefined;
-    return normalized;
+    return {
+      date: payload.date,
+      zomato: { ...(payload.zomato || {}), receivedIn: payload.zomato?.receivedIn || undefined },
+      fatafat: { ...(payload.fatafat || {}), receivedIn: payload.fatafat?.receivedIn || undefined },
+      otherSales: payload.otherSales || 0,
+      otherSalesReceivedIn: payload.otherSalesReceivedIn || undefined,
+      otherSalesDescription: payload.otherSalesDescription || '',
+      notes: payload.notes || '',
+    };
   };
 
   // ── Submit form ─────────────────────────────────────────────────
@@ -245,11 +273,12 @@ export default function SalesPage() {
         await salesApi.create(payload);
         toast.success(`Sales entry for ${formatDate(form.date)} recorded successfully`);
       }
+      clearFinancialCaches();
       setModal(null);
       setForm(blank());
       setZomatoOpen(false);
       setFatafatOpen(false);
-      load();
+      load(true);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to save sales entry');
     } finally {
@@ -259,11 +288,12 @@ export default function SalesPage() {
 
   // ── Delete entry ─────────────────────────────────────────────────
   const del = async (id: string) => {
-    if (!confirm('Delete this sales entry? Account credits and GST will be reversed.')) return;
+    if (!confirm('Delete this sales entry? Non-outlet platform credits will be reversed.')) return;
     try {
       await salesApi.delete(id);
       toast.success('Sales entry deleted successfully');
-      load();
+      clearFinancialCaches();
+      load(true);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to delete sales entry');
     }
@@ -422,7 +452,7 @@ export default function SalesPage() {
             <button
               type="button"
               onClick={() => {
-                localStorage.removeItem(SALES_LIST_CACHE_KEY);
+                clearFinancialCaches();
                 load(true);
               }}
               disabled={refreshing}
@@ -583,79 +613,50 @@ export default function SalesPage() {
             <input type="date" className="input" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
           </div>
 
-          {/* ── OUTLET SALES SECTION ─────────────────────────── */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 space-y-3">
+          {/* ── OUTLET SALES SECTION (Read-only, auto-synced from Orders) ── */}
+          <div className="border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">🏪 Outlet / Counter Sales</p>
-              {/* Live total shown as you type */}
-              <span className="text-sm font-bold text-brand-600">{formatCurrency(outletSalesCalc)}</span>
+              <div>
+                <p className="font-semibold text-sm text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                  <span>🏪</span> Outlet / Counter Sales
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  Auto-aggregated from settled POS orders
+                </p>
+              </div>
+              <span className="text-base font-bold text-brand-600">{formatCurrency(form.outletSales || outletSalesCalc)}</span>
             </div>
 
-            {/* Info note */}
-            <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-900/10 rounded-lg px-3 py-2">
+            {/* Read-only payment mode breakdown */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 text-xs">
+              <div className="bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700">
+                <p className="text-gray-400 text-[10px] uppercase font-semibold">💵 Cash</p>
+                <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5">{formatCurrency(form.paymentBreakdown?.cash || 0)}</p>
+              </div>
+              <div className="bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700">
+                <p className="text-gray-400 text-[10px] uppercase font-semibold">📱 UPI</p>
+                <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5">{formatCurrency(form.paymentBreakdown?.upi || 0)}</p>
+              </div>
+              <div className="bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700">
+                <p className="text-gray-400 text-[10px] uppercase font-semibold">💳 Card</p>
+                <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5">{formatCurrency(form.paymentBreakdown?.card || 0)}</p>
+              </div>
+              <div className="bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700">
+                <p className="text-gray-400 text-[10px] uppercase font-semibold">🏦 Bank Trf</p>
+                <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5">{formatCurrency(form.paymentBreakdown?.bankTransfer || 0)}</p>
+              </div>
+              <div className="bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700 col-span-2 sm:col-span-1">
+                <p className="text-gray-400 text-[10px] uppercase font-semibold">📋 Due</p>
+                <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5">{formatCurrency(form.paymentBreakdown?.due || 0)}</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2 bg-blue-50/70 dark:bg-blue-900/20 rounded-lg px-3 py-2 border border-blue-100/50 dark:border-blue-800/30">
               <Info className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-blue-600 dark:text-blue-400">
-                Enter by payment mode below. Cash → credited to Cash Counter. UPI/Card/Bank → credited to Current Account automatically.
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                Outlet sales and GST are calculated exclusively from orders. To adjust an order, use the Reports &gt; Detailed Sales tab.
               </p>
             </div>
-
-            {/* Payment mode breakdown */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="label">💵 Cash (₹)</label>
-                <input type="number" className="input"
-                  value={form.paymentBreakdown?.cash || ''}
-                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, cash: +e.target.value } })}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="label">📱 UPI (₹)</label>
-                <input type="number" className="input"
-                  value={form.paymentBreakdown?.upi || ''}
-                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, upi: +e.target.value } })}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="label">💳 Card (₹)</label>
-                <input type="number" className="input"
-                  value={form.paymentBreakdown?.card || ''}
-                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, card: +e.target.value } })}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="label">🏦 Bank Transfer (₹)</label>
-                <input type="number" className="input"
-                  value={form.paymentBreakdown?.bankTransfer || ''}
-                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, bankTransfer: +e.target.value } })}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="label">📋 Due / Khata (₹)</label>
-                <input type="number" className="input"
-                  value={form.paymentBreakdown?.due || ''}
-                  onChange={e => setForm({ ...form, paymentBreakdown: { ...form.paymentBreakdown, due: +e.target.value } })}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            {/* Auto-calculated outlet total */}
-            <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2">
-              <span className="text-xs font-medium text-gray-500">Outlet Sales Total (auto-calculated)</span>
-              <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(outletSalesCalc)}</span>
-            </div>
-
-            {/* GST preview */}
-            {outletSalesCalc > 0 && (
-              <div className="flex justify-between items-center bg-orange-50 dark:bg-orange-900/10 rounded-lg px-3 py-2">
-                <span className="text-xs font-medium text-orange-600">GST to be added (4.77% of outlet sales)</span>
-                <span className="text-xs font-bold text-orange-600">+ {formatCurrency(outletSalesCalc * 0.0477)}</span>
-              </div>
-            )}
           </div>
 
           {/* ── ZOMATO — collapsed by default ───────────────────── */}

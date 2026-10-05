@@ -814,8 +814,8 @@ export default function LoginPage() {
     }
   };
 
-  const fillCredentials = (roleEmail: string) => {
-    setEmail(roleEmail);
+  const fillViewerCredentials = () => {
+    setEmail('viewer@peyala.com');
     setPassword('peyala123');
     setError('');
   };
@@ -830,7 +830,7 @@ export default function LoginPage() {
           </div>
           <div>
             <span className="font-black text-lg text-white tracking-tight">Peyala</span>
-            <span className="text-[10px] text-brand-400 font-bold ml-1.5 uppercase tracking-wider">v8.0</span>
+            <span className="text-[10px] text-brand-400 font-bold ml-1.5 uppercase tracking-wider">v9.0</span>
           </div>
         </div>
 
@@ -1071,43 +1071,21 @@ export default function LoginPage() {
             <p className="text-xs sm:text-sm text-gray-400 mt-1 font-medium">Enterprise Restaurant Admin & POS Portal</p>
           </div>
 
-          {/* Quick Demo Access Pills */}
-          <div className="p-3.5 rounded-xl bg-gray-950/80 border border-gray-800 space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-bold text-gray-400">
-              <span>Quick Demo Autofill:</span>
-              <span className="text-[10px] text-brand-400">1-Tap Fill</span>
+          {/* Read-Only Demo Access */}
+          <div className="p-3.5 rounded-xl bg-gray-950/80 border border-gray-800 flex items-center justify-between">
+            <div className="space-y-0.5">
+              <span className="text-xs font-bold text-gray-200">Public Demo Access</span>
+              <p className="text-[11px] text-gray-500">Explore in read-only audit mode</p>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              <button
-                type="button"
-                onClick={() => fillCredentials('admin@peyala.com')}
-                className="py-1.5 px-2 rounded-lg bg-gray-800/90 hover:bg-brand-500/20 hover:border-brand-500/40 border border-gray-700/80 text-[11px] font-bold text-gray-200 transition-colors text-center cursor-pointer"
-              >
-                👑 Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => fillCredentials('manager@peyala.com')}
-                className="py-1.5 px-2 rounded-lg bg-gray-800/90 hover:bg-brand-500/20 hover:border-brand-500/40 border border-gray-700/80 text-[11px] font-bold text-gray-200 transition-colors text-center cursor-pointer"
-              >
-                💼 Manager
-              </button>
-              <button
-                type="button"
-                onClick={() => fillCredentials('staff@peyala.com')}
-                className="py-1.5 px-2 rounded-lg bg-gray-800/90 hover:bg-brand-500/20 hover:border-brand-500/40 border border-gray-700/80 text-[11px] font-bold text-gray-200 transition-colors text-center cursor-pointer"
-              >
-                🍽️ Staff
-              </button>
-              <button
-                type="button"
-                onClick={() => fillCredentials('viewer@peyala.com')}
-                className="py-1.5 px-2 rounded-lg bg-amber-950/40 hover:bg-amber-500/20 hover:border-amber-500/50 border border-amber-800/80 text-[11px] font-bold text-amber-200 transition-colors text-center cursor-pointer"
-                title="Read-only demo role"
-              >
-                👀 Viewer
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={fillViewerCredentials}
+              className="py-1.5 px-3 rounded-lg bg-amber-950/40 hover:bg-amber-500/20 hover:border-amber-500/50 border border-amber-800/80 text-xs font-bold text-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Explore read-only demo mode"
+            >
+              <span>👀</span>
+              <span>Demo View</span>
+            </button>
           </div>
 
           {/* Login Form */}
@@ -1122,16 +1100,15 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-gray-950 border border-gray-800 rounded-xl text-sm font-medium text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
-                  placeholder="admin@peyala.com"
+                  placeholder="name@peyala.com"
                   required
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                <span>Password</span>
-                <span className="text-[10px] text-gray-400 font-normal">Default: peyala123</span>
+              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                Password
               </label>
               <div className="relative">
                 <input
@@ -1188,7 +1165,7 @@ export default function LoginPage() {
             >
               <span className="text-emerald-400 text-sm">📱</span>
               <span>Install Staff Android App (APK)</span>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">v1.0</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">v9.0</span>
             </a>
           </div>
 
@@ -1196,7 +1173,7 @@ export default function LoginPage() {
           <div className="pt-2 text-center border-t border-gray-800/60 space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/60 text-emerald-400 text-[11px] font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>System Operational · v8.0 Production Ready</span>
+              <span>System Operational · v9.0 Production Ready</span>
             </div>
             <p className="text-[11px] text-gray-400">
               Peyala Café & Restaurant Operations Engine · Midnapore, WB

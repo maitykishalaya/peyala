@@ -13,15 +13,27 @@ export function formatCurrency(amount: number | null | undefined): string {
 }
 
 export function formatDate(date: string | Date): string {
-  return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(date));
+  if (!date) return '—';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  }).format(d);
 }
 
-export function formatDateInput(date: Date = new Date()): string {
+export function formatDateInput(date: Date | string = new Date()): string {
+  if (!date) return '';
   const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
 }
 
 export function today(): string {
@@ -29,8 +41,33 @@ export function today(): string {
 }
 
 export function monthStart(): string {
-  const d = new Date();
-  return formatDateInput(new Date(d.getFullYear(), d.getMonth(), 1));
+  const istStr = formatDateInput(new Date());
+  const [y, m] = istStr.split('-');
+  return `${y}-${m}-01`;
+}
+
+export function clearFinancialCaches() {
+  const prefixes = [
+    'peyala_sales_list_cache',
+    'peyala_sales_accounts_cache',
+    'peyala_reports_sales_cache',
+    'peyala_reports_daily_cache',
+    'peyala_reports_pnl_cache',
+    'peyala_balancesheet_cache',
+    'peyala_accounts_cache',
+    'peyala_dashboard_cache',
+  ];
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && prefixes.some((p) => key.startsWith(p))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('peyala_sales_updated'));
+  }
 }
 
 export function getInitials(name: string): string {

@@ -141,18 +141,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true')) {
-        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
-          try {
-            window.focus();
-            (window as any).electronAPI?.ensureFocus?.();
-          } catch (_) {}
-        }
+        try {
+          window.focus();
+          (window as any).electronAPI?.ensureFocus?.();
+        } catch (_) {}
         setTimeout(() => {
-          if (document.activeElement !== target && typeof target.focus === 'function') {
-            try {
-              target.focus();
-            } catch (_) {}
-          }
+          try {
+            if (typeof target.focus === 'function') {
+              target.focus({ preventScroll: true });
+            }
+          } catch (_) {}
         }, 0);
       }
     };
@@ -160,22 +158,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
-          try {
-            window.focus();
-            (window as any).electronAPI?.ensureFocus?.();
-          } catch (_) {}
-        }
-      }
-    };
-
-    const cleanupStrandedFrames = () => {
-      const frames = document.querySelectorAll('iframe[id*="print"], iframe[id*="thermal"]');
-      frames.forEach((f) => {
         try {
-          if (f.parentNode) f.parentNode.removeChild(f);
+          window.focus();
+          (window as any).electronAPI?.ensureFocus?.();
         } catch (_) {}
-      });
+      }
     };
 
     window.addEventListener('focus', handleWindowFocus);
@@ -183,14 +170,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     document.addEventListener('touchstart', handlePointerDown as any, { capture: true, passive: true });
     document.addEventListener('focusin', handleFocusIn, true);
 
-    const frameCheckInterval = setInterval(cleanupStrandedFrames, 15000);
-
     return () => {
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('mousedown', handlePointerDown as any, true);
       document.removeEventListener('touchstart', handlePointerDown as any, true);
       document.removeEventListener('focusin', handleFocusIn, true);
-      clearInterval(frameCheckInterval);
     };
   }, []);
 
@@ -460,8 +444,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </footer>
         <OfflineSyncBanner />
-        <ThermalPreviewModal />
-        <WastagePromptBanner />
       </div>
     </div>
   );
