@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useDeferredValue } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { inventoryApi, suppliersApi, auditApi } from '@/lib/api';
@@ -37,6 +37,7 @@ export default function InventoryPage() {
   const [selectedCat, setSelectedCat] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [modal, setModal] = useState<'item' | 'cat' | 'edit' | 'editCat' | null>(null);
   const [selected, setSelected] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<any>(null);
@@ -228,17 +229,22 @@ export default function InventoryPage() {
     }
   };
 
-  const totalValue = items.reduce((s, i) => s + (i.currentStock * i.averageCost), 0);
-  const lowCount = items.filter(i => i.currentStock <= i.minimumStock).length;
+  const totalValue = useMemo(() => items.reduce((s, i) => s + (i.currentStock * i.averageCost), 0), [items]);
+  const lowCount = useMemo(() => items.filter(i => i.currentStock <= i.minimumStock).length, [items]);
 
   // Group by category — filtered by search text first
-  const searchedItems = search.trim()
-    ? items.filter(i => matchesSearch([i.name, i.category?.name, i.preferredSupplier?.name], search))
-    : items;
-  const grouped = categories.reduce((acc: any, cat: any) => {
-    acc[cat._id] = { cat, items: searchedItems.filter(i => i.category?._id === cat._id) };
-    return acc;
-  }, {});
+  const searchedItems = useMemo(() => {
+    const q = deferredSearch.trim();
+    if (!q) return items;
+    return items.filter(i => matchesSearch([i.name, i.category?.name, i.preferredSupplier?.name], q));
+  }, [items, deferredSearch]);
+
+  const grouped = useMemo(() => {
+    return categories.reduce((acc: any, cat: any) => {
+      acc[cat._id] = { cat, items: searchedItems.filter(i => i.category?._id === cat._id) };
+      return acc;
+    }, {});
+  }, [categories, searchedItems]);
 
   return (
     <AppLayout>
@@ -323,14 +329,21 @@ export default function InventoryPage() {
           <input
             type="text"
             value={search}
-            onChange={e => { setSearch(e.target.value); if (e.target.value.trim()) { setSelectedCat(''); setLowStockOnly(false); } }}
+            onChange={e => {
+              const val = e.target.value;
+              setSearch(val);
+              if (val.trim()) {
+                if (selectedCat) setSelectedCat('');
+                if (lowStockOnly) setLowStockOnly(false);
+              }
+            }}
             placeholder="Search items by name..."
             className="input pl-9"
           />
         </div>
 
         {/* Filters */}
-        {!search.trim() && (
+        {!deferredSearch.trim() && (
         <div className="flex gap-3 flex-wrap">
           <button onClick={() => { setSelectedCat(''); setLowStockOnly(false); }} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!selectedCat && !lowStockOnly ? 'bg-brand-500 text-white' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}>All</button>
           <button onClick={() => setLowStockOnly(!lowStockOnly)} className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors ${lowStockOnly ? 'bg-yellow-500 text-white' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}><AlertTriangle className="w-3.5 h-3.5" /> Low Stock {lowCount > 0 && `(${lowCount})`}</button>
@@ -349,7 +362,7 @@ export default function InventoryPage() {
           <div className="space-y-4">
             {Object.values(grouped).map(({ cat, items: catItems }: any) => {
               if (selectedCat && selectedCat !== cat._id) return null;
-              if (search.trim() && catItems.length === 0) return null;
+              if (deferredSearch.trim() && catItems.length === 0) return null;
               return (
                 <div key={cat._id} className="card overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2" style={{ borderLeftColor: cat.color, borderLeftWidth: 3 }}>
@@ -365,7 +378,7 @@ export default function InventoryPage() {
                     <span className="text-xs text-gray-400 ml-auto">{formatCurrency(catItems.reduce((s: number, i: any) => s + i.currentStock * i.averageCost, 0))}</span>
                   </div>
                   {catItems.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-sm text-gray-400">{search.trim() ? 'No items match your search in this category' : 'No items in this category yet'}</div>
+                    <div className="px-4 py-6 text-center text-sm text-gray-400">{deferredSearch.trim() ? 'No items match your search in this category' : 'No items in this category yet'}</div>
                   ) : (
                   <div className="table-responsive">
                     <table className="w-full min-w-max">

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useDeferredValue } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import { menuApi, addonsApi, MenuCategory, MenuItem, Addon, MenuItemVariant } from '@/lib/pos-api';
@@ -20,6 +20,7 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [vegFilter, setVegFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
 
   // Loading states for buttons
@@ -129,14 +130,14 @@ export default function MenuPage() {
       if (vegFilter === 'non-veg' && item.isVeg) return false;
 
       // Search filter
-      if (search.trim()) {
+      if (deferredSearch.trim()) {
         const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
-        if (!matchesSearch([item.name, item.description, catName], search)) return false;
+        if (!matchesSearch([item.name, item.description, catName], deferredSearch)) return false;
       }
 
       return true;
     });
-  }, [items, selectedCategory, vegFilter, search]);
+  }, [items, selectedCategory, vegFilter, deferredSearch]);
 
   // Open item create
   const openCreateItem = () => {

@@ -126,8 +126,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [dark, mounted]);
 
   // ── GLOBAL INPUT FOCUS & WINDOW RE-SYNCHRONIZATION GUARD ──────────
-  // Permanently prevents Windows / Chromium focus-loss bug where textboxes
-  // stop taking keyboard inputs until switching tabs.
+  // Safeguards window and input focus without stealing caret or competing with native input routing
   useEffect(() => {
     const handleWindowFocus = () => {
       const active = document.activeElement as HTMLElement | null;
@@ -141,40 +140,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true')) {
-        try {
-          window.focus();
-          (window as any).electronAPI?.ensureFocus?.();
-        } catch (_) {}
-        setTimeout(() => {
+        // Only if the browser window does not have OS focus, restore top-level focus
+        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
           try {
-            if (typeof target.focus === 'function') {
-              target.focus({ preventScroll: true });
-            }
+            window.focus();
+            (window as any).electronAPI?.ensureFocus?.();
           } catch (_) {}
-        }, 0);
-      }
-    };
-
-    const handleFocusIn = (e: FocusEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-        try {
-          window.focus();
-          (window as any).electronAPI?.ensureFocus?.();
-        } catch (_) {}
+        }
       }
     };
 
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('mousedown', handlePointerDown as any, true);
     document.addEventListener('touchstart', handlePointerDown as any, { capture: true, passive: true });
-    document.addEventListener('focusin', handleFocusIn, true);
 
     return () => {
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('mousedown', handlePointerDown as any, true);
       document.removeEventListener('touchstart', handlePointerDown as any, true);
-      document.removeEventListener('focusin', handleFocusIn, true);
     };
   }, []);
 

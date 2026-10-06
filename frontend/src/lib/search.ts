@@ -115,14 +115,14 @@ function tokenMatchesWord(token: string, word: string): boolean {
   const maxDist = tLen <= 7 ? 1 : 2;
 
   // Full word comparison
-  if (Math.abs(wLen - tLen) <= maxDist) {
+  if (Math.abs(wLen - tLen) <= maxDist && token[0] === word[0]) {
     if (damerauLevenshtein(token, word) <= maxDist) {
       return true;
     }
   }
 
-  // Prefix comparison for longer target words (e.g. "chileda" [len 7] matching prefix of "chilledas" [len 9])
-  if (wLen > tLen) {
+  // Prefix comparison for longer target words (e.g. "chileda" matching prefix of "chilledas")
+  if (wLen > tLen && token[0] === word[0]) {
     const candPrefixes = [
       word.slice(0, tLen),
       word.slice(0, tLen + 1),
@@ -147,43 +147,26 @@ function tokenMatchesAny(
   targetStrings: string[],
   targetStringsNoSpace: string[]
 ): boolean {
-  // 1. Check against individual words
-  for (const word of allTargetWords) {
-    if (tokenMatchesWord(token, word)) {
-      return true;
-    }
-  }
-
-  // 2. Check if token is a substring of any target string
+  // 1. Check if token is a direct substring of any target string
   for (const t of targetStrings) {
     if (t.includes(token)) {
       return true;
     }
   }
 
-  // 3. Check space-collapsed target strings (handles tokens that were split across words)
-  const tokenNoSpace = token.replace(/\s+/g, '');
-  for (const tNoSpace of targetStringsNoSpace) {
-    if (tNoSpace.includes(tokenNoSpace)) {
+  // 2. Check individual target words (exact, prefix, substring, or typo)
+  for (const word of allTargetWords) {
+    if (tokenMatchesWord(token, word)) {
       return true;
     }
   }
 
-  // 4. Fuzzy window check on space-collapsed target if token is long enough
-  if (tokenNoSpace.length >= 5) {
-    const maxDist = tokenNoSpace.length <= 7 ? 1 : 2;
+  // 3. Check space-collapsed target strings (handles tokens split across words)
+  const tokenNoSpace = token.replace(/\s+/g, '');
+  if (tokenNoSpace) {
     for (const tNoSpace of targetStringsNoSpace) {
-      if (tNoSpace.length >= tokenNoSpace.length - maxDist) {
-        for (let i = 0; i <= tNoSpace.length - tokenNoSpace.length + maxDist; i++) {
-          for (let len = tokenNoSpace.length - 1; len <= tokenNoSpace.length + 1; len++) {
-            if (i + len <= tNoSpace.length && Math.abs(len - tokenNoSpace.length) <= maxDist) {
-              const windowStr = tNoSpace.slice(i, i + len);
-              if (damerauLevenshtein(tokenNoSpace, windowStr) <= maxDist) {
-                return true;
-              }
-            }
-          }
-        }
+      if (tNoSpace.includes(tokenNoSpace)) {
+        return true;
       }
     }
   }
@@ -223,7 +206,7 @@ export function matchesSearch(
     if (!norm) continue;
     normTargets.push(norm);
 
-    // Fast path: Exact match or substring match
+    // Fast path 1: Exact match or substring match
     if (norm === normQuery || norm.includes(normQuery)) {
       return true;
     }
@@ -231,12 +214,12 @@ export function matchesSearch(
     const noSpace = norm.replace(/\s+/g, '');
     normTargetsNoSpace.push(noSpace);
 
-    // Fast path: Space-collapsed match (e.g. "chill eda" matching "chilleda")
+    // Fast path 2: Space-collapsed match (e.g. "chill eda" matching "chilleda")
     if (noSpace.includes(normQueryNoSpace)) {
       return true;
     }
 
-    // Fast path: Alphanumeric match (e.g. "t1" matching "T-1" or "PO 102" matching "PO-102")
+    // Fast path 3: Alphanumeric match (e.g. "t1" matching "T-1" or "PO 102" matching "PO-102")
     const normAlphaNum = norm.replace(/[^a-z0-9]/g, '');
     const queryAlphaNum = normQuery.replace(/[^a-z0-9]/g, '');
     if (queryAlphaNum && normAlphaNum.includes(queryAlphaNum)) {
@@ -252,20 +235,16 @@ export function matchesSearch(
 
   if (normTargets.length === 0) return false;
 
-  // Check if whole query matches via fuzzy window on space-collapsed string
-  if (normQueryNoSpace.length >= 5) {
-    const maxDist = normQueryNoSpace.length <= 7 ? 1 : 2;
+  // Fast path 4: Whole-query typo check on short targets (e.g. typing "panner" matching "paneer")
+  if (normQueryNoSpace.length >= 4 && normQueryNoSpace.length <= 16) {
+    const maxDist = normQueryNoSpace.length <= 6 ? 1 : 2;
     for (const tNoSpace of normTargetsNoSpace) {
-      if (tNoSpace.length >= normQueryNoSpace.length - maxDist) {
-        for (let i = 0; i <= tNoSpace.length - normQueryNoSpace.length + maxDist; i++) {
-          for (let len = normQueryNoSpace.length - 1; len <= normQueryNoSpace.length + 1; len++) {
-            if (i + len <= tNoSpace.length && Math.abs(len - normQueryNoSpace.length) <= maxDist) {
-              const windowStr = tNoSpace.slice(i, i + len);
-              if (damerauLevenshtein(normQueryNoSpace, windowStr) <= maxDist) {
-                return true;
-              }
-            }
-          }
+      if (
+        Math.abs(tNoSpace.length - normQueryNoSpace.length) <= maxDist &&
+        tNoSpace[0] === normQueryNoSpace[0]
+      ) {
+        if (damerauLevenshtein(normQueryNoSpace, tNoSpace) <= maxDist) {
+          return true;
         }
       }
     }
@@ -274,7 +253,6 @@ export function matchesSearch(
   // Multi-token matching: Every token in the query must match something in the targets
   const queryTokens = normQuery.split(' ').filter(Boolean);
   if (queryTokens.length <= 1) {
-    // Single token was already checked or was not in target
     if (queryTokens.length === 1) {
       return tokenMatchesAny(queryTokens[0], allTargetWords, normTargets, normTargetsNoSpace);
     }

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useDeferredValue } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import Link from 'next/link';
@@ -193,6 +193,8 @@ export default function TablesPage() {
   const [cart, setCart] = useState<Record<string, CartItemConfig>>({});
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [menuSearch, setMenuSearch] = useState('');
+  const deferredMenuSearch = useDeferredValue(menuSearch);
+  const deferredTableSearch = useDeferredValue(tableSearch);
   const [serviceType, setServiceType] = useState<'dine_in' | 'delivery' | 'pickup'>('dine_in');
   const [guestCount, setGuestCount] = useState<number>(1);
   const [orderNotes, setOrderNotes] = useState<string>('');
@@ -645,8 +647,8 @@ export default function TablesPage() {
   const sectionGroupedTables = useMemo(() => {
     const filtered = tables.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-      if (tableSearch.trim()) {
-        return matchesSearch([t.tableNumber, (t as any).name, (t as any).section], tableSearch);
+      if (deferredTableSearch.trim()) {
+        return matchesSearch([t.tableNumber, (t as any).name, (t as any).section], deferredTableSearch);
       }
       return true;
     });
@@ -663,7 +665,22 @@ export default function TablesPage() {
     });
 
     return groups;
-  }, [tables, statusFilter, tableSearch, activeSections]);
+  }, [tables, statusFilter, deferredTableSearch, activeSections]);
+
+  // Memoized filtered menu items for POS Order catalog (computed once per search change)
+  const filteredMenuItems = useMemo(() => {
+    return menuItems.filter((item) => {
+      if (selectedCategory !== 'all') {
+        const cId = typeof item.category === 'object' && item.category !== null ? item.category._id : item.category;
+        if (cId !== selectedCategory) return false;
+      }
+      if (deferredMenuSearch.trim()) {
+        const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
+        return matchesSearch([item.name, item.description, catName], deferredMenuSearch);
+      }
+      return true;
+    });
+  }, [menuItems, selectedCategory, deferredMenuSearch]);
 
   // Helper to compute composite cart key for variants/addons
   const getCartKey = (itemId: string, variantName?: string, addonsList?: Array<{ name: string }>) => {
@@ -2380,35 +2397,13 @@ export default function TablesPage() {
 
                 {/* Items Grid with Veg / Non-Veg Colored Left Border */}
                 <div className="flex-1 overflow-y-auto max-h-[calc(100vh-300px)] pr-1">
-                  {menuItems.filter((item) => {
-                    if (selectedCategory !== 'all') {
-                      const cId = typeof item.category === 'object' && item.category !== null ? item.category._id : item.category;
-                      if (cId !== selectedCategory) return false;
-                    }
-                    if (menuSearch.trim()) {
-                      const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
-                      return matchesSearch([item.name, item.description, catName], menuSearch);
-                    }
-                    return true;
-                  }).length === 0 ? (
+                  {filteredMenuItems.length === 0 ? (
                     <div className="py-16 text-center text-gray-400 text-sm">
                       No menu items match your search.
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                      {menuItems
-                        .filter((item) => {
-                          if (selectedCategory !== 'all') {
-                            const cId = typeof item.category === 'object' && item.category !== null ? item.category._id : item.category;
-                            if (cId !== selectedCategory) return false;
-                          }
-                          if (menuSearch.trim()) {
-                            const catName = typeof item.category === 'object' && item.category !== null ? item.category.name : '';
-                            return matchesSearch([item.name, item.description, catName], menuSearch);
-                          }
-                          return true;
-                        })
-                        .map((item) => {
+                      {filteredMenuItems.map((item) => {
                           const applicableAddons = getItemApplicableAddons(item);
                           const hasVariants = Boolean(item.hasVariants && item.variants && item.variants.length > 0);
                           const isCustomizable = hasVariants || applicableAddons.length > 0;
