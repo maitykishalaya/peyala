@@ -188,6 +188,7 @@ export default function TablesPage() {
   const [selectedKotRounds, setSelectedKotRounds] = useState<number[]>([]);
   const [itemTransferQuantities, setItemTransferQuantities] = useState<Record<string, number>>({});
   const [moveLoading, setMoveLoading] = useState<boolean>(false);
+  const isMoveExecutingRef = useRef<boolean>(false);
 
   // POS Order Screen Cart state (for Round 1 or Round 2+)
   const [cart, setCart] = useState<Record<string, CartItemConfig>>({});
@@ -823,9 +824,15 @@ export default function TablesPage() {
 
   // Execute Move KOT / Items / Table Transfer
   const handleExecuteMove = async () => {
+    if (isMoveExecutingRef.current || moveLoading) return;
     if (!moveModal.sourceTable || !moveModal.activeOrder) return;
     if (!selectedTargetTableId) {
       toast.error('Please select a destination table');
+      return;
+    }
+
+    if (String(selectedTargetTableId) === String(moveModal.sourceTable._id)) {
+      toast.error('Destination table cannot be the same as source table');
       return;
     }
 
@@ -835,6 +842,7 @@ export default function TablesPage() {
       return;
     }
 
+    isMoveExecutingRef.current = true;
     setMoveLoading(true);
     try {
       const payload: any = {
@@ -846,6 +854,7 @@ export default function TablesPage() {
         if (selectedKotRounds.length === 0) {
           toast.error('Please select at least one KOT round to move');
           setMoveLoading(false);
+          isMoveExecutingRef.current = false;
           return;
         }
         payload.kotRoundNumbers = selectedKotRounds;
@@ -857,6 +866,7 @@ export default function TablesPage() {
         if (itemTransfers.length === 0) {
           toast.error('Please select at least one item quantity to move');
           setMoveLoading(false);
+          isMoveExecutingRef.current = false;
           return;
         }
         payload.itemTransfers = itemTransfers;
@@ -874,6 +884,7 @@ export default function TablesPage() {
       toast.error(err.response?.data?.message || err.message || 'Failed to move KOT/Table');
     } finally {
       setMoveLoading(false);
+      isMoveExecutingRef.current = false;
     }
   };
 
@@ -4385,7 +4396,7 @@ export default function TablesPage() {
               </button>
               <button
                 type="button"
-                disabled={!selectedTargetTableId || moveLoading}
+                disabled={!selectedTargetTableId || moveLoading || selectedTargetTableId === moveModal.sourceTable?._id}
                 onClick={handleExecuteMove}
                 className="px-6 py-2 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm disabled:opacity-50 transition-colors"
               >

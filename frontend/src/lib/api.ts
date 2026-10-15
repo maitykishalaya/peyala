@@ -60,7 +60,11 @@ api.interceptors.response.use(
       (typeof navigator !== 'undefined' && !navigator.onLine);
 
     // Queue mutation locally on connection or DB error so user can continue uninterrupted
+    // EXCLUDE table transfer/move operations from background offline replay to prevent state conflicts
     if (isMutation && isConnectionError && typeof window !== 'undefined' && config) {
+      if (config.url?.includes('/transfer')) {
+        return Promise.reject(err);
+      }
       const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       enqueueRequest(config, tempId);
 

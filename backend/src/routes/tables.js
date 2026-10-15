@@ -421,6 +421,27 @@ router.get('/', async (req, res) => {
       .sort({ tableNumber: 1 })
       .lean();
 
+    // Auto-heal any tables whose activeOrder points to a cancelled, paid, or missing order
+    const staleTables = [];
+    for (const t of tables) {
+      if (t.activeOrder) {
+        if (!t.activeOrder._id || t.activeOrder.status === 'cancelled' || t.activeOrder.status === 'paid') {
+          t.activeOrder = null;
+          t.status = 'available';
+          staleTables.push(t._id);
+        }
+      } else if (t.status === 'occupied') {
+        t.status = 'available';
+        staleTables.push(t._id);
+      }
+    }
+    if (staleTables.length > 0) {
+      Table.updateMany(
+        { _id: { $in: staleTables } },
+        { $set: { activeOrder: null, status: 'available' } }
+      ).catch((e) => console.error('[Tables] Auto-heal update error:', e));
+    }
+
     // Check if any legacy tables need their default category persisted
     const uncatTables = tables.filter((t) => !t.category);
     if (uncatTables.length > 0) {
@@ -454,6 +475,15 @@ router.get('/:id', async (req, res) => {
 
     if (!table) {
       return res.status(404).json({ message: 'Table not found' });
+    }
+
+    if (table.activeOrder && (table.activeOrder.status === 'cancelled' || table.activeOrder.status === 'paid')) {
+      table.activeOrder = null;
+      table.status = 'available';
+      await table.save();
+    } else if (!table.activeOrder && table.status === 'occupied') {
+      table.status = 'available';
+      await table.save();
     }
 
     res.json(table);

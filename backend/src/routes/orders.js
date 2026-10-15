@@ -16,6 +16,9 @@ const { reconcileDailySales } = require('../utils/salesReconciler');
 
 router.use(auth);
 
+// Concurrency lock to prevent simultaneous table transfers / double clicks / race conditions
+const activeTransferLocks = new Set();
+
 // Helper to populate order consistently
 const populateOrder = (query) => {
   return query
@@ -84,6 +87,16 @@ router.get('/table/:tableId/active', async (req, res) => {
         status: { $nin: ['paid', 'cancelled'] },
       }).sort({ createdAt: -1 })
     );
+
+    // Self-heal table state if no active non-cancelled order is found
+    if (!order) {
+      const tbl = await Table.findById(req.params.tableId);
+      if (tbl && (tbl.activeOrder || tbl.status === 'occupied')) {
+        tbl.activeOrder = null;
+        tbl.status = 'available';
+        await tbl.save();
+      }
+    }
 
     res.json(order || null);
   } catch (err) {
@@ -1486,6 +1499,16 @@ router.post('/:id/cancel', staffOrAdmin, async (req, res) => {
 // POST /api/orders/:id/transfer — Move table / KOT / items
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
+  const orderLockKey = String(req.params.id);
+  const targetLockKey = req.body?.targetTableId ? String(req.body.targetTableId) : null;
+
+  if (activeTransferLocks.has(orderLockKey) || (targetLockKey && activeTransferLocks.has(targetLockKey))) {
+    return res.status(409).json({ message: 'A transfer operation for this table or order is currently in progress. Please wait a moment.' });
+  }
+
+  activeTransferLocks.add(orderLockKey);
+  if (targetLockKey) activeTransferLocks.add(targetLockKey);
+
   try {
     const { targetTableId, transferType = 'table', kotRoundNumbers = [], itemTransfers = [] } = req.body;
 
@@ -1513,6 +1536,26 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
 
     if (String(sourceTable._id) === String(targetTable._id)) {
       return res.status(400).json({ message: 'Source table and target table cannot be the same' });
+    }
+
+    if (String(sourceOrder.table) === String(targetTable._id)) {
+      return res.status(400).json({ message: 'Order is already assigned to the destination table' });
+    }
+
+    // ── Pre-flight Target Table & Self-Merge Safeguard ──
+    if (targetTable.activeOrder) {
+      if (String(sourceOrder._id) === String(targetTable.activeOrder)) {
+        return res.status(400).json({ message: 'Cannot transfer or merge an order with itself' });
+      }
+      const existingTargetOrder = await Order.findById(targetTable.activeOrder);
+      if (!existingTargetOrder || existingTargetOrder.status === 'paid' || existingTargetOrder.status === 'cancelled') {
+        // Target table was holding a stale reference to a settled or cancelled order — auto-heal
+        targetTable.activeOrder = null;
+        targetTable.status = 'available';
+        await targetTable.save();
+      } else if (String(sourceOrder._id) === String(existingTargetOrder._id)) {
+        return res.status(400).json({ message: 'Cannot merge an order into itself' });
+      }
     }
 
     // ───────────────────────────────────────────────
@@ -1547,8 +1590,8 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
       } else {
         // Target table is already occupied -> MERGE orders
         const targetOrder = await Order.findById(targetTable.activeOrder);
-        if (!targetOrder) {
-          // Orphan reference fallback
+        if (!targetOrder || targetOrder.status === 'paid' || targetOrder.status === 'cancelled') {
+          // Orphan reference fallback -> treat as empty table move
           sourceOrder.table = targetTable._id;
           await sourceOrder.save();
           targetTable.activeOrder = sourceOrder._id;
@@ -1563,6 +1606,10 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
             message: `Successfully moved order from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}`,
             type: 'table_move',
           });
+        }
+
+        if (String(sourceOrder._id) === String(targetOrder._id)) {
+          return res.status(400).json({ message: 'Cannot merge order with itself' });
         }
 
         // Merge items from source into target
@@ -1614,6 +1661,11 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
         sourceTable.activeOrder = null;
         sourceTable.status = 'available';
         await sourceTable.save();
+
+        // Ensure target table is firmly occupied with targetOrder
+        targetTable.activeOrder = targetOrder._id;
+        targetTable.status = 'occupied';
+        await targetTable.save();
 
         await log({
           user: req.user,
@@ -1746,7 +1798,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
         await targetTable.save();
       } else {
         const targetOrder = await Order.findById(targetTable.activeOrder);
-        if (targetOrder) {
+        if (targetOrder && String(sourceOrder._id) !== String(targetOrder._id)) {
           for (const mi of movedItems) {
             targetOrder.items.push(mi);
           }
@@ -1869,7 +1921,7 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
         await targetTable.save();
       } else {
         const targetOrder = await Order.findById(targetTable.activeOrder);
-        if (targetOrder) {
+        if (targetOrder && String(sourceOrder._id) !== String(targetOrder._id)) {
           for (const mi of movedItems) {
             targetOrder.items.push(mi);
           }
@@ -1912,6 +1964,9 @@ router.post('/:id/transfer', staffOrAdmin, async (req, res) => {
     return res.status(400).json({ message: 'Invalid transferType' });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  } finally {
+    activeTransferLocks.delete(orderLockKey);
+    if (targetLockKey) activeTransferLocks.delete(targetLockKey);
   }
 });
 

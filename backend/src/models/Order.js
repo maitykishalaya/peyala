@@ -97,6 +97,7 @@ const orderSchema = new mongoose.Schema({
   foodServedAt: { type: Date, default: null },
   effectiveActiveTime: { type: Date, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  cancelReason: { type: String, trim: true, default: null },
 }, { timestamps: true });
 
 orderSchema.index({ billPrintQueued: 1, billPrintQueuedAt: 1, updatedAt: 1 });
