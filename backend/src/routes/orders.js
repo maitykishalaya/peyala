@@ -22,7 +22,7 @@ const activeTransferLocks = new Set();
 // Helper to populate order consistently
 const populateOrder = (query) => {
   return query
-    .populate('table', 'tableNumber capacity status')
+    .populate('table', 'tableNumber capacity status category')
     .populate({
       path: 'items.menuItem',
       select: 'name price isVeg isAvailable category',
@@ -52,6 +52,24 @@ function isBeverageItem(item) {
 
   const name = String(item.name || '').trim();
   return BEVERAGE_ITEM_REGEX.test(name);
+}
+
+// Clean helper to format table label (e.g., "Indoor 1", "Outdoor 2", or "Takeaway")
+function getOrderTableLabel(order) {
+  if (!order) return 'Takeaway';
+  const tableObj = typeof order.table === 'object' && order.table !== null ? order.table : null;
+  const rawNum = tableObj ? String(tableObj.tableNumber || '').trim() : (typeof order.table === 'string' ? order.table.trim() : '');
+  const cat = (tableObj?.category || order.tableCategory || '').trim();
+
+  if (!rawNum) {
+    return cat || 'Takeaway';
+  }
+
+  // If rawNum already starts with or includes category (e.g. "Indoor 1" or "Outdoor 2"), return rawNum
+  if (cat && !rawNum.toLowerCase().includes(cat.toLowerCase())) {
+    return `${cat} ${rawNum}`;
+  }
+  return rawNum;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -336,15 +354,12 @@ router.get('/kds/active', async (req, res) => {
     });
 
     // Compute "Prep Next" (Smart Item-wise Aggregation) from activeOrders
+    // Group variants of the same dish together under the base dish
     const prepMap = new Map();
 
     for (const order of activeOrders) {
       if (!Array.isArray(order.items)) continue;
-      const tableNumber = order.table
-        ? typeof order.table === 'object'
-          ? order.table.tableNumber
-          : 'Takeaway'
-        : 'Takeaway';
+      const tableNumber = getOrderTableLabel(order);
 
       for (const item of order.items) {
         if (item.status === 'cancelled' || item.status === 'served') continue;
@@ -356,7 +371,8 @@ router.get('/kds/active', async (req, res) => {
             : String(item.menuItem)
           : item.name;
         const variantName = item.variant?.name || '';
-        const key = `${menuItemId}__${variantName}`;
+        // Group by base menuItem identifier so variants show together
+        const key = item.menuItem ? String(menuItemId) : String(item.name || '').trim().toLowerCase();
 
         const itemAddons = (Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0)
           ? item.selectedAddons.map((a) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean)
@@ -368,6 +384,7 @@ router.get('/kds/active', async (req, res) => {
           tableNumber,
           tokenNumber: order.orderNumber,
           quantity: item.quantity,
+          variantName: variantName || '',
           status: item.status,
           notes: item.notes || '',
           addons: itemAddons,
@@ -383,7 +400,8 @@ router.get('/kds/active', async (req, res) => {
             key,
             menuItemId,
             name: item.name,
-            variantName,
+            variantName: variantName || '',
+            variants: [{ name: variantName || '', quantity: item.quantity }],
             isVeg:
               typeof item.menuItem === 'object' && item.menuItem !== null
                 ? Boolean(item.menuItem.isVeg)
@@ -408,6 +426,18 @@ router.get('/kds/active', async (req, res) => {
           }
           if (item.notes && !existing.notes.includes(item.notes)) {
             existing.notes.push(item.notes);
+          }
+          // Aggregate variants
+          const vKey = variantName || '';
+          const existingVariant = existing.variants.find((v) => v.name === vKey);
+          if (existingVariant) {
+            existingVariant.quantity += item.quantity;
+          } else {
+            existing.variants.push({ name: vKey, quantity: item.quantity });
+          }
+          // If variants are different across orders, clear single variantName
+          if (existing.variantName && existing.variantName !== variantName) {
+            existing.variantName = '';
           }
           existing.tables.push(tableEntry);
         }
@@ -451,7 +481,10 @@ router.post('/kds/batch-bump', async (req, res) => {
         const mId = item.menuItem ? String(item.menuItem) : item.name;
         const vName = item.variant?.name || '';
 
-        if (mId === String(menuItemId) && (!variantName || vName === variantName)) {
+        const idMatches = mId === String(menuItemId) || item.name === String(menuItemId);
+        const variantMatches = !variantName || vName === variantName;
+
+        if (idMatches && variantMatches) {
           item.status = 'served';
           modified = true;
         }

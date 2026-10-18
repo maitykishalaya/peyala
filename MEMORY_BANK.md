@@ -795,13 +795,25 @@ Whenever changes are made, run this validation suite before concluding:
 - **Versioning Strategy**:
   - Point releases (e.g. `8.1`, `8.2`) are reserved for minor bug fixes.
   - Major releases (e.g. `9.0`, `10.0`) are triggered on any core business logic, schema, or functional capability updates.
-  - Upgraded codebase across all surfaces to **v9.0** (`9.0.0`):
-    - `package.json` (root): `9.0.0`
-    - `backend/package.json`: `9.0.0`
-    - `frontend/package.json`: `9.0.0`
-    - `desktop/package.json`: `9.0.0`
-    - `android/app/build.gradle`: `versionCode 9`, `versionName "9.0.0"`
-    - `frontend/src/app/login/page.tsx`: Updated mobile badge, footer status, and APK download badge to `v9.0`.
+  - Upgraded codebase across all surfaces to **v10.0** (`10.0.0`):
+    - `package.json` (root): `10.0.0`
+    - `backend/package.json`: `10.0.0`
+    - `frontend/package.json`: `10.0.0`
+    - `desktop/package.json`: `10.0.0`
+    - `android/app/build.gradle`: `versionCode 10`, `versionName "10.0.0"`
+    - `frontend/src/app/login/page.tsx`: Updated mobile badge, footer status, and APK download badge to `v10.0`.
+- **KOT, Variants, Addons, and Independent Section Scrolling (v10.0)**:
+  - **Whole KOT & Bill Variant/Addon Visibility**:
+    - In `tables/page.tsx`, `showOrderDetailsModal` now renders complete portion/variant badges (`Plain`, `Peri Peri`, `4pc`, `8pc`) and emerald addon tags (`+ Addon (₹price)`) alongside item names.
+    - Updated KOT round previews in Move Modal to also display variant names and addons.
+  - **Mobile Sideways Scrolling for KOT/Bill Items**:
+    - Replaced `overflow-hidden` on the ordered items table container with `overflow-x-auto touch-pan-x scrollbar-thin` and set table `min-w-[560px]`, enabling smooth sideways swipe on mobile devices to inspect Item, Qty, Price, Line Total, Status, and Actions.
+  - **POS Order Screen Scrolling & Search Separation**:
+    - Added automatic search bar clearing when switching categories (`handleSelectCategory`), preventing items from being hidden by residual search queries.
+    - Isolated scrolling across Category Rail (`overflow-x-auto` on mobile, `overflow-y-auto` on desktop), Item Grid (`flex-1 min-h-0 overflow-y-auto`), and Cart Items (`flex-1 min-h-0 overflow-y-auto`), eliminating page-level scroll conflicts.
+  - **KDS Variant Aggregation & Fullscreen Controls**:
+    - Grouped identical base menu items across tables on KDS while maintaining distinct variant breakdowns (e.g. `French Fries x2` -> `Plain at Indoor 1`, `Peri Peri at Outdoor 2`).
+    - Fixed KDS fullscreen mode so vertical/horizontal scrolling does not kick the user out of fullscreen, and added an explicit Close Fullscreen button with proper container padding.
 - **Billing Sequence & Timestamp Order**:
   - **Sequential Bill Generation by Billing Time**:
     - Previously, bills were assigned numbers or displayed using `createdAt` (when the customer table was opened).
@@ -840,4 +852,4 @@ Whenever changes are made, run this validation suite before concluding:
     - Removed `focusin` listener calling `window.focus()` that previously caused Chromium on Windows to steal caret focus from active textboxes.
 
 ---
-*Last Updated: October 2026 · Peyala v9.0 Engineering*
+*Last Updated: October 2026 · Peyala v10.0 Engineering*

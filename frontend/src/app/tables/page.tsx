@@ -144,6 +144,38 @@ function getTableSection(table: Table | string): string {
   return inferTableSection(String(table || ''));
 }
 
+// Helpers to cleanly extract variant and addons from order items
+function getOrderItemVariant(item: any): string {
+  if (!item) return '';
+  if (typeof item.variant === 'string' && item.variant.trim()) return item.variant.trim();
+  if (item.variant && typeof item.variant === 'object' && item.variant.name) return String(item.variant.name).trim();
+  if (item.variantName && typeof item.variantName === 'string') return item.variantName.trim();
+  return '';
+}
+
+function getOrderItemAddons(item: any): Array<{ name: string; price?: number }> {
+  if (!item) return [];
+  if (Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0) {
+    return item.selectedAddons
+      .map((a: any) => {
+        if (!a) return null;
+        if (typeof a === 'string') return { name: a };
+        return { name: a.name || a.addonName || '', price: typeof a.price === 'number' ? a.price : undefined };
+      })
+      .filter((a: any) => a && a.name);
+  }
+  if (Array.isArray(item.addons) && item.addons.length > 0) {
+    return item.addons
+      .map((a: any) => {
+        if (!a) return null;
+        if (typeof a === 'string') return { name: a };
+        return { name: a.name || '', price: typeof a.price === 'number' ? a.price : undefined };
+      })
+      .filter((a: any) => a && a.name);
+  }
+  return [];
+}
+
 export default function TablesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -194,6 +226,10 @@ export default function TablesPage() {
   const [cart, setCart] = useState<Record<string, CartItemConfig>>({});
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [menuSearch, setMenuSearch] = useState('');
+  const handleSelectCategory = (catId: string) => {
+    setSelectedCategory(catId);
+    setMenuSearch('');
+  };
   const deferredMenuSearch = useDeferredValue(menuSearch);
   const deferredTableSearch = useDeferredValue(tableSearch);
   const [serviceType, setServiceType] = useState<'dine_in' | 'delivery' | 'pickup'>('dine_in');
@@ -1325,8 +1361,10 @@ export default function TablesPage() {
         quantity: it.quantity || 1,
         price: it.price || 0,
         taxPercent: it.taxPercent,
-        variantName: it.variant?.name,
-        addons: it.selectedAddons?.map((a) => ({ name: a.name, price: a.price || 0 })),
+        variantName: getOrderItemVariant(it) || it.variant?.name,
+        addons: (it.selectedAddons && it.selectedAddons.length > 0)
+          ? it.selectedAddons.map((a) => ({ name: a.name, price: a.price || 0 }))
+          : getOrderItemAddons(it).map((a) => ({ name: a.name, price: a.price || 0 })),
       }));
 
     const billerDisplayName = user?.name || 'Staff';
@@ -2334,15 +2372,15 @@ export default function TablesPage() {
             </div>
 
             {/* 3-Column Layout: Left Category Rail (Col 1) | Middle Menu Grid (Col 2) | Right Order Cart (Col 3) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-210px)]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-210px)] lg:h-[calc(100vh-210px)] lg:max-h-[calc(100vh-210px)]">
               {/* ── COLUMN 1: Category Rail (2 cols on lg) ── */}
               <div className={cn(
-                "lg:col-span-2 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-row lg:flex-col overflow-x-auto lg:overflow-y-auto max-h-[140px] lg:max-h-[calc(100vh-220px)] divide-y divide-gray-100 dark:divide-gray-800 divide-x lg:divide-x-0",
+                "lg:col-span-2 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-row lg:flex-col overflow-x-auto lg:overflow-y-auto max-h-[52px] lg:max-h-full lg:h-full divide-y divide-gray-100 dark:divide-gray-800 divide-x lg:divide-x-0 shrink-0 touch-pan-x scrollbar-thin",
                 mobileActiveTab === 'cart' ? 'hidden lg:flex' : 'flex'
               )}>
                 <button
                   type="button"
-                  onClick={() => setSelectedCategory('all')}
+                  onClick={() => handleSelectCategory('all')}
                   className={cn(
                     'p-2.5 text-left text-xs font-bold transition-all whitespace-nowrap flex items-center justify-between shrink-0',
                     selectedCategory === 'all'
@@ -2365,7 +2403,7 @@ export default function TablesPage() {
                     <button
                       key={cat._id}
                       type="button"
-                      onClick={() => setSelectedCategory(cat._id)}
+                      onClick={() => handleSelectCategory(cat._id)}
                       className={cn(
                         'p-2.5 text-left text-xs font-bold transition-all whitespace-nowrap flex items-center justify-between shrink-0',
                         isActive
@@ -2382,12 +2420,12 @@ export default function TablesPage() {
 
               {/* ── COLUMN 2: Item Grid & Search (6 cols on lg) ── */}
               <div className={cn(
-                "lg:col-span-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3 flex flex-col justify-between space-y-3",
+                "lg:col-span-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3 flex flex-col lg:h-full space-y-3 min-h-0",
                 mobileActiveTab === 'cart' ? 'hidden lg:flex' : 'flex',
                 cartSummary.itemCount > 0 ? 'pb-24 lg:pb-3' : ''
               )}>
                 {/* Search Bar matching Image 1 & 3 */}
-                <div className="relative">
+                <div className="relative shrink-0">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
@@ -2407,7 +2445,7 @@ export default function TablesPage() {
                 </div>
 
                 {/* Items Grid with Veg / Non-Veg Colored Left Border */}
-                <div className="flex-1 overflow-y-auto max-h-[calc(100vh-300px)] pr-1">
+                <div className="flex-1 min-h-0 overflow-y-auto max-h-[calc(100vh-280px)] lg:max-h-none pr-1 touch-pan-y">
                   {filteredMenuItems.length === 0 ? (
                     <div className="py-16 text-center text-gray-400 text-sm">
                       No menu items match your search.
@@ -2486,11 +2524,11 @@ export default function TablesPage() {
 
               {/* ── COLUMN 3: Live Order / Cart Panel (4 cols on lg) (Matches Image 1 & 3) ── */}
               <div className={cn(
-                "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3.5 flex flex-col justify-start gap-3",
-                mobileActiveTab === 'cart' ? 'flex col-span-1' : 'hidden lg:flex lg:col-span-4'
+                "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3.5 flex flex-col justify-start gap-3 lg:h-full min-h-0",
+                mobileActiveTab === 'cart' ? 'flex col-span-1 h-[calc(100vh-190px)]' : 'hidden lg:flex lg:col-span-4'
               )}>
                 {/* Service Type Tabs: Dine In | Delivery | Pick Up */}
-                <div className="grid grid-cols-3 gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                <div className="grid grid-cols-3 gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg shrink-0">
                   {(
                     [
                       { id: 'dine_in', label: 'Dine In', icon: Utensils },
@@ -2516,7 +2554,7 @@ export default function TablesPage() {
                 </div>
 
                 {/* Table Info & Guest Controls */}
-                <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 text-sm">
+                <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 text-sm shrink-0">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-gray-700 dark:text-gray-300">Table:</span>
                     {selectedTable ? (
@@ -2570,7 +2608,7 @@ export default function TablesPage() {
                 </div>
 
                 {/* Items Table Header: ITEMS | CHECK ITEMS | QTY. | PRICE */}
-                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden flex-1 flex flex-col justify-start min-h-[220px]">
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden flex-1 min-h-0 flex flex-col justify-start">
                   <div className="bg-gray-50 dark:bg-gray-800/80 px-3 py-2 border-b border-gray-200 dark:border-gray-800 grid grid-cols-12 text-xs font-extrabold text-gray-700 dark:text-gray-200 uppercase tracking-wider shrink-0">
                     <span className="col-span-6">ITEMS</span>
                     <span className="col-span-2 text-center">CHECK</span>
@@ -2579,7 +2617,7 @@ export default function TablesPage() {
                   </div>
 
                   {/* Cart Items List with indented addons (Matches Image 1 & 3) */}
-                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto max-h-[360px] pr-0.5 flex-1 flex flex-col justify-start items-stretch">
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-0 pr-0.5 flex flex-col justify-start items-stretch touch-pan-y">
                     {/* If occupied in Round 2, show previous rounds collapsible */}
                     {isRound2Mode && activeOrder && (
                       <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 dark:border-amber-900/40 shrink-0">
@@ -2888,7 +2926,7 @@ export default function TablesPage() {
                         <span className="col-span-2 text-right">PRICE</span>
                       </div>
 
-                      <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[280px] overflow-y-auto pr-0.5">
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[280px] overflow-y-auto pr-0.5 touch-pan-y">
                         {isRound2Mode && activeOrder && (
                           <div className="p-2 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 shrink-0">
                             <div className="flex items-center justify-between font-bold text-amber-900 dark:text-amber-200">
@@ -3347,8 +3385,8 @@ export default function TablesPage() {
                 </div>
 
                 {/* Ordered Items Table */}
-                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-x-auto touch-pan-x scrollbar-thin">
+                  <table className="w-full min-w-[560px] text-left text-xs">
                     <thead className="bg-gray-50 dark:bg-gray-800/60 border-b">
                       <tr>
                         <th className="table-th">Item</th>
@@ -3363,11 +3401,55 @@ export default function TablesPage() {
                       {activeOrder.items?.map((item: any) => {
                         const isCancelled = item.status === 'cancelled';
                         const lineTotal = item.price * item.quantity;
+                        const variantName = getOrderItemVariant(item);
+                        const itemAddons = getOrderItemAddons(item);
+                        const hasMultipleRounds = Boolean(
+                          (activeOrder.kotRounds && activeOrder.kotRounds.length > 1) ||
+                          (item.roundNumber && item.roundNumber > 1)
+                        );
                         return (
                           <tr key={item._id} className={cn(isCancelled && 'opacity-40 line-through')}>
                             <td className="table-td font-medium">
-                              {item.name}
-                              {item.notes && <p className="text-[10px] text-amber-600">Note: {item.notes}</p>}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-gray-900 dark:text-white">
+                                  {item.name}
+                                </span>
+                                {variantName && (
+                                  <span className="inline-flex items-center text-[10px] font-black px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-900 dark:text-blue-200 border border-blue-300 dark:border-blue-700 shadow-2xs">
+                                    {variantName}
+                                  </span>
+                                )}
+                                {item.roundNumber && hasMultipleRounds && (
+                                  <span className="inline-flex items-center text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                    Round {item.roundNumber}
+                                  </span>
+                                )}
+                              </div>
+
+                              {itemAddons.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {itemAddons.map((addon, aIdx) => (
+                                    <span
+                                      key={aIdx}
+                                      className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                                    >
+                                      <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">+</span>
+                                      <span>{addon.name}</span>
+                                      {addon.price && addon.price > 0 ? (
+                                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold ml-0.5">
+                                          ({formatCurrency(addon.price)})
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {item.notes && (
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-1 flex items-center gap-1">
+                                  <span className="font-bold">Note:</span> {item.notes}
+                                </p>
+                              )}
                             </td>
                             <td className="table-td font-bold">{item.quantity}</td>
                             <td className="table-td text-gray-500">{formatCurrency(item.price)}</td>
@@ -4184,11 +4266,25 @@ export default function TablesPage() {
                               </span>
                             </div>
                             <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
-                              {round.items?.map((it, idx) => (
-                                <span key={idx} className="bg-white dark:bg-gray-800 border px-1.5 py-0.5 rounded">
-                                  {it.quantity}x {it.name}
-                                </span>
-                              ))}
+                              {round.items?.map((it, idx) => {
+                                const vName = getOrderItemVariant(it);
+                                const itAddons = getOrderItemAddons(it);
+                                return (
+                                  <span key={idx} className="bg-white dark:bg-gray-800 border px-1.5 py-0.5 rounded flex items-center gap-1 flex-wrap">
+                                    <span className="font-semibold">{it.quantity}x {it.name}</span>
+                                    {vName && (
+                                      <span className="text-[10px] font-black px-1 py-0.2 rounded bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200">
+                                        {vName}
+                                      </span>
+                                    )}
+                                    {itAddons.length > 0 && (
+                                      <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                        +{itAddons.map((a) => a.name).join(', ')}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
                         </label>
@@ -4270,10 +4366,19 @@ export default function TablesPage() {
                           )}
                         >
                           <div>
-                            <div className="font-bold text-gray-900 dark:text-white">
-                              {item.name}
-                              {item.variant?.name && <span className="ml-1 text-[11px] text-gray-500">({item.variant.name})</span>}
+                            <div className="font-bold text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                              <span>{item.name}</span>
+                              {getOrderItemVariant(item) && (
+                                <span className="text-[10px] font-black px-1.5 py-0.2 rounded-md bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border border-blue-300 dark:border-blue-700">
+                                  {getOrderItemVariant(item)}
+                                </span>
+                              )}
                             </div>
+                            {getOrderItemAddons(item).length > 0 && (
+                              <div className="text-[10px] text-emerald-700 dark:text-emerald-300 font-bold mt-0.5">
+                                +{getOrderItemAddons(item).map((a) => a.name).join(', ')}
+                              </div>
+                            )}
                             <div className="text-[10px] text-gray-400">
                               Original Qty: {item.quantity} · Price: {formatCurrency(item.price)}
                             </div>

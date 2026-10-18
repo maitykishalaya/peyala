@@ -31,6 +31,29 @@ import {
   Minimize2,
 } from 'lucide-react';
 
+// Clean formatting for table display labels (e.g. "Indoor 1", "Outdoor 2", "Table 5", or "Takeaway")
+const formatTableDisplay = (tableNum?: string | null) => {
+  if (!tableNum) return 'Order';
+  const str = String(tableNum).trim();
+  if (!str) return 'Order';
+  if (/^table\s+/i.test(str)) return str;
+  if (/^\d+$/.test(str)) return `Table ${str}`;
+  return str;
+};
+
+const getOrderTableDisplay = (order: Order) => {
+  if (!order) return 'Order';
+  const tableObj = typeof order.table === 'object' && order.table !== null ? order.table : null;
+  const rawNum = tableObj ? String((tableObj as any).tableNumber || '').trim() : (typeof order.table === 'string' ? order.table.trim() : '');
+  const cat = ((tableObj as any)?.category || order.tableCategory || '').trim();
+
+  if (!rawNum) return formatTableDisplay(cat || 'Takeaway');
+  if (cat && !rawNum.toLowerCase().includes(cat.toLowerCase())) {
+    return `${cat} ${rawNum}`;
+  }
+  return formatTableDisplay(rawNum);
+};
+
 // Web Audio API dual-frequency chime synthesizer (880Hz -> 1320Hz bell)
 const playKitchenChime = () => {
   try {
@@ -169,40 +192,15 @@ export default function KitchenDisplayPage() {
     }
   };
 
-  // Handle native browser fullscreen change events (e.g. user presses Esc or tablet gesture)
+  // Keyboard shortcut: Escape exits fullscreen mode
   useEffect(() => {
-    const handleFsChange = () => {
-      const doc = document as any;
-      const isFs = Boolean(
-        document.fullscreenElement ||
-        doc.webkitFullscreenElement ||
-        doc.mozFullScreenElement ||
-        doc.msFullscreenElement
-      );
-      if (!isFs && isFullscreen) {
-        setIsFullscreen(false);
-      }
-    };
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isFullscreen) {
         exitFullscreen();
       }
     };
-
-    document.addEventListener('fullscreenchange', handleFsChange);
-    document.addEventListener('webkitfullscreenchange', handleFsChange);
-    document.addEventListener('mozfullscreenchange', handleFsChange);
-    document.addEventListener('MSFullscreenChange', handleFsChange);
     window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFsChange);
-      document.removeEventListener('webkitfullscreenchange', handleFsChange);
-      document.removeEventListener('mozfullscreenchange', handleFsChange);
-      document.removeEventListener('MSFullscreenChange', handleFsChange);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isFullscreen]);
 
   // Cleanup on unmount (e.g. navigating to Tables POS while in fullscreen)
@@ -286,12 +284,7 @@ export default function KitchenDisplayPage() {
       if (nextStatus === 'served') {
         const targetOrder = orders.find((o) => o._id === orderId);
         const targetItem = targetOrder?.items?.find((i) => i._id === itemId);
-        const tableNum = targetOrder
-          ? typeof targetOrder.table === 'object'
-            ? targetOrder.table?.tableNumber
-            : targetOrder.table
-          : '';
-        const tableLabel = tableNum ? `Table ${tableNum}` : 'Order';
+        const tableLabel = targetOrder ? getOrderTableDisplay(targetOrder) : 'Order';
         const itemName = targetItem?.name || 'Dish';
         const itemVariant = targetItem?.variant?.name;
         const variantPart = itemVariant ? ` (${itemVariant})` : '';
@@ -303,7 +296,7 @@ export default function KitchenDisplayPage() {
           id: String(Date.now()),
           title: 'Item Ready',
           name: `${itemDisplayName} (${tableLabel})`,
-          tables: tableNum ? [String(tableNum)] : [],
+          tables: [tableLabel],
         });
 
         if (soundEnabled) {
@@ -313,8 +306,8 @@ export default function KitchenDisplayPage() {
         broadcastKdsReady({
           id: String(Date.now()),
           name: `${itemDisplayName} (${tableLabel})`,
-          tables: tableNum ? [String(tableNum)] : [],
-          tableNumber: tableNum ? String(tableNum) : undefined,
+          tables: [tableLabel],
+          tableNumber: tableLabel,
           timestamp: Date.now(),
         });
       }
@@ -333,8 +326,7 @@ export default function KitchenDisplayPage() {
       setActionLoading(order._id);
       await ordersApi.bumpKdsOrder(order._id);
       setFulfilledHistory((prev) => [order, ...prev.slice(0, 19)]);
-      const tableStr = typeof order.table === 'object' ? order.table.tableNumber : 'Order';
-      const orderLabel = `Table ${tableStr}`;
+      const orderLabel = getOrderTableDisplay(order);
       toast.success(`Ticket for ${orderLabel} completed! 🎉`);
 
       // 2-blink notification popup & sound alert for cashier notice
@@ -342,7 +334,7 @@ export default function KitchenDisplayPage() {
         id: String(Date.now()),
         title: 'Ticket Ready',
         name: `Order #${order.orderNumber || order._id.slice(-4)} (${orderLabel})`,
-        tables: [String(tableStr)],
+        tables: [orderLabel],
       });
 
       if (soundEnabled) {
@@ -352,8 +344,8 @@ export default function KitchenDisplayPage() {
       broadcastKdsReady({
         id: String(Date.now()),
         name: `Order #${order.orderNumber || order._id.slice(-4)} (${orderLabel})`,
-        tables: [String(tableStr)],
-        tableNumber: String(tableStr),
+        tables: [orderLabel],
+        tableNumber: orderLabel,
         timestamp: Date.now(),
       });
 
@@ -388,7 +380,7 @@ export default function KitchenDisplayPage() {
   const handleBatchBumpItem = async (prepItem: KdsPrepNextItem) => {
     try {
       setActionLoading(prepItem.key);
-      await ordersApi.batchBumpKdsItem(prepItem.menuItemId, prepItem.variantName);
+      await ordersApi.batchBumpKdsItem(prepItem.menuItemId);
 
       const variantPart = prepItem.variantName ? ` (${prepItem.variantName})` : '';
       const itemDisplayName = `${prepItem.name}${variantPart}`;
@@ -402,7 +394,7 @@ export default function KitchenDisplayPage() {
         title: 'Batch Ready',
         name: prepItem.name,
         variantName: prepItem.variantName,
-        tables: prepItem.tables?.map((t) => t.tableNumber),
+        tables: prepItem.tables?.map((t) => formatTableDisplay(t.tableNumber)),
       });
 
       // 2-blink audio alert to catch cashier notice
@@ -415,7 +407,7 @@ export default function KitchenDisplayPage() {
         id: String(Date.now()),
         name: prepItem.name,
         variantName: prepItem.variantName,
-        tables: prepItem.tables?.map((t) => t.tableNumber),
+        tables: prepItem.tables?.map((t) => formatTableDisplay(t.tableNumber)),
         timestamp: Date.now(),
       });
 
@@ -437,10 +429,12 @@ export default function KitchenDisplayPage() {
       setActionLoading(actionKey);
       await ordersApi.updateKdsItemStatus(tableEntry.orderId, tableEntry.itemId, 'served');
 
-      const variantPart = prepItem.variantName ? ` (${prepItem.variantName})` : '';
-      const tableLabel = tableEntry.tableNumber.startsWith('Table')
-        ? tableEntry.tableNumber
-        : `Table ${tableEntry.tableNumber}`;
+      const variantPart = tableEntry.variantName
+        ? ` (${tableEntry.variantName})`
+        : prepItem.variantName
+        ? ` (${prepItem.variantName})`
+        : '';
+      const tableLabel = formatTableDisplay(tableEntry.tableNumber);
       const itemDisplayName = `${prepItem.name}${variantPart}`;
 
       // Toast notification: "<item name> for Table X is ready"
@@ -451,7 +445,7 @@ export default function KitchenDisplayPage() {
         id: String(Date.now()),
         title: 'Item Ready',
         name: `${itemDisplayName} (${tableLabel})`,
-        tables: [String(tableEntry.tableNumber)],
+        tables: [String(tableLabel)],
       });
 
       // 2-blink audio alert to catch cashier notice
@@ -463,8 +457,8 @@ export default function KitchenDisplayPage() {
       broadcastKdsReady({
         id: String(Date.now()),
         name: `${itemDisplayName} (${tableLabel})`,
-        tables: [String(tableEntry.tableNumber)],
-        tableNumber: String(tableEntry.tableNumber),
+        tables: [String(tableLabel)],
+        tableNumber: String(tableLabel),
         timestamp: Date.now(),
       });
 
@@ -499,8 +493,8 @@ export default function KitchenDisplayPage() {
     try {
       setActionLoading(`recall-${order._id}`);
       await ordersApi.recallKdsOrder(order._id);
-      const tableStr = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
-      toast.info(`Ticket for Table ${tableStr} recalled back to active queue ↩`);
+      const orderLabel = getOrderTableDisplay(order);
+      toast.info(`Ticket for ${orderLabel} recalled back to active queue ↩`);
       await loadKdsData(true);
     } catch (err: any) {
       toast.error('Failed to recall ticket');
@@ -615,7 +609,11 @@ export default function KitchenDisplayPage() {
     }
 
     if (searchQuery.trim()) {
-      items = items.filter((i) => matchesSearch([i.name, i.variantName], searchQuery));
+      items = items.filter((i) => {
+        const variantNames = (i.variants || []).map((v: any) => v.name);
+        const tableNames = (i.tables || []).map((t: any) => t.tableNumber);
+        return matchesSearch([i.name, i.variantName, ...variantNames, ...tableNames], searchQuery);
+      });
     }
 
     if (prepSort === 'oldest') {
@@ -694,7 +692,7 @@ export default function KitchenDisplayPage() {
     const map = new Map<string, CategoryItemEntry[]>();
 
     for (const order of filteredOrders) {
-      const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+      const tableNumber = getOrderTableDisplay(order);
 
       for (const item of (order.items || [])) {
         if (!item._id || item.status === 'cancelled' || item.status === 'served') continue;
@@ -832,11 +830,26 @@ export default function KitchenDisplayPage() {
         </div>
       )}
 
+      {/* Floating Exit Full Screen Cross Button (Always accessible when scrolling deep) */}
+      {isFullscreen && (
+        <button
+          type="button"
+          onClick={exitFullscreen}
+          className="fixed top-3 right-4 z-[120] p-2 sm:px-3 sm:py-2 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-95 text-white shadow-2xl border-2 border-white/60 ring-4 ring-red-500/40 flex items-center gap-1.5 text-xs font-black cursor-pointer transition-all animate-in fade-in zoom-in-95 duration-200"
+          title="Exit Full Screen (or click Cross)"
+          aria-label="Exit Full Screen"
+        >
+          <X className="w-4 h-4 stroke-[3]" />
+          <span className="hidden sm:inline">Exit Fullscreen</span>
+        </button>
+      )}
+
       <div
         className={cn(
           "space-y-3 p-1 sm:p-2 transition-all",
-          isFullscreen && "fixed inset-0 z-[100] bg-gray-100 dark:bg-gray-950 p-2 sm:p-3 overflow-y-auto h-screen h-[100dvh] max-h-screen"
+          isFullscreen && "fixed inset-0 z-[100] bg-gray-100 dark:bg-gray-950 p-3 sm:p-5 md:p-6 pb-28 sm:pb-36 overflow-y-auto overscroll-contain h-screen h-[100dvh] max-h-screen"
         )}
+        style={isFullscreen ? { WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' } : undefined}
       >
         {/* ═══════════════════════════════════════════════════════════════ */}
         {/* TOP BAR: KDS BRANDING, CLOCK, CHIME, REFRESH & NAVIGATION */}
@@ -927,7 +940,7 @@ export default function KitchenDisplayPage() {
             >
               {isFullscreen ? (
                 <>
-                  <Minimize2 className="w-3.5 h-3.5 text-white" />
+                  <X className="w-3.5 h-3.5 text-white stroke-[2.5]" />
                   <span>Exit Full Screen</span>
                 </>
               ) : (
@@ -1142,11 +1155,22 @@ export default function KitchenDisplayPage() {
                                   {item.name}
                                 </h3>
                               </div>
-                              {item.variantName && (
+                              {item.variantName ? (
                                 <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
                                   Portion: {item.variantName}
                                 </p>
-                              )}
+                              ) : item.variants && item.variants.length > 1 ? (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {item.variants.map((v, vIdx) => (
+                                    <span
+                                      key={vIdx}
+                                      className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                                    >
+                                      {v.name || 'Standard'}: ×{v.quantity}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1187,7 +1211,7 @@ export default function KitchenDisplayPage() {
                             </span>
                           </div>
 
-                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
                             {item.tables.map((t, idx) => {
                               const itemKey = `${t.orderId}-${t.itemId}`;
                               const isItemLoading = actionLoading === itemKey;
@@ -1198,8 +1222,13 @@ export default function KitchenDisplayPage() {
                                   className="flex items-center justify-between gap-2 p-1.5 px-2.5 rounded-xl bg-gray-50 dark:bg-gray-800/80 border border-gray-200/90 dark:border-gray-700/80 hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors"
                                 >
                                   <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                    {t.variantName && (
+                                      <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border border-blue-300 dark:border-blue-700 shadow-2xs">
+                                        {t.variantName}
+                                      </span>
+                                    )}
                                     <span className="text-xs font-black text-gray-900 dark:text-gray-100">
-                                      {t.tableNumber.startsWith('Table') ? t.tableNumber : `Table ${t.tableNumber}`}
+                                      {t.variantName ? 'at ' : ''}{formatTableDisplay(t.tableNumber)}
                                     </span>
                                     <span className="text-[11px] font-black px-1.5 py-0.2 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
                                       ×{t.quantity}
@@ -1245,7 +1274,7 @@ export default function KitchenDisplayPage() {
                                     onClick={() => handleSingleTableReady(item, t)}
                                     disabled={isItemLoading || isProcessing}
                                     className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] font-black flex items-center gap-1 shadow-2xs transition-all cursor-pointer disabled:opacity-50 shrink-0"
-                                    title={`Mark ${item.name} for Table ${t.tableNumber} as Ready`}
+                                    title={`Mark ${item.name}${t.variantName ? ` (${t.variantName})` : ''} for ${formatTableDisplay(t.tableNumber)} as Ready`}
                                   >
                                     {isItemLoading ? (
                                       <RefreshCw className="w-3 h-3 animate-spin" />
@@ -1538,7 +1567,7 @@ export default function KitchenDisplayPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filteredOrders.map((order) => {
-                  const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+                  const tableNumber = getOrderTableDisplay(order);
                   const activeInfo = getTicketActiveInfo(order);
                   const elapsedMins = getElapsedMinutes(activeInfo.punchTime);
                   const urgency = getUrgencyColor(elapsedMins);
@@ -1573,7 +1602,7 @@ export default function KitchenDisplayPage() {
                             </span>
                             <div className="flex items-center gap-2 mt-0.5">
                               <h3 className="font-black text-lg sm:text-xl text-gray-900 dark:text-white leading-tight">
-                                Table {tableNumber}
+                                {tableNumber}
                               </h3>
                               {activeInfo.roundNumber > 1 && (
                                 <span className="text-[11px] font-black uppercase px-2 py-0.5 rounded-lg bg-amber-500 text-white shadow-2xs animate-pulse">
@@ -1753,7 +1782,7 @@ export default function KitchenDisplayPage() {
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-800">
                 {filteredFulfilled.map((order) => {
-                  const tableNumber = typeof order.table === 'object' ? order.table.tableNumber : 'Takeaway';
+                  const tableNumber = getOrderTableDisplay(order);
                   const servedAtTime = order.foodServedAt || order.effectiveActiveTime || order.createdAt;
 
                   return (
@@ -1761,7 +1790,7 @@ export default function KitchenDisplayPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-black text-sm sm:text-base text-gray-900 dark:text-white">
-                            Table {tableNumber}
+                            {tableNumber}
                           </span>
                           <span className="text-xs font-bold text-gray-400">
                             Token #{order.orderNumber || order._id.slice(-4)}

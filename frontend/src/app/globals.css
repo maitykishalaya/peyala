@@ -44,6 +44,10 @@
 }
 
 /* KDS Full Screen mode - hide all app shell chrome for kitchen tablet */
+body.kds-fullscreen-active {
+  overflow: hidden !important;
+}
+
 body.kds-fullscreen-active header,
 body.kds-fullscreen-active aside,
 body.kds-fullscreen-active footer {
@@ -54,4 +58,8 @@ body.kds-fullscreen-active main {
   padding: 0 !important;
   margin: 0 !important;
   overflow: hidden !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100vh !important;
 }
+

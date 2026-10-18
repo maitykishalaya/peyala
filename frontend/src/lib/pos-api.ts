@@ -443,6 +443,7 @@ export interface KdsPrepTableEntry {
   tableNumber: string;
   tokenNumber?: number;
   quantity: number;
+  variantName?: string;
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
   notes?: string;
   addons?: string[];
@@ -457,6 +458,7 @@ export interface KdsPrepNextItem {
   menuItemId: string;
   name: string;
   variantName?: string;
+  variants?: Array<{ name: string; quantity: number }>;
   isVeg: boolean;
   category?: any;
   totalQuantity: number;
