@@ -145,15 +145,29 @@ function getTableSection(table: Table | string): string {
 }
 
 // Helpers to cleanly extract variant and addons from order items
-function getOrderItemVariant(item: any): string {
+function getOrderItemVariant(item: any, order?: any): string {
   if (!item) return '';
   if (typeof item.variant === 'string' && item.variant.trim()) return item.variant.trim();
   if (item.variant && typeof item.variant === 'object' && item.variant.name) return String(item.variant.name).trim();
   if (item.variantName && typeof item.variantName === 'string') return item.variantName.trim();
+  if (order?.kotRounds && Array.isArray(order.kotRounds)) {
+    for (const round of order.kotRounds) {
+      if (Array.isArray(round.items)) {
+        const match = round.items.find((ri: any) =>
+          (ri._id && item._id && String(ri._id) === String(item._id)) ||
+          (ri.name === item.name && (ri.variantName || ri.variant?.name))
+        );
+        if (match) {
+          const v = match.variantName || match.variant?.name || (typeof match.variant === 'string' ? match.variant : '');
+          if (v && String(v).trim()) return String(v).trim();
+        }
+      }
+    }
+  }
   return '';
 }
 
-function getOrderItemAddons(item: any): Array<{ name: string; price?: number }> {
+function getOrderItemAddons(item: any, order?: any): Array<{ name: string; price?: number }> {
   if (!item) return [];
   if (Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0) {
     return item.selectedAddons
@@ -172,6 +186,21 @@ function getOrderItemAddons(item: any): Array<{ name: string; price?: number }> 
         return { name: a.name || '', price: typeof a.price === 'number' ? a.price : undefined };
       })
       .filter((a: any) => a && a.name);
+  }
+  if (order?.kotRounds && Array.isArray(order.kotRounds)) {
+    for (const round of order.kotRounds) {
+      if (Array.isArray(round.items)) {
+        const match = round.items.find((ri: any) =>
+          (ri._id && item._id && String(ri._id) === String(item._id)) ||
+          (ri.name === item.name && Array.isArray(ri.addons) && ri.addons.length > 0)
+        );
+        if (match && Array.isArray(match.addons) && match.addons.length > 0) {
+          return match.addons
+            .map((a: any) => (typeof a === 'string' ? { name: a } : { name: a?.name || '', price: a?.price }))
+            .filter((a: any) => a && a.name);
+        }
+      }
+    }
   }
   return [];
 }
@@ -3401,8 +3430,8 @@ export default function TablesPage() {
                       {activeOrder.items?.map((item: any) => {
                         const isCancelled = item.status === 'cancelled';
                         const lineTotal = item.price * item.quantity;
-                        const variantName = getOrderItemVariant(item);
-                        const itemAddons = getOrderItemAddons(item);
+                        const variantName = getOrderItemVariant(item, activeOrder);
+                        const itemAddons = getOrderItemAddons(item, activeOrder);
                         const hasMultipleRounds = Boolean(
                           (activeOrder.kotRounds && activeOrder.kotRounds.length > 1) ||
                           (item.roundNumber && item.roundNumber > 1)
