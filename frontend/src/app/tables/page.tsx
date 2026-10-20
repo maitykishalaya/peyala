@@ -22,6 +22,7 @@ import {
 import { formatCurrency, cn } from '@/lib/utils';
 import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
+import realtime from '@/lib/realtime';
 import { playTwoBlinkAlertSound, listenToKdsReady, KdsReadyEvent } from '@/lib/audio-alerts';
 import {
   BellRing,
@@ -651,10 +652,9 @@ export default function TablesPage() {
     return () => clearInterval(interval);
   }, [isPrintStation]);
 
-  // Periodic background refresh for tables status (syncs green bill status & real-time changes)
+  // Periodic background refresh for tables status (syncs green bill status & real-time changes across devices)
   useEffect(() => {
-    const tablePoller = setInterval(() => {
-      // If cashier is actively typing in a search box, customer field, or note, defer background re-render
+    const handleRefresh = () => {
       const isUserTyping =
         typeof document !== 'undefined' &&
         ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName || '');
@@ -670,9 +670,49 @@ export default function TablesPage() {
       ) {
         loadData(true);
       }
-    }, 60000);
-    return () => clearInterval(tablePoller);
+    };
+
+    const tablePoller = setInterval(handleRefresh, 4000);
+    window.addEventListener('focus', handleRefresh);
+    document.addEventListener('visibilitychange', handleRefresh);
+
+    return () => {
+      clearInterval(tablePoller);
+      window.removeEventListener('focus', handleRefresh);
+      document.removeEventListener('visibilitychange', handleRefresh);
+    };
   }, [activeView, showOrderDetailsModal, moveModal.open, orderModalLoading]);
+
+  // Instant Cross-Device Local-First Realtime Synchronization Listener
+  useEffect(() => {
+    const unsub = realtime.on('*', (event) => {
+      const type = (event.type || (event as any).event || '').toUpperCase().replace(':', '_');
+      if (
+        [
+          'ORDER_UPDATED',
+          'ORDER_CREATED',
+          'ORDER_DELETED',
+          'TABLE_UPDATED',
+          'VERSION_RESTORED',
+          'PAYMENT_SETTLED',
+          'DATA_SYNCED_FROM_CLOUD',
+          'SYNC_STATUS_CHANGED',
+        ].includes(type)
+      ) {
+        const isUserTyping =
+          typeof document !== 'undefined' &&
+          ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName || '');
+
+        if (!isUserTyping && !orderModalLoading) {
+          loadData(true);
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [orderModalLoading]);
 
   // Statistics for Table View
   const stats = useMemo(() => {
@@ -2006,8 +2046,8 @@ export default function TablesPage() {
                         </span>
                       </div>
 
-                      {/* Tables Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 sm:gap-4">
+                      {/* Tables Grid - High-density compact responsive grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
                         {secTables.map((table) => {
                           const isOccupied = table.status === 'occupied';
                           const isAvailable = table.status === 'available';
@@ -2042,7 +2082,7 @@ export default function TablesPage() {
                                 }
                               }}
                               className={cn(
-                                'rounded-2xl p-3.5 sm:p-4 transition-all duration-150 cursor-pointer relative flex flex-col justify-between group min-h-[145px] sm:min-h-[155px] select-none shadow-xs hover:shadow-md',
+                                'rounded-xl p-2 sm:p-2.5 transition-all duration-150 cursor-pointer relative flex flex-col justify-between group min-h-[105px] sm:min-h-[115px] select-none shadow-xs hover:shadow-md',
                                 // Blank Table
                                 isAvailable &&
                                   'border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 hover:border-red-400 hover:shadow-md',
@@ -2069,7 +2109,7 @@ export default function TablesPage() {
                                   {isOccupied && kotMins !== null ? (
                                     <span
                                       className={cn(
-                                        'inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded shadow-2xs',
+                                        'inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shadow-2xs',
                                         isRunningKOT
                                           ? 'bg-amber-200/90 text-amber-950 border border-amber-300'
                                           : isBilled
@@ -2081,137 +2121,125 @@ export default function TablesPage() {
                                       title={`Time since latest KOT: ${kotMins} min`}
                                     >
                                       <Clock className="w-2.5 h-2.5" />
-                                      <span>{kotMins <= 0 ? '< 1 Min' : `${kotMins} Min`}</span>
+                                      <span>{kotMins <= 0 ? '< 1m' : `${kotMins}m`}</span>
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] text-gray-400 font-medium">Ready</span>
+                                    <span className="text-[9px] text-gray-400 font-medium">Ready</span>
                                   )}
 
                                   {/* Table Status Badge */}
                                   <div>
                                     {isAvailable && (
-                                      <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                                      <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400">
                                         Blank
                                       </span>
                                     )}
                                     {isRunningKOT && (
-                                      <span className="text-[9px] font-black uppercase tracking-wider bg-amber-300/80 text-amber-950 px-1.5 py-0.5 rounded border border-amber-400 flex items-center gap-1 shadow-2xs">
+                                      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider bg-amber-300/80 text-amber-950 px-1.5 py-0.5 rounded border border-amber-400 flex items-center gap-1 shadow-2xs">
                                         <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse" />
                                         KOT Active
                                       </span>
                                     )}
                                     {isRunningBlue && (
-                                      <span className="text-[9px] font-black uppercase tracking-wider bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded border border-blue-300 flex items-center gap-1 shadow-2xs">
+                                      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded border border-blue-300 flex items-center gap-1 shadow-2xs">
                                         <Utensils className="w-2.5 h-2.5 text-blue-700" />
-                                        Food Served
+                                        Served
                                       </span>
                                     )}
                                     {isBilled && (
-                                      <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-950 px-1.5 py-0.5 rounded border border-emerald-400 flex items-center gap-1 shadow-2xs">
+                                      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-950 px-1.5 py-0.5 rounded border border-emerald-400 flex items-center gap-1 shadow-2xs">
                                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                                        Bill Given
+                                        Billed
                                       </span>
                                     )}
                                     {isPaid && (
-                                      <span className="text-[9px] font-black uppercase tracking-wider bg-orange-200 text-orange-900 px-1.5 py-0.2 rounded">
+                                      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider bg-orange-200 text-orange-900 px-1.5 py-0.2 rounded">
                                         Paid
                                       </span>
                                     )}
                                   </div>
                                 </div>
 
-                                {/* Table Name, Capacity & Direct "View KOT" Button */}
-                                <div className="mt-2 flex items-center justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <h3 className="font-black text-base sm:text-lg tracking-tight leading-tight truncate">
-                                      {table.tableNumber}
-                                    </h3>
-                                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold">
-                                      {table.capacity || 4} Seats
-                                    </span>
-                                  </div>
-
-                                  {/* Dedicated Eye / View KOT button for running tables */}
-                                  {isOccupied && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleViewOrderDetails(table, e)}
-                                      className="px-2.5 py-1.5 rounded-xl bg-gray-900/10 dark:bg-white/15 hover:bg-gray-900/20 dark:hover:bg-white/25 text-gray-900 dark:text-white font-extrabold text-xs flex items-center gap-1.5 shadow-2xs border border-black/10 dark:border-white/15 transition-all active:scale-95 cursor-pointer shrink-0"
-                                      title="View Whole KOT & Order Details"
-                                    >
-                                      <Eye className="w-4 h-4 text-gray-900 dark:text-white stroke-[2.5]" />
-                                      <span>View KOT</span>
-                                    </button>
-                                  )}
+                                {/* Table Name & Capacity - FULL WIDTH, NEVER CUT OFF */}
+                                <div className="mt-1 flex items-baseline justify-between gap-1">
+                                  <h3
+                                    className="font-black text-sm sm:text-base tracking-tight leading-tight text-gray-950 dark:text-white truncate"
+                                    title={table.tableNumber}
+                                  >
+                                    {table.tableNumber}
+                                  </h3>
+                                  <span className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold shrink-0">
+                                    {table.capacity || 4}s
+                                  </span>
                                 </div>
                               </div>
 
                               {/* Middle / Bottom Info */}
-                              <div className="mt-2.5 pt-2 border-t border-black/10 dark:border-white/10 flex items-center justify-between gap-2 flex-wrap">
+                              <div className="mt-1.5 pt-1.5 border-t border-black/10 dark:border-white/10 flex items-center justify-between gap-1">
                                 {isOccupied && order ? (
                                   <div className="flex flex-col min-w-0">
-                                    <span className="text-sm sm:text-base font-black text-gray-950 dark:text-white leading-tight">
+                                    <span className="text-xs sm:text-sm font-black text-gray-950 dark:text-white leading-tight">
                                       {formatCurrency(order.total)}
                                     </span>
                                     {order.items && (
-                                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
-                                        {order.items.filter((i) => i.status !== 'cancelled').length} items
+                                      <span className="text-[9px] text-gray-500 dark:text-gray-400 font-medium leading-none">
+                                        {order.items.filter((i) => i.status !== 'cancelled').length} itm
                                       </span>
                                     )}
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-gray-400 font-semibold">
+                                  <span className="text-[11px] text-gray-400 font-medium">
                                     Tap to order
                                   </span>
                                 )}
 
                                 {/* Bottom Quick Action Icons */}
-                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                  {/* If Billed: Green [ 💵 Settle ] button */}
+                                <div className="flex items-center gap-1 flex-wrap justify-end">
+                                  {/* If Billed: Green [ Settle ] button */}
                                   {isBilled && (
                                     <button
                                       type="button"
                                       onClick={(e) => handleViewOrderDetails(table, e)}
-                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                      className="px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
                                       title="Enter Payment Amount & Settle Table"
                                     >
-                                      <Wallet className="w-3.5 h-3.5" />
+                                      <Wallet className="w-3 h-3" />
                                       <span>Settle</span>
                                     </button>
                                   )}
 
-                                  {/* If Food Served (Blue): Quick [ 🖨️ Bill ] button */}
+                                  {/* If Food Served (Blue): Quick [ Bill ] button */}
                                   {isRunningBlue && (
                                     <button
                                       type="button"
                                       onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                      className="px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
                                       title="Generate & Print Customer Bill (Turns Table Green)"
                                     >
-                                      <Receipt className="w-3.5 h-3.5" />
+                                      <Receipt className="w-3 h-3" />
                                       <span>Bill</span>
                                     </button>
                                   )}
 
-                                  {/* If KOT Active (Yellow): Optional [ 🍽️ Served ] AND Direct [ 🖨️ Bill ] buttons */}
+                                  {/* If KOT Active (Yellow): Optional [ Served ] AND Direct [ Bill ] buttons */}
                                   {isRunningKOT && (
                                     <>
                                       <button
                                         type="button"
                                         onClick={(e) => handleQuickMarkServed(table, e)}
-                                        className="px-2 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                        className="px-1.5 py-0.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
                                         title="Optional: Mark Food as Served to Customer"
                                       >
-                                        <Utensils className="w-3.5 h-3.5" />
-                                        <span>Served</span>
+                                        <Utensils className="w-3 h-3" />
+                                        <span className="hidden sm:inline">Served</span>
                                       </button>
                                       <button
                                         type="button"
                                         onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
-                                        title="Generate & Print Customer Bill directly (Skip Food Served)"
+                                        className="px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                                        title="Generate & Print Customer Bill directly"
                                       >
-                                        <Receipt className="w-3.5 h-3.5" />
+                                        <Receipt className="w-3 h-3" />
                                         <span>Bill</span>
                                       </button>
                                     </>
@@ -2224,10 +2252,10 @@ export default function TablesPage() {
                                         <button
                                           type="button"
                                           onClick={(e) => handleQuickPrintFromTable(table, e)}
-                                          className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
+                                          className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
                                           title="Reprint Customer Bill"
                                         >
-                                          <Printer className="w-4 h-4" />
+                                          <Printer className="w-3.5 h-3.5" />
                                         </button>
                                       )}
 
@@ -2235,20 +2263,20 @@ export default function TablesPage() {
                                       <button
                                         type="button"
                                         onClick={(e) => handleOpenMoveModal(table, e)}
-                                        className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
+                                        className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-gray-700 dark:text-gray-200 cursor-pointer"
                                         title="Move KOT / Transfer Table"
                                       >
-                                        <ArrowRightLeft className="w-4 h-4" />
+                                        <ArrowRightLeft className="w-3.5 h-3.5" />
                                       </button>
 
-                                      {/* View Items (Eye) Icon */}
+                                      {/* View Items / Eye Icon */}
                                       <button
                                         type="button"
                                         onClick={(e) => handleViewOrderDetails(table, e)}
-                                        className="p-1.5 rounded-lg bg-black/10 dark:bg-white/15 hover:bg-black/20 dark:hover:bg-white/25 text-gray-800 dark:text-gray-100 transition-colors cursor-pointer flex items-center gap-1"
-                                        title="View Ordered Items & Settle Bill"
+                                        className="p-1 rounded-md bg-black/10 dark:bg-white/15 hover:bg-black/20 dark:hover:bg-white/25 text-gray-800 dark:text-gray-100 transition-colors cursor-pointer flex items-center"
+                                        title="View Whole KOT & Order Details"
                                       >
-                                        <Eye className="w-4 h-4 stroke-[2.5]" />
+                                        <Eye className="w-3.5 h-3.5 stroke-[2.5]" />
                                       </button>
                                     </>
                                   )}
@@ -2260,7 +2288,7 @@ export default function TablesPage() {
                                         e.stopPropagation();
                                         openEditTable(table);
                                       }}
-                                      className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg cursor-pointer"
+                                      className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-md cursor-pointer"
                                       title="Edit Table"
                                     >
                                       <Pencil className="w-3.5 h-3.5" />

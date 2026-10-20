@@ -95,21 +95,47 @@ router.get('/summary', async (req, res) => {
 
     // Yesterday's purchases (all entries, summed)
     const yesterdayPurchasesAgg = await PurchaseEntry.aggregate([
-      { $match: { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } } },
+      {
+        $match: {
+          $or: [
+            { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+            { createdAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+          ],
+        },
+      },
       { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
     ]);
-    const yesterdayPurchases = await PurchaseEntry.find({ date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } })
+    const yesterdayPurchases = await PurchaseEntry.find({
+      $or: [
+        { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+        { createdAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
+      ],
+    })
       .populate('supplier', 'name')
-      .select('supplier totalAmount isPaid');
+      .select('supplier totalAmount isPaid date createdAt')
+      .sort({ createdAt: -1, date: -1, _id: -1 });
 
     // Today's purchases (all entries, summed)
     const todayPurchasesAgg = await PurchaseEntry.aggregate([
-      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
+      {
+        $match: {
+          $or: [
+            { date: { $gte: todayRange.start, $lte: todayRange.end } },
+            { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
+          ],
+        },
+      },
       { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
     ]);
-    const todayPurchases = await PurchaseEntry.find({ date: { $gte: todayRange.start, $lte: todayRange.end } })
+    const todayPurchases = await PurchaseEntry.find({
+      $or: [
+        { date: { $gte: todayRange.start, $lte: todayRange.end } },
+        { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
+      ],
+    })
       .populate('supplier', 'name')
-      .select('supplier totalAmount isPaid');
+      .select('supplier totalAmount isPaid date createdAt')
+      .sort({ createdAt: -1, date: -1, _id: -1 });
 
     // 3. Today's sales & expenses in IST
     const todaySales = await SalesEntry.findOne({
@@ -178,7 +204,14 @@ router.get('/summary', async (req, res) => {
 
     // Today's expenses by category
     const todayExpenses = await Payment.aggregate([
-      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
+      {
+        $match: {
+          $or: [
+            { date: { $gte: todayRange.start, $lte: todayRange.end } },
+            { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
+          ],
+        },
+      },
       { $group: { _id: '$category', total: { $sum: '$amount' } } }
     ]);
 

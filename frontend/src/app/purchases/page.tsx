@@ -25,7 +25,7 @@ import Modal from '@/components/ui/Modal';
 import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
-import { formatCurrency, formatDate, today, UNITS, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, today, UNITS, cn, clearFinancialCaches } from '@/lib/utils';
 import { matchesSearch, sortBySearchRelevance, isExactMatch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
@@ -469,6 +469,7 @@ export default function PurchasesPage() {
         await purchasesApi.create(payload);
         toast.success('Purchase created successfully');
       }
+      clearFinancialCaches();
       setModal(false);
       setEditingPurchase(null);
       setForm(blankPurchaseForm());
@@ -488,6 +489,7 @@ export default function PurchasesPage() {
     if (!confirm('Delete this purchase and reverse inventory?')) return;
     try {
       await purchasesApi.delete(id);
+      clearFinancialCaches();
       toast.success('Purchase deleted and inventory reversed');
       load();
     } catch (err: any) {
@@ -503,6 +505,7 @@ export default function PurchasesPage() {
     setClearDueSaving(true);
     try {
       await purchasesApi.clearDue(clearDueModal._id, clearDueForm);
+      clearFinancialCaches();
       toast.success('Due payment cleared successfully');
       setClearDueModal(null);
       load();

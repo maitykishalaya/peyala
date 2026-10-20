@@ -10,4 +10,7 @@ const menuCategorySchema = new mongoose.Schema({
 
 menuCategorySchema.index({ isActive: 1, sortOrder: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+menuCategorySchema.plugin(syncPlugin, { modelName: 'MenuCategory' });
+
 module.exports = mongoose.model('MenuCategory', menuCategorySchema);

@@ -8,6 +8,7 @@ import Walkthrough from '@/components/ui/Walkthrough';
 import ThermalPreviewModal from '@/components/ui/ThermalPreviewModal';
 import WastagePromptBanner from '@/components/ui/WastagePromptBanner';
 import OfflineSyncBanner from '@/components/ui/OfflineSyncBanner';
+import LocalServerStatus from '@/components/LocalServerStatus';
 import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
@@ -369,6 +370,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </h1>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">Mobile friendly business dashboard</p>
           </div>
+
+          {/* Local Server & Sync Health Status Indicator */}
+          <LocalServerStatus />
 
           {/* Dark Mode Toggle */}
           <button onClick={() => setDark(!dark)} className="p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" title="Toggle theme">

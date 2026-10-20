@@ -17,6 +17,7 @@ import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
+import realtime from '@/lib/realtime';
 import { Plus, ArrowRightLeft, Pencil, Trash2, Wallet, Building2, Smartphone, MoreHorizontal, Settings2, RefreshCw } from 'lucide-react';
 
 const ACCOUNTS_CACHE_KEY = 'peyala_accounts_cache_v1';
@@ -119,7 +120,7 @@ export default function AccountsPage() {
     }
   };
 
-  // Run load() on mount — show cache from browser storage, only fetch on initial visit or manual refresh
+  // Run load() on mount — show cache immediately, then fetch fresh data from API (stale-while-revalidate)
   useEffect(() => {
     const cached = readCache();
     if (cached?.accounts) {
@@ -129,10 +130,28 @@ export default function AccountsPage() {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setLoading(false);
-      // Only fetch upon manually clicking refresh; otherwise only show browser storage data
-      return;
     }
     load();
+  }, []);
+
+  // Listen for real-time account/transfer updates and background sync events
+  useEffect(() => {
+    const unsub = realtime.on('*', (event) => {
+      const type = (event.type || (event as any).event || '').toUpperCase().replace(':', '_');
+      if (
+        [
+          'ACCOUNT_UPDATED',
+          'TRANSFER_UPDATED',
+          'PAYMENT_UPDATED',
+          'DATA_SYNCED_FROM_CLOUD',
+          'SYNC_STATUS_CHANGED',
+        ].includes(type)
+      ) {
+        load();
+      }
+    });
+
+    return () => unsub();
   }, []);
 
   // ── When account type changes, auto-suggest payment modes ───────

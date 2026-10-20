@@ -17,7 +17,7 @@ import Modal from '@/components/ui/Modal';
 import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
 import { paymentsApi, accountsApi, suppliersApi, categoriesApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
-import { formatCurrency, formatDate, today, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, today, cn, clearFinancialCaches } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, Search, X } from 'lucide-react';
@@ -220,6 +220,7 @@ export default function PaymentsPage() {
         await paymentsApi.create(payload);
         toast.success(`Payment to "${form.payee}" recorded successfully`);
       }
+      clearFinancialCaches();
       setModal(null);
       setForm(blank());
       setAllowedModes([]);
@@ -237,6 +238,7 @@ export default function PaymentsPage() {
     if (!confirm('Delete this payment? Account balance will be restored.')) return;
     try {
       await paymentsApi.delete(id);
+      clearFinancialCaches();
       toast.success('Payment deleted and account balance restored');
       load();
     } catch (err: any) {

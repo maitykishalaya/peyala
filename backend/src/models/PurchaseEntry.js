@@ -32,4 +32,7 @@ purchaseEntrySchema.index({ date: -1 });
 purchaseEntrySchema.index({ supplier: 1, date: -1 });
 purchaseEntrySchema.index({ 'items.item': 1, date: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+purchaseEntrySchema.plugin(syncPlugin, { modelName: 'PurchaseEntry' });
+
 module.exports = mongoose.model('PurchaseEntry', purchaseEntrySchema);

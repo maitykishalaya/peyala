@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+require('./MenuItem');
+require('./Addon');
+require('./Table');
+require('./User');
 
 const orderItemSchema = new mongoose.Schema({
   menuItem: { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem', required: true },
@@ -170,4 +174,8 @@ orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discoun
 orderSchema.index({ table: 1, status: 1 });
 orderSchema.index({ createdAt: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+orderSchema.plugin(syncPlugin, { modelName: 'Order' });
+
 module.exports = mongoose.model('Order', orderSchema);
+

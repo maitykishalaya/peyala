@@ -102,4 +102,7 @@ accountSchema.pre('save', function (next) {
 // Almost every route queries Account.find({ isActive: true }).
 accountSchema.index({ isActive: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+accountSchema.plugin(syncPlugin, { modelName: 'Account' });
+
 module.exports = mongoose.model('Account', accountSchema);

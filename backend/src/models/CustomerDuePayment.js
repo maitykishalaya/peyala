@@ -44,4 +44,7 @@ const customerDuePaymentSchema = new mongoose.Schema({
 
 customerDuePaymentSchema.index({ customer: 1, date: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+customerDuePaymentSchema.plugin(syncPlugin, { modelName: 'CustomerDuePayment' });
+
 module.exports = mongoose.model('CustomerDuePayment', customerDuePaymentSchema);

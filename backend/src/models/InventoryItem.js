@@ -32,4 +32,7 @@ inventoryItemSchema.set('toJSON', { virtuals: true });
 inventoryItemSchema.index({ isActive: 1, category: 1 });
 inventoryItemSchema.index({ name: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+inventoryItemSchema.plugin(syncPlugin, { modelName: 'InventoryItem' });
+
 module.exports = mongoose.model('InventoryItem', inventoryItemSchema);

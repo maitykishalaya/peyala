@@ -56,4 +56,7 @@ const wastageSchema = new mongoose.Schema(
 wastageSchema.index({ date: -1 });
 wastageSchema.index({ itemName: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+wastageSchema.plugin(syncPlugin, { modelName: 'Wastage' });
+
 module.exports = mongoose.model('Wastage', wastageSchema);

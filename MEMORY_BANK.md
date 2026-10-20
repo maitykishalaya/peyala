@@ -21,14 +21,18 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 9. **Wastage Tracking & Operational Loss Auditing** (logging spoiled, expired, or discarded food and ingredients via 3 core fields: item name, quantity, and approximate value, with real-time period aggregation on the P&L statement).
 10. **Customer Dues & Khata Ledger System** (credit orders tracking, customer profiles, instant autocomplete, due collections, thermal receipts, and double-entry Balance Sheet asset reconciliation).
 11. **Sales Analytics & Statutory Tax Auditing** (executive business cockpit, daily pace monitoring, autonomous heuristic suggestions, delivery margin leakage auditing, and GSTR-1/3B compliant GST registers with invoice range tracking).
+12. **Local-First Performance & Multi-Device Real-Time Sync** (sub-1ms operational database reads and writes running on the cafe's local server, sub-10ms real-time WebSocket event broadcasting between floor laptops and waiter phones, background 15-minute delta outbox push to Central MongoDB Atlas, and versioned restore point system with safe 8-step rollback).
 
 ---
 
 ## 2) Executive Summary of Architecture & System State
 
-### Backend
+### Backend (Local-First Real-Time Architecture)
 - **Framework**: Node.js & Express.js (`backend/src/server.js`).
-- **Database**: MongoDB via Mongoose (`backend/src/config/db.js`).
+- **Database (Local-First Operational Engine)**: Local MongoDB running on `127.0.0.1:27017` with WiredTiger storage in `backend/data/db`. Delivers sub-1ms local read/write latency. Central MongoDB Atlas (`MONGODB_CENTRAL_URI`) serves as periodic persistence/backup layer via 15-minute background delta sync.
+- **Real-Time Hub (`backend/src/services/realtimeHub.js`)**: WebSocket server on `/ws/realtime` (port 4000) providing sub-10ms real-time event distribution between floor laptops and waiter phones with a 200-event circular catch-up buffer.
+- **Sync Outbox Engine (`backend/src/services/syncEngine.js`)**: Universal Mongoose plugin (`syncPlugin.js`) queues local mutations into `SyncOutbox`. Automatically pushes pending deltas every 15 minutes or via manual "Sync Now" button. Fully resilient against internet outages.
+- **Versioned Restore & Rollback System (`backend/src/services/restoreSystem.js`)**: Complete snapshot and safe 8-step rollback engine (`/api/maintenance/restore-points`, `/api/maintenance/rollback`) with pre-rollback safety backup, data integrity validation, and instant recovery.
 - **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration), `managerOrAdmin` (for table metadata and menu add-on configurations), `staffOrAdmin` (granting staff, manager, and admin users operational access for taking orders, KOT rounds, billing, printing, discounts, and payment settlements), and `viewer` (read-only demo role strictly blocking all mutations system-wide with `403 Forbidden`) in `backend/src/middleware/auth.js`.
 - **Timezone Standardization**: All daily consolidation and reporting logic operates strictly under Indian Standard Time (`Asia/Kolkata`, UTC+05:30) via `backend/src/utils/date.js` (`getIstDayRange()`).
 

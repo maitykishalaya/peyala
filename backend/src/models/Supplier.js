@@ -18,4 +18,7 @@ supplierSchema.virtual('outstanding').get(function() {
 
 supplierSchema.set('toJSON', { virtuals: true });
 
+const syncPlugin = require('../utils/syncPlugin');
+supplierSchema.plugin(syncPlugin, { modelName: 'Supplier' });
+
 module.exports = mongoose.model('Supplier', supplierSchema);

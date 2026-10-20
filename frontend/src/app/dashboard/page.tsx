@@ -6,6 +6,7 @@ import StatCard from '@/components/dashboard/StatCard';
 import { dashboardApi, ownerNoteApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
+import { realtime } from '@/lib/realtime';
 import { TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle, CreditCard, TrendingDown, RefreshCw, ShieldAlert, ArrowRight, EyeOff } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis,
@@ -44,6 +45,8 @@ export default function DashboardPage() {
   const [ownerNote, setOwnerNote] = useState<string>('');
   const [summaryPeriod, setSummaryPeriod] = useState<'today' | 'yesterday'>('yesterday');
 
+  const [userSelectedPeriod, setUserSelectedPeriod] = useState(false);
+
   const fetchFresh = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
@@ -67,6 +70,18 @@ export default function DashboardPage() {
         setData(d);
         writeCache(userRole, { ...d, ownerNote: noteText });
         setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+        // If today has data and user hasn't manually chosen yesterday, switch to today
+        if (!userSelectedPeriod && d.today) {
+          const hasTodayActivity = Boolean(
+            d.today.sales?.total > 0 ||
+            d.today.purchases?.count > 0 ||
+            (Array.isArray(d.today.purchases?.entries) && d.today.purchases.entries.length > 0)
+          );
+          if (hasTodayActivity) {
+            setSummaryPeriod('today');
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -83,7 +98,7 @@ export default function DashboardPage() {
       setOwnerNote(note);
     }).catch(() => {});
 
-    // 2. Read local dashboard cache scoped to user role
+    // 2. Read local dashboard cache for instant render (stale-while-revalidate)
     const cached = readCache(userRole);
     if (cached?.data) {
       setData(cached.data);
@@ -94,11 +109,34 @@ export default function DashboardPage() {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setLoading(false);
-      return;
     }
 
-    // 3. Only hit server on initial load if no cache exists
+    // 3. Always fetch live data from server/database on load
     fetchFresh();
+
+    // 4. Real-time live updates: listen to cloud sync, payments, purchases, accounts, orders
+    const handleLiveUpdate = () => {
+      fetchFresh();
+    };
+
+    const unsubs = [
+      realtime.on('DATA_SYNCED_FROM_CLOUD', handleLiveUpdate),
+      realtime.on('ACCOUNT_UPDATED', handleLiveUpdate),
+      realtime.on('PURCHASE_CREATED', handleLiveUpdate),
+      realtime.on('PAYMENT_CREATED', handleLiveUpdate),
+      realtime.on('ORDER_CREATED', handleLiveUpdate),
+      realtime.on('ORDER_UPDATED', handleLiveUpdate),
+    ];
+
+    const onSalesUpdate = () => fetchFresh();
+    window.addEventListener('peyala_sales_updated', onSalesUpdate);
+    window.addEventListener('focus', onSalesUpdate);
+
+    return () => {
+      unsubs.forEach(unsub => unsub());
+      window.removeEventListener('peyala_sales_updated', onSalesUpdate);
+      window.removeEventListener('focus', onSalesUpdate);
+    };
   }, [userRole]);
 
   if (loading) return (
@@ -213,7 +251,10 @@ export default function DashboardPage() {
             <div className="inline-flex items-center bg-black/20 backdrop-blur-xs p-1 rounded-xl border border-white/20 shadow-inner self-start sm:self-auto">
               <button
                 type="button"
-                onClick={() => setSummaryPeriod('yesterday')}
+                onClick={() => {
+                  setUserSelectedPeriod(true);
+                  setSummaryPeriod('yesterday');
+                }}
                 className={cn(
                   "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
                   summaryPeriod === 'yesterday'
@@ -225,7 +266,10 @@ export default function DashboardPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setSummaryPeriod('today')}
+                onClick={() => {
+                  setUserSelectedPeriod(true);
+                  setSummaryPeriod('today');
+                }}
                 className={cn(
                   "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
                   summaryPeriod === 'today'

@@ -1,6 +1,6 @@
 {
   "name": "peyala-v8",
-  "version": "10.0.0",
+  "version": "11.0.0",
   "description": "Peyala Restaurant Operations & POS Management Suite",
   "scripts": {
     "start": "node -e \"if (process.platform === 'win32' && !process.env.CI) { require('child_process').spawn('cmd.exe', ['/c', 'start-peyala-app.bat'], { stdio: 'inherit' }); } else { require('child_process').spawn('npm', ['run', 'frontend'], { stdio: 'inherit', shell: true }); }\"",

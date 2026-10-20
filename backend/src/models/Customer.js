@@ -40,4 +40,7 @@ const customerSchema = new mongoose.Schema({
 customerSchema.index({ phone: 1, name: 1 });
 customerSchema.index({ totalDue: -1, isActive: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+customerSchema.plugin(syncPlugin, { modelName: 'Customer' });
+
 module.exports = mongoose.model('Customer', customerSchema);

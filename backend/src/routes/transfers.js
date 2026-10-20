@@ -23,8 +23,8 @@ router.post('/', async (req, res) => {
     if (!from || from.currentBalance < amount) return res.status(400).json({ message: 'Insufficient balance' });
 
     const transfer = await Transfer.create({ fromAccount, toAccount, amount, description, date, createdBy: req.user._id });
-    await Account.findByIdAndUpdate(fromAccount, { $inc: { currentBalance: -amount } });
-    await Account.findByIdAndUpdate(toAccount, { $inc: { currentBalance: amount } });
+    await Account.findByIdAndUpdate(fromAccount, { $inc: { currentBalance: -amount } }, { new: true });
+    await Account.findByIdAndUpdate(toAccount, { $inc: { currentBalance: amount } }, { new: true });
 
     const populated = await Transfer.findById(transfer._id).populate('fromAccount', 'name').populate('toAccount', 'name');
     res.status(201).json(populated);

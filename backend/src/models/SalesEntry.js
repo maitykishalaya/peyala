@@ -90,4 +90,7 @@ salesEntrySchema.statics.calcTotals = function(data) {
 // Dashboard and reports constantly filter/aggregate SalesEntry by date range.
 salesEntrySchema.index({ date: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+salesEntrySchema.plugin(syncPlugin, { modelName: 'SalesEntry' });
+
 module.exports = mongoose.model('SalesEntry', salesEntrySchema);

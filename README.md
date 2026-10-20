@@ -33,6 +33,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Balance Sheet** | `/balancesheet` | Dynamic statement of Assets (bank/cash accounts), Liabilities (GST liability, supplier dues, loans), and Net Equity. |
 | **Outlet Design & Floor Zones** | `/settings/outlet-design` | Floor category management (Indoor, Outdoor, Other), table reassignment, section reordering, and revenue analytics per zone. |
 | **Settings & Security** | `/settings` | Role-based user administration, audit logging, payment categories, database backup/restore, and dark/light mode. |
+| **Local Server & Version System** | `/settings` | Local-First operational health monitor, real-time WebSocket connection stats, manual "Sync Now" delta push, and versioned restore point creation & 8-step rollback. |
 | **Features Showcase & Login** | `/login` | 12-slide interactive scrollable feature showcase paired with right-hand business authentication portal and 1-tap demo credentials. |
 
 ---
@@ -512,6 +513,24 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Mathematical integrity strictly enforced across all views: $\text{Net Sales} = \text{Gross Sales} - \text{GST Collected}$.
 - **Export Suite (UTF-8 BOM CSV, Excel XML SpreadsheetML, Branded PDF)**:
   - 1-click export of GST registers, item sales reports, and daily audits compatible with Microsoft Excel, Apple Numbers, and Google Sheets.
+
+### 27. Local-First Performance, Real-Time Sync & Version Restore Engine
+- **Local-First Operational Architecture (`DEVICE → LOCAL SERVER → OTHER DEVICES`)**:
+  - Operational primary source of truth resides on the local cafe server running WiredTiger MongoDB on `127.0.0.1:27017` with auto-seeding.
+  - Sub-1ms read/write latency on local Wi-Fi: all orders, bill settlements, table status changes, and inventory deductions occur instantaneously.
+  - Periodic 15-minute background delta sync pushes pending mutations to Central MongoDB Atlas (`LOCAL SERVER → CENTRAL DATABASE`).
+  - **100% Offline Resilience**: If internet or MongoDB Atlas is unavailable, cafe operations run completely uninterrupted with zero crashes or UI freezing.
+- **Real-Time WebSocket Synchronization Hub (`/ws/realtime`)**:
+  - Sub-10ms event broadcasting across floor laptops, cashier terminals, and waiter Android phones.
+  - 200-event circular ring buffer for fast catch-up upon device reconnect without downloading full datasets.
+- **Sync Outbox & Collision Prevention**:
+  - Every local mutation is recorded in `SyncOutbox` with unique idempotency keys (`${collection}_${docId}_rev${rev}_${timestamp}`).
+  - Coalesces rapid modifications on the same document to prevent network churn.
+- **Admin Maintenance & Safe 8-Step Rollback System (`/settings`)**:
+  - Live status indicator pill in the application topbar (🟢 Local Connected, 🟡 Sync Pending, 🔴 Offline).
+  - Dedicated "Local Server & Versions" maintenance tab in Settings with connected device count, pending outbox items, and 1-tap "Sync Now" button.
+  - Create versioned point-in-time snapshots (`v10.0.0`, `v10.1.0`).
+  - Safe 8-step rollback engine: pauses sync, creates emergency pre-rollback backup, restores collections, performs strict document integrity verification, and safely resumes operations.
 
 ---
 

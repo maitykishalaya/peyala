@@ -16,4 +16,7 @@ const transferSchema = new mongoose.Schema({
 transferSchema.index({ fromAccount: 1, date: -1 });
 transferSchema.index({ toAccount: 1, date: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+transferSchema.plugin(syncPlugin, { modelName: 'Transfer' });
+
 module.exports = mongoose.model('Transfer', transferSchema);

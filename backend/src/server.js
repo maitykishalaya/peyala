@@ -36,6 +36,10 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir));
 
+const http = require('http');
+const realtimeHub = require('./services/realtimeHub');
+const localDbRunner = require('./services/localDbRunner');
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/accounts', require('./routes/accounts'));
@@ -63,12 +67,15 @@ app.use('/api/expense-leaks', require('./routes/expenseLeak'));
 app.use('/api/wastage', require('./routes/wastage'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/sync', require('./routes/sync'));
+app.use('/api/maintenance', require('./routes/maintenance'));
 
 // Health check endpoints for Render, Docker, and local pinging
 app.get(['/health', '/api/health'], (req, res) =>
   res.json({
     status: 'ok',
     app: 'Peyala Business Admin',
+    mode: 'local-first',
     timestamp: new Date().toISOString(),
   })
 );
@@ -78,8 +85,9 @@ app.get('/', (req, res) =>
   res.json({
     status: 'ok',
     app: 'Peyala Business Admin - Backend API',
+    mode: 'local-first',
     health: '/health',
-    version: '1.0.0',
+    version: '10.0.0',
   })
 );
 
@@ -90,4 +98,24 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`🍵 Peyala API running on port ${PORT}`));
+const server = http.createServer(app);
+
+// Initialize Realtime WebSocket Hub on same port
+realtimeHub.init(server);
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🍵 Peyala Local-First API & Realtime Hub running on port ${PORT} (0.0.0.0)`);
+});
+
+// Clean shutdown handler
+const gracefulShutdown = async () => {
+  console.log('[Peyala Server] Shutting down gracefully...');
+  server.close(async () => {
+    try {
+      await localDbRunner.stop();
+    } catch (_) {}
+    process.exit(0);
+  });
+};
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);

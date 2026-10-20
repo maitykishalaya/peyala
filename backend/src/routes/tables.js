@@ -2,6 +2,7 @@ const router = require('express').Router();
 const Table = require('../models/Table');
 const TableCategory = require('../models/TableCategory');
 const Order = require('../models/Order');
+const MenuItem = require('../models/MenuItem');
 const { auth, adminOnly, managerOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange, getIstFiscalQuarter } = require('../utils/date');
@@ -410,36 +411,55 @@ router.get('/analytics/outlet-sales', async (req, res) => {
 // GET /api/tables — List all tables
 router.get('/', async (req, res) => {
   try {
-    const tables = await Table.find()
-      .populate({
-        path: 'activeOrder',
-        populate: [
-          { path: 'items.menuItem', select: 'name price isVeg' },
-          { path: 'createdBy', select: 'name' },
-        ],
-      })
-      .sort({ tableNumber: 1 })
+    const tables = await Table.find().sort({ tableNumber: 1 }).lean();
+
+    // Query all active orders currently open/running across all tables (Single Source of Truth)
+    const activeOrders = await Order.find({
+      status: { $nin: ['paid', 'cancelled'] },
+    })
+      .populate('items.menuItem', 'name price isVeg')
+      .populate('createdBy', 'name')
+      .sort({ createdAt: -1 })
       .lean();
 
-    // Auto-heal any tables whose activeOrder points to a cancelled, paid, or missing order
-    const staleTables = [];
-    for (const t of tables) {
-      if (t.activeOrder) {
-        if (!t.activeOrder._id || t.activeOrder.status === 'cancelled' || t.activeOrder.status === 'paid') {
-          t.activeOrder = null;
-          t.status = 'available';
-          staleTables.push(t._id);
+    const activeOrderMap = new Map();
+    for (const ord of activeOrders) {
+      if (ord.table) {
+        const tid = String(ord.table._id || ord.table);
+        if (!activeOrderMap.has(tid)) {
+          activeOrderMap.set(tid, ord);
         }
-      } else if (t.status === 'occupied') {
-        t.status = 'available';
-        staleTables.push(t._id);
       }
     }
-    if (staleTables.length > 0) {
-      Table.updateMany(
-        { _id: { $in: staleTables } },
-        { $set: { activeOrder: null, status: 'available' } }
-      ).catch((e) => console.error('[Tables] Auto-heal update error:', e));
+
+    const updates = [];
+    for (const t of tables) {
+      const activeOrd = activeOrderMap.get(String(t._id));
+      if (activeOrd) {
+        t.activeOrder = activeOrd;
+        t.status = 'occupied';
+        updates.push(
+          Table.updateOne(
+            { _id: t._id },
+            { $set: { status: 'occupied', activeOrder: activeOrd._id } }
+          )
+        );
+      } else {
+        t.activeOrder = null;
+        if (t.status === 'occupied') {
+          t.status = 'available';
+          updates.push(
+            Table.updateOne(
+              { _id: t._id },
+              { $set: { status: 'available', activeOrder: null } }
+            )
+          );
+        }
+      }
+    }
+
+    if (updates.length > 0) {
+      Promise.all(updates).catch((e) => console.error('[Tables] Background table sync error:', e));
     }
 
     // Check if any legacy tables need their default category persisted
@@ -465,25 +485,37 @@ router.get('/', async (req, res) => {
 // GET /api/tables/:id — Single table
 router.get('/:id', async (req, res) => {
   try {
-    const table = await Table.findById(req.params.id).populate({
-      path: 'activeOrder',
-      populate: [
-        { path: 'items.menuItem', select: 'name price isVeg' },
-        { path: 'createdBy', select: 'name' },
-      ],
-    });
+    const table = await Table.findById(req.params.id).lean();
 
     if (!table) {
       return res.status(404).json({ message: 'Table not found' });
     }
 
-    if (table.activeOrder && (table.activeOrder.status === 'cancelled' || table.activeOrder.status === 'paid')) {
+    const activeOrd = await Order.findOne({
+      table: table._id,
+      status: { $nin: ['paid', 'cancelled'] },
+    })
+      .populate('items.menuItem', 'name price isVeg')
+      .populate('createdBy', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (activeOrd) {
+      table.activeOrder = activeOrd;
+      table.status = 'occupied';
+      Table.updateOne(
+        { _id: table._id },
+        { $set: { status: 'occupied', activeOrder: activeOrd._id } }
+      ).catch(() => {});
+    } else {
       table.activeOrder = null;
-      table.status = 'available';
-      await table.save();
-    } else if (!table.activeOrder && table.status === 'occupied') {
-      table.status = 'available';
-      await table.save();
+      if (table.status === 'occupied') {
+        table.status = 'available';
+        Table.updateOne(
+          { _id: table._id },
+          { $set: { status: 'available', activeOrder: null } }
+        ).catch(() => {});
+      }
     }
 
     res.json(table);

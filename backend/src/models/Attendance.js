@@ -33,4 +33,7 @@ const attendanceSchema = new mongoose.Schema({
 
 attendanceSchema.index({ staff: 1, date: 1 }, { unique: true });
 
+const syncPlugin = require('../utils/syncPlugin');
+attendanceSchema.plugin(syncPlugin, { modelName: 'Attendance' });
+
 module.exports = mongoose.model('Attendance', attendanceSchema);

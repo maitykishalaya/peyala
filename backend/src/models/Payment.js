@@ -63,4 +63,7 @@ paymentSchema.index({ staff: 1 });
 paymentSchema.index({ supplier: 1, date: -1 });
 paymentSchema.index({ payee: 1, date: -1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+paymentSchema.plugin(syncPlugin, { modelName: 'Payment' });
+
 module.exports = mongoose.model('Payment', paymentSchema);

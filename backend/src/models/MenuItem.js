@@ -19,4 +19,7 @@ const menuItemSchema = new mongoose.Schema({
 
 menuItemSchema.index({ category: 1, isAvailable: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+menuItemSchema.plugin(syncPlugin, { modelName: 'MenuItem' });
+
 module.exports = mongoose.model('MenuItem', menuItemSchema);

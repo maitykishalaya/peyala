@@ -13,4 +13,7 @@ const receiptSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
+const syncPlugin = require('../utils/syncPlugin');
+receiptSchema.plugin(syncPlugin, { modelName: 'Receipt' });
+
 module.exports = mongoose.model('Receipt', receiptSchema);

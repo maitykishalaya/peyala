@@ -15,4 +15,7 @@ const tableSchema = new mongoose.Schema({
 tableSchema.index({ status: 1 });
 tableSchema.index({ category: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+tableSchema.plugin(syncPlugin, { modelName: 'Table' });
+
 module.exports = mongoose.model('Table', tableSchema);
