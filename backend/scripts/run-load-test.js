@@ -18,7 +18,7 @@ const jwt = require('jsonwebtoken');
 
 const TEST_DB_URI = process.env.TEST_DB_URI || 'mongodb://127.0.0.1:27017/peyala_loadtest';
 const TEST_PORT = parseInt(process.env.TEST_PORT || '4005', 10);
-const DURATION_SECONDS = parseInt(process.env.TEST_DURATION || '120', 10); // 2 minutes
+const DURATION_SECONDS = parseInt(process.env.TEST_DURATION || '180', 10); // 3 minutes (180s)
 
 // Performance metrics store
 const metrics = {
@@ -204,9 +204,9 @@ async function startIsolatedServer() {
 
 async function runLoadTest() {
   console.log('════════════════════════════════════════════════════════════════════');
-  console.log('  PEYALA POS - HIGH FREQUENCY 2-MINUTE LOAD & STRESS BENCHMARK     ');
+  console.log('  PEYALA POS - POST-OPTIMIZATION 180s LOAD & STRESS BENCHMARK       ');
   console.log('════════════════════════════════════════════════════════════════════');
-  console.log(`Duration: ${DURATION_SECONDS} seconds (120s)`);
+  console.log(`Duration: ${DURATION_SECONDS} seconds (180s)`);
   console.log('Frequency: Operations executed every 3 seconds');
   console.log('Target DB: peyala_loadtest (Zero impact on business data)');
   console.log('────────────────────────────────────────────────────────────────────\n');
