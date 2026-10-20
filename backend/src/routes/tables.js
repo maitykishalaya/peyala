@@ -432,34 +432,39 @@ router.get('/', async (req, res) => {
       }
     }
 
-    const updates = [];
+    const bulkOps = [];
     for (const t of tables) {
       const activeOrd = activeOrderMap.get(String(t._id));
       if (activeOrd) {
         t.activeOrder = activeOrd;
         t.status = 'occupied';
-        updates.push(
-          Table.updateOne(
-            { _id: t._id },
-            { $set: { status: 'occupied', activeOrder: activeOrd._id } }
-          )
-        );
+        bulkOps.push({
+          updateOne: {
+            filter: {
+              _id: t._id,
+              $or: [{ status: { $ne: 'occupied' } }, { activeOrder: { $ne: activeOrd._id } }],
+            },
+            update: { $set: { status: 'occupied', activeOrder: activeOrd._id } },
+          },
+        });
       } else {
         t.activeOrder = null;
         if (t.status === 'occupied') {
           t.status = 'available';
-          updates.push(
-            Table.updateOne(
-              { _id: t._id },
-              { $set: { status: 'available', activeOrder: null } }
-            )
-          );
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: t._id, status: 'occupied' },
+              update: { $set: { status: 'available', activeOrder: null } },
+            },
+          });
         }
       }
     }
 
-    if (updates.length > 0) {
-      Promise.all(updates).catch((e) => console.error('[Tables] Background table sync error:', e));
+    if (bulkOps.length > 0) {
+      Table.bulkWrite(bulkOps, { ordered: false }).catch((e) =>
+        console.error('[Tables] Bulk table sync error:', e)
+      );
     }
 
     // Check if any legacy tables need their default category persisted

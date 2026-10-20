@@ -108,6 +108,7 @@ orderSchema.index({ billPrintQueued: 1, billPrintQueuedAt: 1, updatedAt: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
 orderSchema.index({ status: 1, paidAt: -1 });
 orderSchema.index({ status: 1, 'kotRounds.printed': 1, createdAt: 1 });
+orderSchema.index({ status: 1, table: 1, createdAt: -1 });
 orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ customer: 1, dueSettled: 1 });
 orderSchema.index({ paymentMethod: 1, dueSettled: 1 });

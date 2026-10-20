@@ -310,6 +310,7 @@ export default function TablesPage() {
   const isFirstTableLoadRef = useRef<boolean>(true);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
   const lastAlertTimestampRef = useRef<number>(Date.now() - 5000);
+  const lastTablesHashRef = useRef<string>('');
 
   // Table Management Modal (create/edit)
   const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
@@ -385,18 +386,41 @@ export default function TablesPage() {
     const isSilent = typeof silent === 'boolean' ? silent : false;
     try {
       if (!isSilent) setLoading(true);
-      const [tableRes, itemRes, catRes, addonRes, tableCatRes] = await Promise.all([
-        tablesApi.list(),
-        menuApi.listItems({ availableOnly: true }),
-        menuApi.listCategories(),
-        addonsApi.list(),
-        tableCategoriesApi.list().catch(() => ({ data: [] })),
-      ]);
-      setTables(tableRes.data);
-      setMenuItems(itemRes.data);
-      setCategories(catRes.data);
-      setAddons(addonRes.data);
-      setTableCategories(tableCatRes.data || []);
+
+      let tableRes;
+      if (isSilent) {
+        // High-speed low-overhead background polling for low-end hardware: only fetch tables
+        tableRes = await tablesApi.list();
+      } else {
+        // Initial / manual load fetches full menu catalogs
+        const [tRes, itemRes, catRes, addonRes, tableCatRes] = await Promise.all([
+          tablesApi.list(),
+          menuApi.listItems({ availableOnly: true }),
+          menuApi.listCategories(),
+          addonsApi.list(),
+          tableCategoriesApi.list().catch(() => ({ data: [] })),
+        ]);
+        tableRes = tRes;
+        setMenuItems(itemRes.data || []);
+        setCategories(catRes.data || []);
+        setAddons(addonRes.data || []);
+        setTableCategories(tableCatRes.data || []);
+      }
+
+      const tableData = tableRes.data || [];
+
+      // Performance check for low-end laptops: only trigger React DOM re-render if table states changed
+      const tableHash = tableData
+        .map(
+          (t) =>
+            `${t._id}:${t.status}:${(t.activeOrder as any)?._id || ''}:${(t.activeOrder as any)?.status || ''}:${(t.activeOrder as any)?.total || 0}:${(t.activeOrder as any)?.billPrinted || false}`
+        )
+        .join('|');
+
+      if (!isSilent || tableHash !== lastTablesHashRef.current) {
+        lastTablesHashRef.current = tableHash;
+        setTables(tableData);
+      }
 
       // Check for orders that were marked served by KDS to notify the cashier
       const newlyServedTables = (tableRes.data || []).filter((t) => {
