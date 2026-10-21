@@ -90,7 +90,28 @@ async function reconcileDailySales(dateInput = new Date(), userId = null) {
   salesEntry.totalRevenue = Math.round(totalRevenue * 100) / 100;
 
   salesEntry.markModified('paymentBreakdown');
-  await salesEntry.save();
+  try {
+    await salesEntry.save();
+  } catch (err) {
+    if (err.code === 11000 || err.name === 'VersionError') {
+      // Concurrency race: another simultaneous settlement already inserted the daily document.
+      // Re-fetch the saved document and re-apply the updated totals.
+      const freshEntry = await SalesEntry.findOne({ date: { $gte: start, $lte: end } });
+      if (freshEntry) {
+        freshEntry.paymentBreakdown = { cash, upi, card, due, bankTransfer };
+        freshEntry.outletSales = outletSales;
+        const totalRev = outletSales
+          + (freshEntry.zomato?.netSettlement || 0)
+          + (freshEntry.fatafat?.netSettlement || 0)
+          + (freshEntry.otherSales || 0);
+        freshEntry.totalRevenue = Math.round(totalRev * 100) / 100;
+        freshEntry.markModified('paymentBreakdown');
+        await freshEntry.save();
+        return freshEntry;
+      }
+    }
+    throw err;
+  }
 
   return salesEntry;
 }

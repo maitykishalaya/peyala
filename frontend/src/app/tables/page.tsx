@@ -416,7 +416,7 @@ export default function TablesPage() {
       const tableHash = tableData
         .map(
           (t) =>
-            `${t._id}:${t.status}:${(t.activeOrder as any)?._id || ''}:${(t.activeOrder as any)?.status || ''}:${(t.activeOrder as any)?.total || 0}:${(t.activeOrder as any)?.billPrinted || false}`
+            `${t._id}:${t.status}:${(t.activeOrder as any)?._id || ''}:${(t.activeOrder as any)?.status || ''}:${(t.activeOrder as any)?.total || 0}:${(t.activeOrder as any)?.billPrinted || false}:${(t.activeOrder as any)?.kotCount || 0}:${(t.activeOrder as any)?.items?.length || 0}`
         )
         .join('|');
 
@@ -508,6 +508,7 @@ export default function TablesPage() {
         if (res.data?.alerts && res.data.alerts.length > 0) {
           let hasNew = false;
           for (const alert of res.data.alerts) {
+            if (alert.id && seenAlertIdsRef.current.has(alert.id)) continue;
             triggerKdsAlert(alert);
             hasNew = true;
             if (alert.timestamp && alert.timestamp > lastAlertTimestampRef.current) {

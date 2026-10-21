@@ -1,0 +1,702 @@
+{
+  "runId": "run_1792561353410",
+  "timestamp": "2026-10-21T05:42:33.411Z",
+  "systemSpecs": {
+    "os": "Windows 11",
+    "node": "v24.19.0",
+    "arch": "x64",
+    "totalRAM_MB": 16239,
+    "freeRAM_MB": 5211,
+    "cpu": "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz (6 cores)",
+    "cDriveFreeGB": "11 GB"
+  },
+  "safetyVerified": true,
+  "layerA_frontend": {
+    "searchScales": {
+      "scale_25": {
+        "scale": 25,
+        "typingLatency": {
+          "min": 197,
+          "max": 344,
+          "avg": 271,
+          "p50": 265,
+          "p95": 344,
+          "p99": 344,
+          "count": 5
+        },
+        "renderFilterLatency": {
+          "min": 4,
+          "max": 15,
+          "avg": 9,
+          "p50": 6,
+          "p95": 15,
+          "p99": 15,
+          "count": 5
+        }
+      },
+      "scale_100": {
+        "scale": 100,
+        "typingLatency": {
+          "min": 238,
+          "max": 387,
+          "avg": 292,
+          "p50": 266,
+          "p95": 387,
+          "p99": 387,
+          "count": 5
+        },
+        "renderFilterLatency": {
+          "min": 4,
+          "max": 52,
+          "avg": 14,
+          "p50": 5,
+          "p95": 52,
+          "p99": 52,
+          "count": 5
+        }
+      },
+      "scale_500": {
+        "scale": 500,
+        "typingLatency": {
+          "min": 345,
+          "max": 770,
+          "avg": 495,
+          "p50": 385,
+          "p95": 770,
+          "p99": 770,
+          "count": 5
+        },
+        "renderFilterLatency": {
+          "min": 2,
+          "max": 79,
+          "avg": 27,
+          "p50": 12,
+          "p95": 79,
+          "p99": 79,
+          "count": 5
+        }
+      },
+      "scale_1000": {
+        "scale": 1000,
+        "typingLatency": {
+          "min": 392,
+          "max": 822,
+          "avg": 571,
+          "p50": 440,
+          "p95": 822,
+          "p99": 822,
+          "count": 5
+        },
+        "renderFilterLatency": {
+          "min": 2,
+          "max": 51,
+          "avg": 22,
+          "p50": 17,
+          "p95": 51,
+          "p99": 51,
+          "count": 5
+        }
+      }
+    },
+    "rendering": {
+      "initialTablesLoad": {
+        "domLoadedTime": 292,
+        "fcp": null,
+        "domInteractive": 280,
+        "domContentLoaded": 280,
+        "loadComplete": 0,
+        "domNodes": 32
+      }
+    },
+    "longTasks": [
+      {
+        "name": "self",
+        "duration": 184,
+        "startTime": 117
+      },
+      {
+        "name": "self",
+        "duration": 115,
+        "startTime": 890
+      },
+      {
+        "name": "self",
+        "duration": 101,
+        "startTime": 1030
+      },
+      {
+        "name": "self",
+        "duration": 60,
+        "startTime": 1148
+      },
+      {
+        "name": "self",
+        "duration": 120,
+        "startTime": 1214
+      },
+      {
+        "name": "self",
+        "duration": 161,
+        "startTime": 1361
+      },
+      {
+        "name": "self",
+        "duration": 57,
+        "startTime": 1809
+      },
+      {
+        "name": "self",
+        "duration": 73,
+        "startTime": 1902
+      },
+      {
+        "name": "self",
+        "duration": 64,
+        "startTime": 1986
+      },
+      {
+        "name": "self",
+        "duration": 58,
+        "startTime": 2710
+      },
+      {
+        "name": "self",
+        "duration": 53,
+        "startTime": 2815
+      },
+      {
+        "name": "self",
+        "duration": 53,
+        "startTime": 3185
+      },
+      {
+        "name": "self",
+        "duration": 55,
+        "startTime": 3739
+      }
+    ],
+    "memory": {
+      "usedJSHeapSizeMB": 77.1,
+      "totalJSHeapSizeMB": 136.4
+    }
+  },
+  "layerB_backend": {
+    "singleUser": {
+      "GET_Tables": {
+        "min": 5,
+        "max": 30,
+        "avg": 8,
+        "p50": 7,
+        "p95": 30,
+        "p99": 30,
+        "count": 20,
+        "errorCount": 0
+      },
+      "GET_MenuItems": {
+        "min": 14,
+        "max": 61,
+        "avg": 25,
+        "p50": 24,
+        "p95": 61,
+        "p99": 61,
+        "count": 20,
+        "errorCount": 0
+      },
+      "GET_DashboardSummary": {
+        "min": 34,
+        "max": 101,
+        "avg": 43,
+        "p50": 38,
+        "p95": 101,
+        "p99": 101,
+        "count": 20,
+        "errorCount": 0
+      },
+      "GET_Inventory": {
+        "min": 2,
+        "max": 8,
+        "avg": 3,
+        "p50": 3,
+        "p95": 8,
+        "p99": 8,
+        "count": 20,
+        "errorCount": 0
+      },
+      "GET_SalesReport": {
+        "min": 3,
+        "max": 5,
+        "avg": 4,
+        "p50": 4,
+        "p95": 5,
+        "p99": 5,
+        "count": 20,
+        "errorCount": 0
+      }
+    },
+    "concurrency": {
+      "c_5": {
+        "GET_Tables": {
+          "min": 12,
+          "max": 23,
+          "avg": 17,
+          "p50": 16,
+          "p95": 23,
+          "p99": 23,
+          "count": 50,
+          "rps": 287.4,
+          "errors": 0,
+          "totalTimeMs": 174
+        },
+        "GET_MenuItems": {
+          "min": 65,
+          "max": 122,
+          "avg": 84,
+          "p50": 82,
+          "p95": 118,
+          "p99": 122,
+          "count": 50,
+          "rps": 58.2,
+          "errors": 0,
+          "totalTimeMs": 859
+        },
+        "GET_DashboardSummary": {
+          "min": 72,
+          "max": 104,
+          "avg": 85,
+          "p50": 82,
+          "p95": 100,
+          "p99": 104,
+          "count": 50,
+          "rps": 58.5,
+          "errors": 0,
+          "totalTimeMs": 854
+        },
+        "GET_Inventory": {
+          "min": 8,
+          "max": 11,
+          "avg": 10,
+          "p50": 9,
+          "p95": 11,
+          "p99": 11,
+          "count": 50,
+          "rps": 510.2,
+          "errors": 0,
+          "totalTimeMs": 98
+        },
+        "GET_SalesReport": {
+          "min": 8,
+          "max": 15,
+          "avg": 10,
+          "p50": 10,
+          "p95": 12,
+          "p99": 15,
+          "count": 50,
+          "rps": 490.2,
+          "errors": 0,
+          "totalTimeMs": 102
+        }
+      },
+      "c_10": {
+        "GET_Tables": {
+          "min": 23,
+          "max": 39,
+          "avg": 28,
+          "p50": 28,
+          "p95": 38,
+          "p99": 39,
+          "count": 100,
+          "rps": 343.6,
+          "errors": 0,
+          "totalTimeMs": 291
+        },
+        "GET_MenuItems": {
+          "min": 85,
+          "max": 197,
+          "avg": 149,
+          "p50": 151,
+          "p95": 195,
+          "p99": 197,
+          "count": 100,
+          "rps": 66.3,
+          "errors": 0,
+          "totalTimeMs": 1508
+        },
+        "GET_DashboardSummary": {
+          "min": 77,
+          "max": 98,
+          "avg": 89,
+          "p50": 90,
+          "p95": 96,
+          "p99": 98,
+          "count": 100,
+          "rps": 111.5,
+          "errors": 0,
+          "totalTimeMs": 897
+        },
+        "GET_Inventory": {
+          "min": 8,
+          "max": 13,
+          "avg": 10,
+          "p50": 10,
+          "p95": 12,
+          "p99": 13,
+          "count": 100,
+          "rps": 980.4,
+          "errors": 0,
+          "totalTimeMs": 102
+        },
+        "GET_SalesReport": {
+          "min": 7,
+          "max": 15,
+          "avg": 11,
+          "p50": 11,
+          "p95": 14,
+          "p99": 15,
+          "count": 100,
+          "rps": 892.9,
+          "errors": 0,
+          "totalTimeMs": 112
+        }
+      },
+      "c_15": {
+        "GET_Tables": {
+          "min": 17,
+          "max": 37,
+          "avg": 24,
+          "p50": 24,
+          "p95": 28,
+          "p99": 36,
+          "count": 150,
+          "rps": 614.8,
+          "errors": 0,
+          "totalTimeMs": 244
+        },
+        "GET_MenuItems": {
+          "min": 90,
+          "max": 192,
+          "avg": 123,
+          "p50": 116,
+          "p95": 186,
+          "p99": 192,
+          "count": 150,
+          "rps": 119.7,
+          "errors": 0,
+          "totalTimeMs": 1253
+        },
+        "GET_DashboardSummary": {
+          "min": 102,
+          "max": 143,
+          "avg": 131,
+          "p50": 133,
+          "p95": 140,
+          "p99": 142,
+          "count": 150,
+          "rps": 113.6,
+          "errors": 0,
+          "totalTimeMs": 1320
+        },
+        "GET_Inventory": {
+          "min": 9,
+          "max": 19,
+          "avg": 14,
+          "p50": 14,
+          "p95": 18,
+          "p99": 19,
+          "count": 150,
+          "rps": 1027.4,
+          "errors": 0,
+          "totalTimeMs": 146
+        },
+        "GET_SalesReport": {
+          "min": 13,
+          "max": 16,
+          "avg": 15,
+          "p50": 15,
+          "p95": 15,
+          "p99": 16,
+          "count": 150,
+          "rps": 1013.5,
+          "errors": 0,
+          "totalTimeMs": 148
+        }
+      }
+    },
+    "orderCreation": {
+      "min": 89,
+      "max": 140,
+      "avg": 107,
+      "p50": 94,
+      "p95": 140,
+      "p99": 140,
+      "count": 15,
+      "rps": 46.3,
+      "errors": 0
+    },
+    "orderSettlement": {
+      "min": 38,
+      "max": 105,
+      "avg": 89,
+      "p50": 94,
+      "p95": 105,
+      "p99": 105,
+      "count": 12,
+      "rps": 36.8,
+      "errors": 3
+    }
+  },
+  "layerC_fullstack": {
+    "singleUserWorkflow": {
+      "loginDuration": 1360,
+      "tablesPageLoad": 220,
+      "wsIndicatorPresent": false,
+      "success": true
+    },
+    "concurrencyStages": {
+      "users_2": {
+        "concurrency": 2,
+        "totalTimeMs": 3878,
+        "successfulRuns": 2,
+        "failedRuns": 0,
+        "login": {
+          "min": 1877,
+          "max": 1970,
+          "avg": 1924,
+          "p50": 1970,
+          "p95": 1970,
+          "p99": 1970,
+          "count": 2
+        },
+        "tablesPageLoad": {
+          "min": 316,
+          "max": 382,
+          "avg": 349,
+          "p50": 382,
+          "p95": 382,
+          "p99": 382,
+          "count": 2
+        }
+      },
+      "users_3": {
+        "concurrency": 3,
+        "totalTimeMs": 3881,
+        "successfulRuns": 3,
+        "failedRuns": 0,
+        "login": {
+          "min": 1308,
+          "max": 1780,
+          "avg": 1613,
+          "p50": 1752,
+          "p95": 1780,
+          "p99": 1780,
+          "count": 3
+        },
+        "tablesPageLoad": {
+          "min": 278,
+          "max": 483,
+          "avg": 365,
+          "p50": 335,
+          "p95": 483,
+          "p99": 483,
+          "count": 3
+        }
+      },
+      "users_5": {
+        "concurrency": 5,
+        "totalTimeMs": 5030,
+        "successfulRuns": 5,
+        "failedRuns": 0,
+        "login": {
+          "min": 1865,
+          "max": 2692,
+          "avg": 2334,
+          "p50": 2224,
+          "p95": 2692,
+          "p99": 2692,
+          "count": 5
+        },
+        "tablesPageLoad": {
+          "min": 269,
+          "max": 993,
+          "avg": 460,
+          "p50": 333,
+          "p95": 993,
+          "p99": 993,
+          "count": 5
+        }
+      }
+    }
+  },
+  "layerD_sustained": {
+    "totalCycles": 12,
+    "cycleSnapshots": [
+      {
+        "cycle": 1,
+        "cycleDurationMs": 1039,
+        "domNodes": 297,
+        "usedHeapMB": 18.5,
+        "routeLatencies": {
+          "/tables": 174,
+          "/menu": 199,
+          "/reports": 280,
+          "/inventory": 171,
+          "/dashboard": 196
+        }
+      },
+      {
+        "cycle": 2,
+        "cycleDurationMs": 1082,
+        "domNodes": 462,
+        "usedHeapMB": 37.6,
+        "routeLatencies": {
+          "/tables": 201,
+          "/menu": 182,
+          "/reports": 235,
+          "/inventory": 233,
+          "/dashboard": 198
+        }
+      },
+      {
+        "cycle": 3,
+        "cycleDurationMs": 1090,
+        "domNodes": 462,
+        "usedHeapMB": 51.7,
+        "routeLatencies": {
+          "/tables": 189,
+          "/menu": 228,
+          "/reports": 217,
+          "/inventory": 192,
+          "/dashboard": 234
+        }
+      },
+      {
+        "cycle": 4,
+        "cycleDurationMs": 1144,
+        "domNodes": 462,
+        "usedHeapMB": 20.7,
+        "routeLatencies": {
+          "/tables": 246,
+          "/menu": 229,
+          "/reports": 212,
+          "/inventory": 176,
+          "/dashboard": 236
+        }
+      },
+      {
+        "cycle": 5,
+        "cycleDurationMs": 1066,
+        "domNodes": 462,
+        "usedHeapMB": 38.2,
+        "routeLatencies": {
+          "/tables": 190,
+          "/menu": 204,
+          "/reports": 229,
+          "/inventory": 218,
+          "/dashboard": 197
+        }
+      },
+      {
+        "cycle": 6,
+        "cycleDurationMs": 931,
+        "domNodes": 462,
+        "usedHeapMB": 49.6,
+        "routeLatencies": {
+          "/tables": 217,
+          "/menu": 213,
+          "/reports": 163,
+          "/inventory": 145,
+          "/dashboard": 169
+        }
+      },
+      {
+        "cycle": 7,
+        "cycleDurationMs": 823,
+        "domNodes": 462,
+        "usedHeapMB": 34.8,
+        "routeLatencies": {
+          "/tables": 161,
+          "/menu": 162,
+          "/reports": 166,
+          "/inventory": 147,
+          "/dashboard": 164
+        }
+      },
+      {
+        "cycle": 8,
+        "cycleDurationMs": 909,
+        "domNodes": 462,
+        "usedHeapMB": 25.3,
+        "routeLatencies": {
+          "/tables": 149,
+          "/menu": 165,
+          "/reports": 177,
+          "/inventory": 159,
+          "/dashboard": 198
+        }
+      },
+      {
+        "cycle": 9,
+        "cycleDurationMs": 894,
+        "domNodes": 462,
+        "usedHeapMB": 18.6,
+        "routeLatencies": {
+          "/tables": 185,
+          "/menu": 199,
+          "/reports": 165,
+          "/inventory": 155,
+          "/dashboard": 160
+        }
+      },
+      {
+        "cycle": 10,
+        "cycleDurationMs": 817,
+        "domNodes": 462,
+        "usedHeapMB": 18.2,
+        "routeLatencies": {
+          "/tables": 154,
+          "/menu": 159,
+          "/reports": 165,
+          "/inventory": 152,
+          "/dashboard": 159
+        }
+      },
+      {
+        "cycle": 11,
+        "cycleDurationMs": 818,
+        "domNodes": 462,
+        "usedHeapMB": 17.7,
+        "routeLatencies": {
+          "/tables": 159,
+          "/menu": 158,
+          "/reports": 162,
+          "/inventory": 149,
+          "/dashboard": 161
+        }
+      },
+      {
+        "cycle": 12,
+        "cycleDurationMs": 819,
+        "domNodes": 462,
+        "usedHeapMB": 18.5,
+        "routeLatencies": {
+          "/tables": 157,
+          "/menu": 157,
+          "/reports": 163,
+          "/inventory": 148,
+          "/dashboard": 156
+        }
+      }
+    ],
+    "leakDetected": false,
+    "latencyDegradationDetected": false,
+    "heapGrowthMB": 0
+  },
+  "dataIntegrity": {
+    "ordersCreated": 15,
+    "ordersSettled": 12,
+    "duplicateBillsDetected": 0,
+    "unauthorizedMutations": 0,
+    "financialDiscrepancies": 0,
+    "verified": true
+  },
+  "cleanupSuccess": true
+}

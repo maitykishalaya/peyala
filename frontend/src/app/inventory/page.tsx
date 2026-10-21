@@ -37,7 +37,20 @@ export default function InventoryPage() {
   const [selectedCat, setSelectedCat] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const deferredSearch = useDeferredValue(debouncedSearch);
   const [modal, setModal] = useState<'item' | 'cat' | 'edit' | 'editCat' | null>(null);
   const [selected, setSelected] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<any>(null);

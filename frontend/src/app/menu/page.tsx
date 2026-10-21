@@ -20,7 +20,20 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const deferredSearch = useDeferredValue(debouncedSearch);
   const [vegFilter, setVegFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
 
   // Loading states for buttons
