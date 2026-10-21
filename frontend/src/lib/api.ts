@@ -241,6 +241,8 @@ export const balanceSheetApi = {
   update: (data: any) => api.put('/balancesheet', data),
   // Record a GST payment — resets liability
   payGst: (data: any) => api.post('/balancesheet/pay-gst', data),
+  // Fetch day-wise GST Collection history for last N days (default 30)
+  getGstDailyHistory: (days = 30) => api.get<any>('/balancesheet/gst-daily-history', { params: { days } }),
 };
 
 // Backup & Restore — full database export/import

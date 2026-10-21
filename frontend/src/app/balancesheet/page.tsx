@@ -28,7 +28,8 @@ import { toast } from '@/lib/toast';
 import {
   Scale, Plus, Pencil, Trash2, RefreshCw,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp, History, IndianRupee, Users, ArrowRight, BookOpen
+  ChevronDown, ChevronUp, History, IndianRupee, Users, ArrowRight, BookOpen,
+  Calendar
 } from 'lucide-react';
 
 const CACHE_KEY = 'peyala_balancesheet_cache_v1';
@@ -61,9 +62,30 @@ export default function BalanceSheetPage() {
   const [saving, setSaving] = useState(false);
 
   // ── UI state ────────────────────────────────────────────────────
-  const [showGstLog, setShowGstLog] = useState(false);    // toggle GST log panel
+  const [showGstLog, setShowGstLog] = useState(false);    // toggle GST history panel
   const [editingGst, setEditingGst] = useState(false);     // editing GST amount inline
   const [gstEditValue, setGstEditValue] = useState('');    // temp value while editing
+  const [gstHistoryTab, setGstHistoryTab] = useState<'daily' | 'log'>('daily'); // 'daily' (day-wise) | 'log' (raw ledger)
+  const [gstShowOnlyActive, setGstShowOnlyActive] = useState(false); // filter zero days in 30d table
+  const [loadingGstDaily, setLoadingGstDaily] = useState(false);
+  const [fallbackGstDaily, setFallbackGstDaily] = useState<any>(null);
+
+  // Toggle GST history with on-demand fallback fetch if cache lacks daily history
+  const toggleGstHistory = async () => {
+    const nextState = !showGstLog;
+    setShowGstLog(nextState);
+    if (nextState && !bs?.gstDailyHistory && !fallbackGstDaily) {
+      setLoadingGstDaily(true);
+      try {
+        const res = await balanceSheetApi.getGstDailyHistory(30);
+        setFallbackGstDaily(res.data);
+      } catch (e) {
+        console.error('Failed to load daily GST history:', e);
+      } finally {
+        setLoadingGstDaily(false);
+      }
+    }
+  };
 
   // ── Modal state ─────────────────────────────────────────────────
   const [modal, setModal] = useState<'accounts' | 'addLiability' | 'payGst' | 'editLiability' | null>(null);
@@ -255,6 +277,7 @@ export default function BalanceSheetPage() {
   const liabilities = bs?.liabilities || { gst: 0, supplierDues: { total: 0, breakdown: [] }, custom: [], total: 0 };
   const equity = bs?.equity || { value: 0, isPositive: true };
   const gstLog = bs?.gstLog || [];
+  const gstDailyHistory = bs?.gstDailyHistory || fallbackGstDaily || null;
 
   return (
     <AppLayout>
@@ -485,11 +508,19 @@ export default function BalanceSheetPage() {
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => setShowGstLog(!showGstLog)}
-                      className="p-1.5 text-orange-500 hover:text-orange-700 rounded"
-                      title="View GST history"
+                      onClick={toggleGstHistory}
+                      className={cn(
+                        "p-1.5 rounded transition-colors flex items-center gap-1",
+                        showGstLog
+                          ? "bg-orange-200 dark:bg-orange-900/60 text-orange-900 dark:text-orange-200 font-semibold"
+                          : "text-orange-500 hover:text-orange-700 hover:bg-orange-100/50"
+                      )}
+                      title="View Day-wise 30-Day GST Collection History"
                     >
                       <History className="w-3.5 h-3.5" />
+                      <span className="text-[11px] font-medium hidden sm:inline">
+                        {showGstLog ? 'Hide' : '30D History'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -523,18 +554,283 @@ export default function BalanceSheetPage() {
                   </div>
                 )}
 
-                {/* GST Log — expandable history */}
-                {showGstLog && gstLog.length > 0 && (
-                  <div className="mt-3.5 pt-3 border-t border-orange-200 dark:border-orange-800 space-y-1.5">
-                    <p className="text-xs font-semibold text-orange-600 mb-2">GST History (last 30 entries)</p>
-                    {gstLog.slice().reverse().map((entry: any, i: number) => (
-                      <div key={i} className="flex justify-between text-xs">
-                        <span className="text-gray-500">{entry.date ? formatDate(entry.date) : '—'}</span>
-                        <span className={entry.gstAdded >= 0 ? 'text-orange-600 font-semibold' : 'text-green-600 font-semibold'}>
-                          {entry.gstAdded >= 0 ? '+' : ''}{formatCurrency(entry.gstAdded)}
-                        </span>
+                {/* ── Day-wise GST Collection (Last 30 Days) ── */}
+                {showGstLog && (
+                  <div className="mt-3.5 pt-3.5 border-t border-orange-200 dark:border-orange-800 space-y-3">
+                    {/* Header with Title & Tab Switcher */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                          <p className="text-xs sm:text-sm font-bold text-orange-800 dark:text-orange-300">
+                            Day-wise GST Collection (Last 30 Days)
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                          {gstDailyHistory?.summary
+                            ? `${formatDate(gstDailyHistory.summary.startDate)} to ${formatDate(gstDailyHistory.summary.endDate)} • 5% GST (2.5% CGST + 2.5% SGST)`
+                            : 'Consistent day-wise record of actual settled orders • 5% GST'}
+                        </p>
                       </div>
-                    ))}
+
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <div className="bg-orange-100/80 dark:bg-orange-950/60 p-0.5 rounded-lg flex text-xs font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setGstHistoryTab('daily')}
+                            className={cn(
+                              "px-2.5 py-1 rounded-md transition-all text-[11px]",
+                              gstHistoryTab === 'daily'
+                                ? "bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 shadow-sm font-bold"
+                                : "text-gray-600 dark:text-gray-400 hover:text-orange-600"
+                            )}
+                          >
+                            Day-wise (30D)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGstHistoryTab('log')}
+                            className={cn(
+                              "px-2.5 py-1 rounded-md transition-all text-[11px]",
+                              gstHistoryTab === 'log'
+                                ? "bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 shadow-sm font-bold"
+                                : "text-gray-600 dark:text-gray-400 hover:text-orange-600"
+                            )}
+                          >
+                            Raw Log ({gstLog.length})
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {loadingGstDaily ? (
+                      <div className="py-6 flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    ) : gstHistoryTab === 'daily' ? (
+                      <>
+                        {/* 30-Day Summary Metrics Bar */}
+                        {gstDailyHistory?.summary && (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white dark:bg-gray-900/90 p-2.5 rounded-xl border border-orange-200/80 dark:border-orange-900/40 shadow-sm">
+                            <div className="p-2 bg-orange-50/70 dark:bg-orange-950/20 rounded-lg">
+                              <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">30D GST Collected</span>
+                              <p className="text-sm sm:text-base font-black text-orange-600 dark:text-orange-400">
+                                {formatCurrency(gstDailyHistory.summary.totalGstCollected)}
+                              </p>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono">
+                                CGST {formatCurrency(gstDailyHistory.summary.cgst)} + SGST {formatCurrency(gstDailyHistory.summary.sgst)}
+                              </span>
+                            </div>
+
+                            <div className="p-2 bg-gray-50 dark:bg-gray-800/40 rounded-lg">
+                              <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Taxable Turnover</span>
+                              <p className="text-sm sm:text-base font-black text-gray-900 dark:text-gray-100">
+                                {formatCurrency(gstDailyHistory.summary.taxableSales)}
+                              </p>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                Gross: {formatCurrency(gstDailyHistory.summary.totalGrossSales)}
+                              </span>
+                            </div>
+
+                            <div className="p-2 bg-gray-50 dark:bg-gray-800/40 rounded-lg">
+                              <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Settled Bills</span>
+                              <p className="text-sm sm:text-base font-black text-gray-900 dark:text-gray-100">
+                                {gstDailyHistory.summary.totalOrders}
+                              </p>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                Orders in 30 days
+                              </span>
+                            </div>
+
+                            <div className="p-2 bg-gray-50 dark:bg-gray-800/40 rounded-lg">
+                              <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Govt GST Paid</span>
+                              <p className="text-sm sm:text-base font-black text-blue-600 dark:text-blue-400">
+                                {formatCurrency(gstDailyHistory.summary.totalGstPaid)}
+                              </p>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                Net 30d: {formatCurrency(gstDailyHistory.summary.netLiabilityAccumulated)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Filter row */}
+                        <div className="flex items-center justify-between text-[11px] px-0.5">
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {gstShowOnlyActive ? 'Showing days with orders/payments' : 'Showing all 30 calendar days'}
+                          </span>
+                          <label className="flex items-center gap-1.5 cursor-pointer text-gray-700 dark:text-gray-300 font-medium select-none">
+                            <input
+                              type="checkbox"
+                              checked={gstShowOnlyActive}
+                              onChange={(e) => setGstShowOnlyActive(e.target.checked)}
+                              className="rounded text-orange-600 focus:ring-orange-500 w-3 h-3"
+                            />
+                            <span>Active Trading Days Only</span>
+                          </label>
+                        </div>
+
+                        {/* Day-wise Table */}
+                        <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-orange-200 dark:border-orange-800/60 bg-white dark:bg-gray-900 shadow-sm scrollbar-thin">
+                          <table className="w-full text-xs text-left border-collapse">
+                            <thead className="bg-orange-50/80 dark:bg-orange-950/40 text-orange-950 dark:text-orange-200 font-bold sticky top-0 z-10 border-b border-orange-200 dark:border-orange-800">
+                              <tr>
+                                <th className="py-2 px-2.5 whitespace-nowrap">Date</th>
+                                <th className="py-2 px-2.5 text-center whitespace-nowrap">Bills</th>
+                                <th className="py-2 px-2.5 text-right whitespace-nowrap">Taxable Sales</th>
+                                <th className="py-2 px-2.5 text-right whitespace-nowrap">CGST (2.5%)</th>
+                                <th className="py-2 px-2.5 text-right whitespace-nowrap">SGST (2.5%)</th>
+                                <th className="py-2 px-2.5 text-right whitespace-nowrap">GST Collected</th>
+                                <th className="py-2 px-2.5 text-right whitespace-nowrap">Gross Sales</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                              {gstDailyHistory?.days?.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} className="py-4 text-center text-gray-400 italic">
+                                    No day-wise GST collection records found in the last 30 days.
+                                  </td>
+                                </tr>
+                              ) : (
+                                gstDailyHistory?.days
+                                  ?.filter((d: any) => !gstShowOnlyActive || d.orderCount > 0 || d.totalGst > 0 || d.gstPaid > 0)
+                                  .map((d: any) => {
+                                    const isActive = d.orderCount > 0 || d.totalGst > 0;
+                                    return (
+                                      <tr
+                                        key={d.date}
+                                        className={cn(
+                                          "transition-colors",
+                                          d.isToday
+                                            ? "bg-orange-50/60 dark:bg-orange-950/30 font-semibold"
+                                            : "hover:bg-orange-50/30 dark:hover:bg-gray-800/40",
+                                          !isActive && "opacity-40 text-gray-400"
+                                        )}
+                                      >
+                                        <td className="py-1.5 px-2.5 whitespace-nowrap font-medium text-gray-900 dark:text-gray-100">
+                                          <div className="flex items-center gap-1.5">
+                                            <span>{formatDate(d.date)}</span>
+                                            {d.isToday && (
+                                              <span className="px-1 py-0.2 text-[9px] font-black uppercase bg-orange-500 text-white rounded">
+                                                Today
+                                              </span>
+                                            )}
+                                            {d.isYesterday && (
+                                              <span className="px-1 py-0.2 text-[9px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">
+                                                Yesterday
+                                              </span>
+                                            )}
+                                            {d.gstPaid > 0 && (
+                                              <span
+                                                className="px-1.5 py-0.2 text-[9px] font-bold bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded"
+                                                title={d.payments?.map((p: any) => p.note).join('; ') || `Paid ₹${d.gstPaid} to GST Department`}
+                                              >
+                                                Govt Paid: ₹{d.gstPaid}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-center whitespace-nowrap">
+                                          {d.orderCount > 0 ? (
+                                            <span className="font-semibold text-gray-700 dark:text-gray-300">
+                                              {d.orderCount} <span className="text-[10px] text-gray-400 font-mono">({d.invoiceRange || '—'})</span>
+                                            </span>
+                                          ) : (
+                                            <span className="text-gray-400">—</span>
+                                          )}
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-right font-mono text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                          {formatCurrency(d.taxableSales)}
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-right font-mono text-orange-600/90 dark:text-orange-400/90 whitespace-nowrap">
+                                          {formatCurrency(d.cgst)}
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-right font-mono text-orange-600/90 dark:text-orange-400/90 whitespace-nowrap">
+                                          {formatCurrency(d.sgst)}
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-right font-mono font-bold text-orange-600 dark:text-orange-400 whitespace-nowrap">
+                                          {formatCurrency(d.totalGst)}
+                                        </td>
+                                        <td className="py-1.5 px-2.5 text-right font-mono text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                          {formatCurrency(d.grossSales)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })
+                              )}
+                            </tbody>
+                            {/* Sticky Total Footer */}
+                            {gstDailyHistory?.summary && (
+                              <tfoot className="bg-orange-100/80 dark:bg-orange-950/70 font-bold text-orange-950 dark:text-orange-200 border-t-2 border-orange-300 dark:border-orange-800 sticky bottom-0 z-10 text-xs">
+                                <tr>
+                                  <td className="py-2 px-2.5 whitespace-nowrap">
+                                    30-Day Total
+                                  </td>
+                                  <td className="py-2 px-2.5 text-center whitespace-nowrap">
+                                    {gstDailyHistory.summary.totalOrders} bills
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono whitespace-nowrap">
+                                    {formatCurrency(gstDailyHistory.summary.taxableSales)}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono whitespace-nowrap">
+                                    {formatCurrency(gstDailyHistory.summary.cgst)}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono whitespace-nowrap">
+                                    {formatCurrency(gstDailyHistory.summary.sgst)}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono font-black text-orange-700 dark:text-orange-300 whitespace-nowrap">
+                                    {formatCurrency(gstDailyHistory.summary.totalGstCollected)}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono whitespace-nowrap">
+                                    {formatCurrency(gstDailyHistory.summary.totalGrossSales)}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            )}
+                          </table>
+                        </div>
+
+                        {/* Footer link to Analytics GST page */}
+                        <div className="flex items-center justify-between pt-1 text-xs">
+                          <Link
+                            href="/analytics?tab=gst"
+                            className="font-semibold text-orange-600 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300 flex items-center gap-1 transition-colors"
+                          >
+                            <span>View Full GST Filing & Tax Reconciliation Report</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </Link>
+                          <span className="text-[11px] text-gray-400 font-mono">
+                            30 Days • Reconciled
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      /* Raw Ledger Tab */
+                      <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                        {gstLog.length === 0 ? (
+                          <p className="text-xs text-gray-400 italic py-2 text-center">No raw ledger entries recorded.</p>
+                        ) : (
+                          gstLog.slice().reverse().map((entry: any, i: number) => (
+                            <div key={i} className="flex justify-between items-center text-xs p-1.5 rounded hover:bg-orange-100/40 dark:hover:bg-gray-800/40">
+                              <div className="flex flex-col">
+                                <span className="text-gray-700 dark:text-gray-300 font-medium">
+                                  {entry.date ? formatDate(entry.date) : '—'}
+                                </span>
+                                {entry.note && (
+                                  <span className="text-[10px] text-gray-400 truncate max-w-xs">{entry.note}</span>
+                                )}
+                              </div>
+                              <span className={cn(
+                                "font-mono font-bold",
+                                entry.gstAdded >= 0 ? "text-orange-600" : "text-emerald-600"
+                              )}>
+                                {entry.gstAdded >= 0 ? '+' : ''}{formatCurrency(entry.gstAdded)}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -17,9 +17,23 @@ const PurchaseEntry = require('../models/PurchaseEntry');
 const Customer = require('../models/Customer');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const { getGstDailyHistory } = require('../utils/gstHistory');
 
 // All routes require authentication
 router.use(auth);
+
+// ── GET /api/balancesheet/gst-daily-history ────────────────────────
+// Returns audit-grade day-wise GST Collection for the last N calendar days (default 30).
+// Consistent with actual POS Orders (taxAmount), SalesEntry, and BalanceSheet payments.
+router.get('/gst-daily-history', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const history = await getGstDailyHistory(days);
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 
 // ── GET /api/balancesheet ─────────────────────────────────────────
@@ -87,6 +101,10 @@ router.get('/', async (req, res) => {
     // Negative = liabilities exceed assets (warning state)
     const equity = totalAssets - totalLiabilities;
 
+    // ── GST DAILY HISTORY: 30-day day-wise GST Collection ────────
+    // Calculated directly from actual paid POS orders & sales data
+    const gstDailyHistory = await getGstDailyHistory(30);
+
     // ── Return full balance sheet ────────────────────────────────
     res.json({
       // Config / stored data
@@ -94,6 +112,7 @@ router.get('/', async (req, res) => {
       includeSupplierDues: bs.includeSupplierDues,
       customLiabilities: bs.customLiabilities,
       gstLog: bs.gstLog.slice(-30),                 // last 30 GST entries for transparency
+      gstDailyHistory,                              // Day-wise GST Collection for the last 30 days
 
       // Live calculated data
       assets: {
