@@ -1,9 +1,11 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
+const offlineAuthVault = require('../services/offlineAuthVault');
 
 // In-memory cache for authenticated users (reduces 80%+ redundant Atlas DB roundtrips during polling)
 const userCache = new Map();
-const USER_CACHE_TTL_MS = 30000; // 30 seconds
+const USER_CACHE_TTL_MS = 60000; // 60 seconds
 
 // Periodic garbage collection for expired entries
 setInterval(() => {
@@ -26,7 +28,8 @@ const auth = async (req, res, next) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
     if (!token) return res.status(401).json({ message: 'No token, authorization denied' });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const jwtSecret = process.env.JWT_SECRET || 'peyala_super_secret_jwt_key_2024_change_in_production';
+    const decoded = jwt.verify(token, jwtSecret);
     
     let user = null;
     const now = Date.now();
@@ -34,7 +37,18 @@ const auth = async (req, res, next) => {
     if (cached && cached.expiresAt > now) {
       user = cached.user;
     } else {
-      user = await User.findById(decoded.id).select('-password');
+      // 1. Try DB first if connected
+      if (mongoose.connection.readyState === 1) {
+        try {
+          user = await User.findById(decoded.id).select('-password').maxTimeMS(2000);
+        } catch (_) {}
+      }
+
+      // 2. If DB is offline/recovering or user not found in DB, check offline vault
+      if (!user) {
+        user = offlineAuthVault.findById(decoded.id);
+      }
+
       if (!user) return res.status(401).json({ message: 'Token invalid' });
       userCache.set(decoded.id, { user, expiresAt: now + USER_CACHE_TTL_MS });
     }

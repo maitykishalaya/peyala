@@ -816,6 +816,16 @@ Peyala POS includes a dedicated, high-performance local Windows desktop applicat
 
 ---
 
+## 🛡️ Offline Standalone Engine & Resilience
+
+Peyala POS features an autonomous offline-first operational design:
+1. **Zero-Crash Server Architecture**: The backend Express server never aborts or crashes (`process.exit(1)`) if Cloud Atlas or remote networks are unreachable. It runs in offline-ready standalone mode and performs continuous background auto-recovery.
+2. **Offline Authentication Vault (`offlineAuthVault.js`)**: Cashiers and staff can log in instantly with their email and password even if MongoDB has not finished booting or is undergoing recovery. Credentials are securely synchronized from local database records and baseline snapshots with bcrypt validation.
+3. **Self-Healing Local Database Engine (`localDbRunner.js`)**: Automatically detects and purges stale shutdown lockfiles (`mongod.lock`) left behind by unexpected Windows restarts or power cuts, terminates orphan zombie instances, and launches standalone local `mongod.exe` without invalid Unix flags.
+4. **Resilient Frontend Offline Queue**: Authentication and table transfers bypass optimistic mock queues to prevent corrupted session tokens or reload loops.
+
+---
+
 ## 📱 Dedicated Android Mobile Application for Staff (Enterprise APK)
 
 Peyala POS provides a standalone, production-ready enterprise Android application (`Peyala-POS.apk`) tailored specifically for restaurant waitstaff, captain order punchers, and floor managers to operate on their personal or restaurant Android smartphones without needing a web browser.

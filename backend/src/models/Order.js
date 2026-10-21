@@ -33,6 +33,7 @@ const kotRoundSchema = new mongoose.Schema({
   roundNumber: { type: Number, required: true },
   kotNumber: { type: Number, index: true },
   roundTag: { type: String, default: '[INITIAL ORDER]' },
+  orderNotes: { type: String, trim: true, default: '' },
   items: [{
     name: { type: String, required: true },
     quantity: { type: Number, required: true, default: 1 },
@@ -50,6 +51,7 @@ const orderSchema = new mongoose.Schema({
   table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table', required: true },
   items: [orderItemSchema],
   kotRounds: [kotRoundSchema],
+  orderNotes: { type: String, trim: true, default: '' },
   status: {
     type: String,
     enum: ['open', 'preparing', 'served', 'billed', 'paid', 'cancelled'],

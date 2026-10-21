@@ -66,6 +66,7 @@ export interface KotRound {
   roundNumber: number;
   kotNumber?: number;
   roundTag?: string;
+  orderNotes?: string;
   items: Array<{
     name: string;
     quantity: number;
@@ -88,6 +89,7 @@ export interface Order {
     status: string;
   } | string;
   items: OrderItem[];
+  orderNotes?: string;
   status: 'open' | 'preparing' | 'served' | 'billed' | 'paid' | 'cancelled';
   orderNumber?: number;
   billNumber?: number;
@@ -353,10 +355,10 @@ export const ordersApi = {
     api.get<Order>(`/orders/${id}`),
   getActiveForTable: (tableId: string) =>
     api.get<Order | null>(`/orders/table/${tableId}/active`),
-  create: (data: { tableId: string; items: OrderInputItem[]; shouldPrint?: boolean }) =>
+  create: (data: { tableId: string; items: OrderInputItem[]; shouldPrint?: boolean; orderNotes?: string }) =>
     api.post<Order>('/orders', data),
-  addItems: (id: string, items: OrderInputItem[], options?: { shouldPrint?: boolean }) =>
-    api.post<Order>(`/orders/${id}/items`, { items, shouldPrint: options?.shouldPrint }),
+  addItems: (id: string, items: OrderInputItem[], options?: { shouldPrint?: boolean; orderNotes?: string }) =>
+    api.post<Order>(`/orders/${id}/items`, { items, shouldPrint: options?.shouldPrint, orderNotes: options?.orderNotes }),
   updateItem: (id: string, itemId: string, data: { status?: string; quantity?: number; notes?: string }) =>
     api.patch<Order>(`/orders/${id}/items/${itemId}`, data),
   cancelItem: (id: string, itemId: string) =>
@@ -446,6 +448,7 @@ export interface KdsPrepTableEntry {
   variantName?: string;
   status: 'pending' | 'preparing' | 'served' | 'cancelled';
   notes?: string;
+  orderNotes?: string;
   addons?: string[];
   createdAt: string;
   orderedAt?: string;

@@ -311,6 +311,7 @@ export default function TablesPage() {
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
   const lastAlertTimestampRef = useRef<number>(Date.now() - 5000);
   const lastTablesHashRef = useRef<string>('');
+  const isDataLoadingRef = useRef<boolean>(false);
 
   // Table Management Modal (create/edit)
   const [tableModal, setTableModal] = useState<'create' | 'edit' | null>(null);
@@ -384,6 +385,8 @@ export default function TablesPage() {
   // Load all tables, menu, and addons
   const loadData = async (silent: boolean = false) => {
     const isSilent = typeof silent === 'boolean' ? silent : false;
+    if (isSilent && isDataLoadingRef.current) return;
+    isDataLoadingRef.current = true;
     try {
       if (!isSilent) setLoading(true);
 
@@ -458,6 +461,7 @@ export default function TablesPage() {
       console.error('Failed to load POS data:', err);
     } finally {
       if (!isSilent) setLoading(false);
+      isDataLoadingRef.current = false;
     }
   };
 
@@ -874,6 +878,9 @@ export default function TablesPage() {
       const res = await ordersApi.getActiveForTable(table._id);
       setActiveOrder(res.data);
       if (res.data) {
+        if (res.data.orderNotes) {
+          setOrderNotes(res.data.orderNotes);
+        }
         setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
         setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
         setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
@@ -1204,6 +1211,7 @@ export default function TablesPage() {
   // ── Dispatch KOT / Save Actions ──
   // User Rule: "once the kot is sent it should return to table view"
   const handleSendKOT = async (shouldPrint: boolean) => {
+    if (actionLoading) return;
     if (!canManageOrders) {
       toast.error('Order dispatching is restricted to authorized staff.');
       return;
@@ -1239,10 +1247,16 @@ export default function TablesPage() {
       setActionLoading(true);
       setSubmittingAction(shouldPrint ? 'kot_print' : 'kot');
 
-      if (isRound2Mode && activeOrder) {
+      const effectiveRound2 = isRound2Mode || (targetTable?.status === 'occupied' && Boolean(targetTable?.activeOrder));
+      const effectiveOrder = activeOrder || (targetTable?.activeOrder as any);
+
+      if (effectiveRound2 && effectiveOrder) {
         // CASE: Add round to existing table order
-        const roundNum = (activeOrder.kotRounds?.length || 1) + 1;
-        const res = await ordersApi.addItems(activeOrder._id, payloadItems, { shouldPrint });
+        const roundNum = (effectiveOrder.kotRounds?.length || 1) + 1;
+        const res = await ordersApi.addItems(effectiveOrder._id, payloadItems, {
+          shouldPrint,
+          orderNotes: orderNotes.trim() || undefined,
+        });
         const updatedOrder = res.data;
 
         if (shouldPrint) {
@@ -1272,6 +1286,7 @@ export default function TablesPage() {
             roundTag: `[ROUND ${roundNum} - ADD-ON]`,
             createdAt: new Date(),
             items: printableItems,
+            orderNotes: orderNotes.trim() || undefined,
           });
 
           if (newRound?._id) {
@@ -1294,6 +1309,7 @@ export default function TablesPage() {
           tableId: targetTable?._id || tables[0]?._id,
           items: payloadItems,
           shouldPrint,
+          orderNotes: orderNotes.trim() || undefined,
         });
         const createdOrder = res.data;
 
@@ -1324,6 +1340,7 @@ export default function TablesPage() {
             roundTag: '[INITIAL ORDER]',
             createdAt: new Date(),
             items: printableItems,
+            orderNotes: orderNotes.trim() || undefined,
           });
 
           if (firstRound?._id) {
@@ -1344,6 +1361,7 @@ export default function TablesPage() {
 
       // Clear cart & return to Table View per user requirement!
       setCart({});
+      setOrderNotes('');
       setSelectedTable(null);
       setActiveOrder(null);
       setIsRound2Mode(false);
@@ -2793,6 +2811,74 @@ export default function TablesPage() {
                   </div>
                 </div>
 
+                {/* Customer Instruction / Cooking Note (Mobile & Desktop Friendly) */}
+                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2.5 my-2 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
+                      <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Customer Instruction</span>
+                    </div>
+                    {orderNotes && (
+                      <button
+                        type="button"
+                        onClick={() => setOrderNotes('')}
+                        className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Quick Touch Chips for Waiters */}
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                    {[
+                      'Less Spicy',
+                      'No Onion/Garlic',
+                      'Parcel / Takeaway',
+                      'Extra Spicy',
+                      'Serve Hot',
+                      'Extra Crispy',
+                    ].map((chip) => {
+                      const isSelected = orderNotes.includes(chip);
+                      return (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              const updated = orderNotes
+                                .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
+                                .replace(/^,\s*/, '')
+                                .trim();
+                              setOrderNotes(updated);
+                            } else {
+                              setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
+                            }
+                          }}
+                          className={cn(
+                            'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                            isSelected
+                              ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
+                          )}
+                        >
+                          {isSelected ? '✓ ' : '+ '}{chip}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={orderNotes}
+                      onChange={(e) => setOrderNotes(e.target.value)}
+                      placeholder="Type cooking note (e.g. less salt, serve water first)..."
+                      className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
                 {/* Financial Summary */}
                 <div className="space-y-1.5 pt-2.5 border-t border-gray-200 dark:border-gray-800 text-sm">
                   <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
@@ -3091,6 +3177,74 @@ export default function TablesPage() {
                             );
                           })
                         )}
+                      </div>
+                    </div>
+
+                    {/* Customer Instruction / Cooking Note (Mobile-Friendly) */}
+                    <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2.5 space-y-1.5 shrink-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
+                          <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>Customer Instruction</span>
+                        </div>
+                        {orderNotes && (
+                          <button
+                            type="button"
+                            onClick={() => setOrderNotes('')}
+                            className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Quick Touch Chips for Mobile Waiters */}
+                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                        {[
+                          'Less Spicy',
+                          'No Onion/Garlic',
+                          'Parcel / Takeaway',
+                          'Extra Spicy',
+                          'Serve Hot',
+                          'Extra Crispy',
+                        ].map((chip) => {
+                          const isSelected = orderNotes.includes(chip);
+                          return (
+                            <button
+                              key={chip}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  const updated = orderNotes
+                                    .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
+                                    .replace(/^,\s*/, '')
+                                    .trim();
+                                  setOrderNotes(updated);
+                                } else {
+                                  setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
+                                }
+                              }}
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                                isSelected
+                                  ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
+                              )}
+                            >
+                              {isSelected ? '✓ ' : '+ '}{chip}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={orderNotes}
+                          onChange={(e) => setOrderNotes(e.target.value)}
+                          placeholder="Type cooking note (e.g. less salt, serve water first)..."
+                          className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        />
                       </div>
                     </div>
 

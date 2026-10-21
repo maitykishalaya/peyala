@@ -4,9 +4,12 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const { auth, adminOnly, invalidateUserCache } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const offlineAuthVault = require('../services/offlineAuthVault');
 
 // Ensure only read-only demo viewer account exists for public walkthroughs
 async function ensureDefaultAccounts() {
+  if (mongoose.connection.readyState !== 1) return;
+
   const defaultAccounts = [
     { name: 'Demo View', email: 'viewer@peyala.com', password: 'peyala123', role: 'viewer' },
   ];
@@ -24,23 +27,41 @@ async function ensureDefaultAccounts() {
     try {
       let user = await User.findOne({ email: acc.email });
       if (!user) {
-        await User.create({
+        user = await User.create({
           ...acc,
           isActive: true,
           isFirstLogin: false,
           hasSeenWalkthrough: true,
         });
         console.log(`✅ Demo viewer account initialized: ${acc.email} (${acc.role})`);
-      } else if (!user.isActive) {
-        user.isActive = true;
-        await user.save();
-        invalidateUserCache(user._id);
-        console.log(`✅ Demo viewer account re-activated: ${acc.email} (${acc.role})`);
+      } else {
+        let changed = false;
+        if (!user.isActive) {
+          user.isActive = true;
+          changed = true;
+        }
+        const matchesCurrent = await user.matchPassword(acc.password).catch(() => false);
+        if (!matchesCurrent) {
+          user.password = acc.password;
+          changed = true;
+        }
+        if (changed) {
+          await user.save();
+          invalidateUserCache(user._id);
+          console.log(`✅ Demo viewer account password synchronized: ${acc.email}`);
+        }
       }
+      offlineAuthVault.saveUser(user);
     } catch (err) {
       // Ignore duplicate key or startup errors
     }
   }
+
+  // Pre-cache all active database users into offline vault for zero-downtime offline login
+  try {
+    const allUsers = await User.find({ isActive: true }).select('+password');
+    offlineAuthVault.syncFromDb(allUsers);
+  } catch (_) {}
 }
 
 mongoose.connection.on('connected', () => {
@@ -54,20 +75,80 @@ if (mongoose.connection.readyState === 1) {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (email === 'viewer@peyala.com') {
-      await ensureDefaultAccounts();
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
     }
-    const user = await User.findOne({ email });
-    if (!user || !(await user.matchPassword(password))) {
+
+    let user = null;
+    let isOfflineAuth = false;
+
+    // 1. Try DB authentication if connected
+    if (mongoose.connection.readyState === 1) {
+      if (email === 'viewer@peyala.com') {
+        await ensureDefaultAccounts().catch(() => {});
+      }
+      try {
+        user = await User.findOne({ email }).maxTimeMS(2500);
+      } catch (dbErr) {
+        console.warn('[Auth] Database lookup error or timeout, trying offline vault:', dbErr.message);
+      }
+    }
+
+    // 2. Fall back to Offline Auth Vault if DB is not connected, timed out, or user not in DB
+    if (!user) {
+      const offlineUser = await offlineAuthVault.verifyUser(email, password);
+      if (offlineUser) {
+        user = offlineUser;
+        isOfflineAuth = true;
+      }
+    } else {
+      // Verify password via DB model
+      const isMatch = await user.matchPassword(password).catch(() => false);
+      if (!isMatch) {
+        // Double check against offline vault in case password was cached/reset locally
+        const offlineFallback = await offlineAuthVault.verifyUser(email, password);
+        if (offlineFallback) {
+          user = offlineFallback;
+          isOfflineAuth = true;
+        } else {
+          return res.status(401).json({ message: 'Invalid credentials' });
+        }
+      } else {
+        // Password verified in DB: keep offline vault up-to-date
+        offlineAuthVault.saveUser(user);
+      }
+    }
+
+    if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-    if (!user.isActive) return res.status(403).json({ message: 'Account deactivated. Contact admin.' });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
+    if (user.isActive === false) {
+      return res.status(403).json({ message: 'Account deactivated. Contact admin.' });
+    }
 
-    await log({ user, action: 'LOGIN', module: 'Auth', description: `${user.name} logged in`, ip: req.ip });
+    const jwtSecret = process.env.JWT_SECRET || 'peyala_super_secret_jwt_key_2024_change_in_production';
+    const token = jwt.sign(
+      { id: user._id || user.id, email: user.email, role: user.role, isOffline: isOfflineAuth },
+      jwtSecret,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
 
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role }, isFirstLogin: user.isFirstLogin });
+    // Audit log (non-blocking, ignore errors if DB offline)
+    log({
+      user,
+      action: 'LOGIN',
+      module: 'Auth',
+      description: `${user.name} logged in${isOfflineAuth ? ' (Offline Vault Mode)' : ''}`,
+      ip: req.ip,
+    }).catch(() => {});
+
+    res.json({
+      token,
+      user: { id: user._id || user.id, name: user.name, email: user.email, role: user.role },
+      isFirstLogin: user.isFirstLogin || false,
+      isOfflineMode: isOfflineAuth || mongoose.connection.readyState !== 1,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

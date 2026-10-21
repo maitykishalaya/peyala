@@ -387,6 +387,7 @@ router.get('/kds/active', async (req, res) => {
           variantName: variantName || '',
           status: item.status,
           notes: item.notes || '',
+          orderNotes: order.orderNotes || (order._doc && order._doc.orderNotes) || '',
           addons: itemAddons,
           createdAt: itemPriorityTime,
           orderedAt: item.createdAt || order.createdAt,
@@ -731,7 +732,8 @@ router.get('/:id', async (req, res) => {
 router.post('/', staffOrAdmin, async (req, res) => {
   let claimedTableId = null;
   try {
-    const { tableId, items, shouldPrint } = req.body;
+    const { tableId, items, shouldPrint, orderNotes, notes } = req.body;
+    const customerInstruction = (orderNotes || notes || '').trim();
 
     if (!tableId) {
       return res.status(400).json({ message: 'Table ID is required' });
@@ -751,6 +753,20 @@ router.post('/', staffOrAdmin, async (req, res) => {
       const existing = await Table.findById(tableId);
       if (!existing) {
         return res.status(404).json({ message: 'Table not found' });
+      }
+      // Resilient fallback for mobile/touch race conditions:
+      // If table is already occupied with an active order, append items as an add-on round instead of erroring
+      if (existing.activeOrder) {
+        const activeOrder = await Order.findById(existing.activeOrder);
+        if (activeOrder && !['paid', 'cancelled'].includes(activeOrder.status)) {
+          const populated = await appendItemsToOrder(activeOrder, {
+            items,
+            shouldPrint,
+            orderNotes: customerInstruction,
+            user: req.user,
+          });
+          return res.json(populated);
+        }
       }
       return res.status(400).json({ message: `Table ${existing.tableNumber} is already occupied with an active order` });
     }
@@ -833,6 +849,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
       roundNumber: 1,
       kotNumber: dailyKotNumber,
       roundTag: '[INITIAL ORDER]',
+      orderNotes: customerInstruction,
       items: snapshottedItems.map((i) => ({
         name: i.name,
         quantity: i.quantity,
@@ -853,6 +870,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
       kotCount: 1,
       items: snapshottedItems,
       kotRounds: [initialKotRound],
+      orderNotes: customerInstruction,
       status: 'open',
       subtotal: totals.subtotal,
       taxAmount: totals.taxAmount,
@@ -886,159 +904,175 @@ router.post('/', staffOrAdmin, async (req, res) => {
   }
 });
 
+// Helper: append items and create a new KOT round for an order
+async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes, user }) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Items array is required');
+  }
+  if (['paid', 'cancelled'].includes(order.status)) {
+    throw new Error(`Cannot add items to an order with status "${order.status}"`);
+  }
+
+  const customerInstruction = (orderNotes || notes || '').trim();
+  if (customerInstruction) {
+    order.orderNotes = customerInstruction;
+  }
+
+  // Fetch and snapshot MenuItems
+  const itemIds = items.map((i) => i.menuItemId);
+  const menuItems = await MenuItem.find({ _id: { $in: itemIds } });
+  const menuItemMap = new Map(menuItems.map((m) => [m._id.toString(), m]));
+
+  const now = new Date();
+
+  // Check if table currently has unserved items (pending or preparing)
+  const unservedPriorItems = (order.items || []).filter(
+    (i) => i.status === 'pending' || i.status === 'preparing'
+  );
+  const hasUnservedPriorItems = unservedPriorItems.length > 0;
+
+  // If order has unserved items, new round inherits the oldest unserved item's priority time.
+  // If all previous items were already served, this round starts fresh with priority timestamp 'now'.
+  let effectivePriorityTime = now;
+  if (hasUnservedPriorItems) {
+    const oldestPriorTime = unservedPriorItems.reduce((oldest, it) => {
+      const t = getItemEffectiveTime(order, it);
+      return t < oldest ? t : oldest;
+    }, getItemEffectiveTime(order, unservedPriorItems[0]));
+    effectivePriorityTime = oldestPriorTime;
+  } else {
+    effectivePriorityTime = now;
+  }
+
+  const nextKotCount = (order.kotCount || 1) + 1;
+  order.kotCount = nextKotCount;
+
+  const newRoundItems = [];
+  for (const it of items) {
+    const mi = menuItemMap.get(String(it.menuItemId));
+    if (!mi) {
+      throw new Error(`Menu item with ID ${it.menuItemId} was not found`);
+    }
+
+    let basePrice = mi.price;
+    let variantObj = undefined;
+    if (it.variant && (it.variant.name || typeof it.variant.price === 'number')) {
+      if (typeof it.variant.price === 'number') {
+        basePrice = Number(it.variant.price);
+      } else if (it.variant.price) {
+        basePrice = Number(it.variant.price) || basePrice;
+      }
+      variantObj = {
+        name: String(it.variant.name || '').trim(),
+        price: basePrice,
+      };
+    }
+
+    let addonsTotal = 0;
+    const validSelectedAddons = [];
+    if (Array.isArray(it.selectedAddons)) {
+      for (const a of it.selectedAddons) {
+        if (a && typeof a.name === 'string') {
+          const addonPrice = Math.max(0, Number(a.price) || 0);
+          addonsTotal += addonPrice;
+          validSelectedAddons.push({
+            addon: a.addon || a.addonId || undefined,
+            name: a.name.trim(),
+            price: addonPrice,
+          });
+        }
+      }
+    }
+
+    const finalUnitPrice = basePrice + addonsTotal;
+
+    const itemObj = {
+      menuItem: mi._id,
+      name: mi.name,
+      price: finalUnitPrice,
+      taxPercent: mi.taxPercent !== undefined ? mi.taxPercent : 5,
+      quantity: Math.max(1, Number(it.quantity) || 1),
+      notes: it.notes ? String(it.notes).trim() : '',
+      variant: variantObj,
+      selectedAddons: validSelectedAddons,
+      status: 'pending',
+      roundNumber: nextKotCount,
+      effectiveTime: effectivePriorityTime,
+      createdAt: now,
+    };
+    order.items.push(itemObj);
+    newRoundItems.push(itemObj);
+  }
+
+  // If order was billed or served, adding items re-opens it for kitchen preparation
+  if (['billed', 'served'].includes(order.status)) {
+    order.status = 'open';
+    order.foodServedAt = null;
+  }
+
+  const totals = Order.calcTotals(order.items, order.discountValue != null ? order.discountValue : order.discount, order.discountType || 'flat');
+  order.subtotal = totals.subtotal;
+  order.taxAmount = totals.taxAmount;
+  order.total = totals.total;
+
+  if (!Array.isArray(order.kotRounds)) {
+    order.kotRounds = [];
+  }
+
+  const isAutoPrint = shouldPrint !== false;
+  const dailyKotNumber = await getNextDailyKotNumber(now);
+  const sortedRoundItems = [...newRoundItems].sort(
+    (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
+  );
+  order.kotRounds.push({
+    roundNumber: nextKotCount,
+    kotNumber: dailyKotNumber,
+    roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
+    orderNotes: customerInstruction,
+    items: sortedRoundItems.map((i) => ({
+      name: i.name,
+      quantity: i.quantity,
+      notes: i.notes || '',
+      variantName: i.variant?.name || '',
+      addons: i.selectedAddons?.map((a) => a.name) || [],
+    })),
+    printed: !isAutoPrint,
+    printedAt: !isAutoPrint ? new Date() : null,
+    createdAt: now,
+    effectiveTime: effectivePriorityTime,
+  });
+
+  order.effectiveActiveTime = effectivePriorityTime;
+  await order.save();
+
+  if (user) {
+    await log({
+      user,
+      action: 'UPDATE',
+      module: 'Orders',
+      description: `${user.name} added ${items.length} item(s) to Order on Table`,
+    });
+  }
+
+  return populateOrder(Order.findById(order._id));
+}
+
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/items — add another KOT round to existing order
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/items', staffOrAdmin, async (req, res) => {
   try {
-    const { items, shouldPrint } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: 'Items array is required' });
-    }
-
     const order = await Order.findById(req.params.id);
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    if (['paid', 'cancelled'].includes(order.status)) {
-      return res.status(400).json({ message: `Cannot add items to an order with status "${order.status}"` });
-    }
-
-    // Fetch and snapshot MenuItems
-    const itemIds = items.map((i) => i.menuItemId);
-    const menuItems = await MenuItem.find({ _id: { $in: itemIds } });
-    const menuItemMap = new Map(menuItems.map((m) => [m._id.toString(), m]));
-
-    const now = new Date();
-
-    // Check if table currently has unserved items (pending or preparing)
-    const unservedPriorItems = (order.items || []).filter(
-      (i) => i.status === 'pending' || i.status === 'preparing'
-    );
-    const hasUnservedPriorItems = unservedPriorItems.length > 0;
-
-    // If order has unserved items, new round inherits the oldest unserved item's priority time.
-    // If all previous items were already served, this round starts fresh with priority timestamp 'now'.
-    let effectivePriorityTime = now;
-    if (hasUnservedPriorItems) {
-      const oldestPriorTime = unservedPriorItems.reduce((oldest, it) => {
-        const t = getItemEffectiveTime(order, it);
-        return t < oldest ? t : oldest;
-      }, getItemEffectiveTime(order, unservedPriorItems[0]));
-      effectivePriorityTime = oldestPriorTime;
-    } else {
-      effectivePriorityTime = now;
-    }
-
-    const nextKotCount = (order.kotCount || 1) + 1;
-    order.kotCount = nextKotCount;
-
-    const newRoundItems = [];
-    for (const it of items) {
-      const mi = menuItemMap.get(String(it.menuItemId));
-      if (!mi) {
-        return res.status(400).json({ message: `Menu item with ID ${it.menuItemId} was not found` });
-      }
-
-      let basePrice = mi.price;
-      let variantObj = undefined;
-      if (it.variant && (it.variant.name || typeof it.variant.price === 'number')) {
-        if (typeof it.variant.price === 'number') {
-          basePrice = Number(it.variant.price);
-        } else if (it.variant.price) {
-          basePrice = Number(it.variant.price) || basePrice;
-        }
-        variantObj = {
-          name: String(it.variant.name || '').trim(),
-          price: basePrice,
-        };
-      }
-
-      let addonsTotal = 0;
-      const validSelectedAddons = [];
-      if (Array.isArray(it.selectedAddons)) {
-        for (const a of it.selectedAddons) {
-          if (a && typeof a.name === 'string') {
-            const addonPrice = Math.max(0, Number(a.price) || 0);
-            addonsTotal += addonPrice;
-            validSelectedAddons.push({
-              addon: a.addon || a.addonId || undefined,
-              name: a.name.trim(),
-              price: addonPrice,
-            });
-          }
-        }
-      }
-
-      const finalUnitPrice = basePrice + addonsTotal;
-
-      const itemObj = {
-        menuItem: mi._id,
-        name: mi.name,
-        price: finalUnitPrice,
-        taxPercent: mi.taxPercent !== undefined ? mi.taxPercent : 5,
-        quantity: Math.max(1, Number(it.quantity) || 1),
-        notes: it.notes ? String(it.notes).trim() : '',
-        variant: variantObj,
-        selectedAddons: validSelectedAddons,
-        status: 'pending',
-        roundNumber: nextKotCount,
-        effectiveTime: effectivePriorityTime,
-        createdAt: now,
-      };
-      order.items.push(itemObj);
-      newRoundItems.push(itemObj);
-    }
-
-    // If order was billed or served, adding items re-opens it for kitchen preparation
-    if (['billed', 'served'].includes(order.status)) {
-      order.status = 'open';
-      order.foodServedAt = null;
-    }
-
-    const totals = Order.calcTotals(order.items, order.discountValue != null ? order.discountValue : order.discount, order.discountType || 'flat');
-    order.subtotal = totals.subtotal;
-    order.taxAmount = totals.taxAmount;
-    order.total = totals.total;
-
-    if (!Array.isArray(order.kotRounds)) {
-      order.kotRounds = [];
-    }
-
-    const isAutoPrint = shouldPrint !== false;
-    const dailyKotNumber = await getNextDailyKotNumber(now);
-    const sortedRoundItems = [...newRoundItems].sort(
-      (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
-    );
-    order.kotRounds.push({
-      roundNumber: nextKotCount,
-      kotNumber: dailyKotNumber,
-      roundTag: `[ROUND ${nextKotCount} - ADD-ON]`,
-      items: sortedRoundItems.map((i) => ({
-        name: i.name,
-        quantity: i.quantity,
-        notes: i.notes || '',
-        variantName: i.variant?.name || '',
-        addons: i.selectedAddons?.map((a) => a.name) || [],
-      })),
-      printed: !isAutoPrint,
-      printedAt: !isAutoPrint ? new Date() : null,
-      createdAt: now,
-      effectiveTime: effectivePriorityTime,
-    });
-
-    order.effectiveActiveTime = effectivePriorityTime;
-
-    await order.save();
-
-    await log({
+    const populated = await appendItemsToOrder(order, {
+      items: req.body.items,
+      shouldPrint: req.body.shouldPrint,
+      orderNotes: req.body.orderNotes,
+      notes: req.body.notes,
       user: req.user,
-      action: 'UPDATE',
-      module: 'Orders',
-      description: `${req.user.name} added ${items.length} item(s) to Order on Table`,
     });
-
-    const populated = await populateOrder(Order.findById(order._id));
     res.json(populated);
   } catch (err) {
     res.status(400).json({ message: err.message });

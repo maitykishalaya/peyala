@@ -2,6 +2,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
+const { spawn, execSync } = require('child_process');
 
 class LocalDbRunner {
   constructor() {
@@ -57,37 +58,85 @@ class LocalDbRunner {
 
   /**
    * Ensure local database is up and accepting connections
+  /**
+   * Remove stale lock files left behind by ungraceful shutdowns or power outages
+   */
+  cleanStaleLocks() {
+    try {
+      const lockFile = path.join(this.dataDir, 'mongod.lock');
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile);
+        console.log('[LocalDbRunner] Cleaned stale mongod.lock file for fresh start.');
+      }
+    } catch (e) {
+      console.warn('[LocalDbRunner] Note on mongod.lock:', e.message);
+    }
+  }
+
+  /**
+   * Terminate any hung mongod process if it is not listening on the expected port
+   */
+  killOrphanedMongod() {
+    try {
+      if (process.platform === 'win32') {
+        const { execSync } = require('child_process');
+        execSync('taskkill /F /IM mongod.exe >nul 2>&1');
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Ensure local database is up and accepting connections
    */
   async start() {
-    // 1. Check if an external MongoDB service is already running on this port
+    // 1. Check if an external or already running MongoDB service is active on this port
     const isOpen = await this.checkPortOpen(this.port);
     if (isOpen) {
-      console.log(`[LocalDbRunner] Detected existing MongoDB running on 127.0.0.1:${this.port}`);
+      console.log(`[LocalDbRunner] Detected active MongoDB running on 127.0.0.1:${this.port}`);
       this.isEmbedded = false;
       return this.getUri();
     }
 
-    // 2. Launch persistent local engine on this port
+    // 2. Port is closed: cleanup any orphaned zombie process and stale lock files
+    this.killOrphanedMongod();
+    await new Promise((r) => setTimeout(r, 200));
+
     console.log(`[LocalDbRunner] Port ${this.port} is free. Launching local MongoDB engine with WiredTiger persistence...`);
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
     }
+    this.cleanStaleLocks();
 
     // 2a. Check if portable mongod.exe exists in backend/bin or Program Files
     const binaryPath = this.findMongodBinary();
     if (binaryPath) {
+      process.env.MONGOMS_SYSTEM_BINARY = binaryPath;
       try {
         console.log(`[LocalDbRunner] Spawning standalone mongod from ${binaryPath}...`);
-        const { spawn } = require('child_process');
-        this.process = spawn(binaryPath, [
+        const mongodArgs = [
           '--dbpath', this.dataDir,
           '--port', String(this.port),
           '--bind_ip', '127.0.0.1',
-          '--nounixsocket',
-        ], {
+        ];
+        if (process.platform !== 'win32') {
+          mongodArgs.push('--nounixsocket');
+        }
+
+        this.process = spawn(binaryPath, mongodArgs, {
           windowsHide: true,
           detached: false,
-          stdio: 'ignore',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        this.process.stdout?.on('data', (d) => {
+          const str = d.toString();
+          if (str.includes('waiting for connections on port')) {
+            console.log(`[LocalDbRunner] Standalone mongod is ready and listening on port ${this.port}`);
+          }
+        });
+
+        this.process.stderr?.on('data', (d) => {
+          console.warn(`[LocalDbRunner stderr] ${d.toString().trim()}`);
         });
 
         this.process.on('error', (err) => {
@@ -109,8 +158,9 @@ class LocalDbRunner {
       }
     }
 
-    // 2b. Fallback to MongoMemoryServer
+    // 2b. Fallback to MongoMemoryServer with local system binary
     try {
+      this.cleanStaleLocks();
       this.server = await MongoMemoryServer.create({
         instance: {
           port: this.port,
@@ -118,6 +168,7 @@ class LocalDbRunner {
           storageEngine: 'wiredTiger',
           dbName: this.dbName,
         },
+        binary: binaryPath ? { systemBinary: binaryPath } : undefined,
         autoStart: true,
       });
 

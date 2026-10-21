@@ -410,7 +410,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
                   ['Architecture', 'Local-First Operational Data Store'],
-                  ['Application Version', '10.0.0'],
+                  ['Application Version', '11.0.0'],
                   ['Local Database', 'WiredTiger Local MongoDB (Sub-5ms)'],
                   ['Central Database', 'MongoDB Atlas (Periodic 15-Min Sync)'],
                   ['Backend Port', '4000'],
@@ -522,7 +522,7 @@ export default function SettingsPage() {
                   <History className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="text-lg font-bold text-gray-900 dark:text-white">
-                  v{maintenanceData?.system?.applicationVersion || '10.0.0'}
+                  v{maintenanceData?.system?.applicationVersion || '11.0.0'}
                 </div>
                 <p className="text-[11px] text-gray-400">
                   {restorePoints.length} Restore Points Available

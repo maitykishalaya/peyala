@@ -58,6 +58,8 @@ export interface KOTPrintData {
   roundTag?: string; // e.g. '[INITIAL ORDER]' or '[ROUND 2 - ADD-ON]'
   createdAt?: string | Date;
   items: KOTItem[];
+  orderNotes?: string;
+  customerInstruction?: string;
 }
 
 export interface BillItem {
@@ -225,6 +227,21 @@ export function generateKOTHtml(data: KOTPrintData): string {
     ? String(data.kotNumber)
     : data.tokenNo || (data.orderNumber ? String(data.orderNumber).slice(-4) : '1');
 
+  const instruction = (data.orderNotes || data.customerInstruction || '').trim();
+  const instructionBoxHtml = instruction
+    ? `
+      <div style="border: 2.5px solid #000; padding: 5px 6px; margin: 4px 0 6px 0; background-color: #fff; text-align: left;">
+        <div style="font-size: 11px; font-weight: 900; letter-spacing: 0.5px; border-bottom: 1.5px solid #000; padding-bottom: 2px; margin-bottom: 3px; display: flex; justify-content: space-between;">
+          <span>*** INSTRUCTION ***</span>
+          <span>CUSTOMER NOTE</span>
+        </div>
+        <div style="font-size: 16px; font-weight: 900; line-height: 1.25; word-break: break-word; text-transform: uppercase;">
+          ${escapeHtml(instruction)}
+        </div>
+      </div>
+    `
+    : '';
+
   // Food items first, beverage section items appear after food items
   const sortedItems = [...(data.items || [])].sort((a, b) => {
     const aBev = isBeverageItem(a) ? 1 : 0;
@@ -374,6 +391,8 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
         <div class="divider-solid"></div>
 
+        ${instructionBoxHtml}
+
         <!-- Items Table -->
         <table>
           <thead>
@@ -395,6 +414,12 @@ export function generateKOTHtml(data: KOTPrintData): string {
           <span>Total Quantity:</span>
           <span style="padding-right: 2px;">${totalQty}</span>
         </div>
+
+        ${instruction ? `
+        <div style="margin-top: 6px; padding: 4px 6px; border: 2px solid #000; font-size: 13px; font-weight: 900; text-align: center; text-transform: uppercase;">
+          *** NOTE: ${escapeHtml(instruction)} ***
+        </div>
+        ` : ''}
 
         <div class="divider" style="margin-top: 8px;"></div>
         <div class="center" style="font-size: 10px; color: #333;">*** Kitchen Copy ***</div>

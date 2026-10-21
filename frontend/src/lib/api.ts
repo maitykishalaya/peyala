@@ -40,16 +40,20 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401 && typeof window !== 'undefined') {
+    const config = err.config;
+    const isAuthRequest = config?.url?.includes('/auth/login') || config?.url?.includes('/auth/register');
+
+    if (err.response?.status === 401 && typeof window !== 'undefined' && !isAuthRequest) {
       localStorage.removeItem('peyala_token');
       localStorage.removeItem('peyala_user');
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     if (err.code === 'ECONNABORTED' && err.message?.includes('timeout')) {
       console.warn('[Peyala API] Request timed out after 12s. Released UI wait lock.');
     }
 
-    const config = err.config;
     const method = (config?.method || 'get').toLowerCase();
     const isMutation = ['post', 'put', 'patch', 'delete'].includes(method);
     const isConnectionError =
@@ -60,9 +64,9 @@ api.interceptors.response.use(
       (typeof navigator !== 'undefined' && !navigator.onLine);
 
     // Queue mutation locally on connection or DB error so user can continue uninterrupted
-    // EXCLUDE table transfer/move operations from background offline replay to prevent state conflicts
+    // EXCLUDE table transfer/move operations and auth operations from background offline replay
     if (isMutation && isConnectionError && typeof window !== 'undefined' && config) {
-      if (config.url?.includes('/transfer')) {
+      if (config.url?.includes('/transfer') || config.url?.includes('/auth/')) {
         return Promise.reject(err);
       }
       const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;

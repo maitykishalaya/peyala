@@ -805,7 +805,7 @@ export default function LoginPage() {
       router.push(redirectTarget);
     } catch (err: any) {
       if (!err.response) {
-        setError('Cannot reach server (' + (err.message || 'Network Error') + '). Please ensure phone is connected to the restaurant Wi-Fi.');
+        setError('Cannot reach server (' + (err.message || 'Network Error') + '). If you are running locally without internet, the local database/server is starting up. Please wait 5 seconds and retry.');
       } else {
         setError(err.response?.data?.message || 'Invalid email or password. Please check your credentials.');
       }

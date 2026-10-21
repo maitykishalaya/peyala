@@ -671,6 +671,7 @@ export default function KitchenDisplayPage() {
     variantName?: string;
     addons: string[];
     notes?: string;
+    orderNotes?: string;
     roundNumber?: number;
     status: 'pending' | 'preparing' | 'served';
     punchTime: Date;
@@ -717,6 +718,7 @@ export default function KitchenDisplayPage() {
           variantName: item.variant?.name,
           addons,
           notes: item.notes,
+          orderNotes: order.orderNotes || (order as any).notes || '',
           roundNumber: item.roundNumber || 1,
           status: item.status as any,
           punchTime,
@@ -1267,6 +1269,14 @@ export default function KitchenDisplayPage() {
                                         • {t.notes}
                                       </span>
                                     )}
+                                    {t.orderNotes && (
+                                      <span
+                                        className="text-[10px] font-black uppercase text-amber-900 dark:text-amber-100 bg-amber-200/90 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-400 dark:border-amber-700 shadow-2xs"
+                                        title={`Customer Note: ${t.orderNotes}`}
+                                      >
+                                        ⚠️ {t.orderNotes}
+                                      </span>
+                                    )}
                                   </div>
 
                                   <button
@@ -1484,6 +1494,12 @@ export default function KitchenDisplayPage() {
                                     <span className="truncate">{it.notes}</span>
                                   </div>
                                 )}
+                                {it.orderNotes && (
+                                  <div className="mt-1.5 p-1.5 bg-amber-500/20 dark:bg-amber-950/60 rounded-md border border-amber-400 dark:border-amber-600 text-xs text-amber-950 dark:text-amber-100 font-black flex items-center gap-1 uppercase shadow-2xs">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                    <span>Note: {it.orderNotes}</span>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Item Action Row */}
@@ -1632,6 +1648,19 @@ export default function KitchenDisplayPage() {
                           <span>Waiter: {order.createdBy?.name || 'Staff'}</span>
                           <span>{activeInfo.punchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
+
+                        {/* Customer Instruction / Cooking Note (Big, Bold, Prominent) */}
+                        {(order.orderNotes || (order as any).notes) && (
+                          <div className="my-2 p-2.5 rounded-xl bg-amber-500/15 dark:bg-amber-950/60 border-2 border-amber-500 dark:border-amber-400 text-amber-950 dark:text-amber-100 shadow-2xs">
+                            <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>Customer Instruction:</span>
+                            </div>
+                            <p className="font-black text-sm sm:text-base mt-1 text-gray-900 dark:text-white leading-snug uppercase">
+                              {order.orderNotes || (order as any).notes}
+                            </p>
+                          </div>
+                        )}
 
                         {/* Items Checklist */}
                         <div className="divide-y divide-gray-100 dark:divide-gray-800 my-2 max-h-[260px] overflow-y-auto pr-0.5">
