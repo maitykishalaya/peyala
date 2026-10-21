@@ -80,6 +80,8 @@ export interface BillPrintData {
   customerName?: string;
   customerPhone?: string;
   customerAddress?: string;
+  customerTotalDue?: number;
+  dueAmount?: number;
   createdAt?: string | Date;
   items: BillItem[];
   subtotal: number;
@@ -596,12 +598,12 @@ export function generateBillHtml(data: BillPrintData): string {
           </tr>
         </table>
 
-        ${data.customerName || data.customerPhone ? `
-          <div style="font-size: 10px; margin-top: 4px; border-top: 1px dotted #ccc; padding-top: 3px;">
-            <div style="color: #666; font-size: 9px;">Customer Details</div>
-            ${data.customerName ? `<div>${escapeHtml(data.customerName)}</div>` : ''}
-            ${data.customerPhone ? `<div>${escapeHtml(data.customerPhone)}</div>` : ''}
-            ${data.customerAddress ? `<div>${escapeHtml(data.customerAddress)}</div>` : ''}
+        ${data.customerName || data.customerPhone || data.customerAddress ? `
+          <div style="font-size: 10px; margin-top: 4px; border-top: 1px dashed #777; padding-top: 3px;">
+            <div style="color: #444; font-size: 9px; font-weight: 800; text-transform: uppercase;">Customer Details</div>
+            ${data.customerName ? `<div><b>Name:</b> ${escapeHtml(data.customerName)}</div>` : ''}
+            ${data.customerPhone ? `<div><b>Phone:</b> ${escapeHtml(data.customerPhone)}</div>` : ''}
+            ${data.customerAddress ? `<div><b>Address:</b> ${escapeHtml(data.customerAddress)}</div>` : ''}
           </div>
         ` : ''}
 
@@ -707,16 +709,58 @@ export function generateBillHtml(data: BillPrintData): string {
               ].filter(Boolean).join(' | ')}
             </div>
           ` : ''}
-          ${(data.paymentMethod === 'due' || (data.paymentBreakdown && (data.paymentBreakdown.due || 0) > 0)) ? `
-            <div style="margin-top: 14px; padding-top: 4px; border-top: 1px dashed #333; font-size: 9.5px;">
+        ` : ''}
+
+        ${(() => {
+          const isDueOrder =
+            data.paymentMethod === 'due' ||
+            (data.paymentBreakdown && (data.paymentBreakdown.due || 0) > 0) ||
+            (data.dueAmount !== undefined && data.dueAmount > 0) ||
+            (data.customerTotalDue !== undefined && data.customerTotalDue > 0);
+
+          if (!isDueOrder) return '';
+
+          const currentBillDue =
+            data.dueAmount !== undefined && data.dueAmount > 0
+              ? data.dueAmount
+              : data.paymentMethod === 'due'
+              ? (data.settledAmount ?? data.total)
+              : (data.paymentBreakdown?.due || 0);
+
+          const totalCustomerDueOwed =
+            data.customerTotalDue !== undefined && data.customerTotalDue !== null
+              ? data.customerTotalDue
+              : currentBillDue;
+
+          return `
+            <div style="border: 2px solid #000; padding: 4px 6px; margin: 6px 0; background-color: #fff; text-align: left;">
+              <div style="font-size: 11px; font-weight: 900; letter-spacing: 0.5px; border-bottom: 1.5px solid #000; padding-bottom: 2px; margin-bottom: 3px; display: flex; justify-content: space-between;">
+                <span>*** DUE / KHATA BILL ***</span>
+                <span>PAYMENT DUE</span>
+              </div>
+              ${currentBillDue > 0 ? `
+                <div style="display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 600; margin: 1px 0;">
+                  <span>This Bill Due Amount:</span>
+                  <span>&#8377;${Number(currentBillDue).toFixed(2)}</span>
+                </div>
+              ` : ''}
+              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; margin-top: 3px; border-top: 1px dashed #000; padding-top: 3px;">
+                <span>TOTAL OWED BY CUSTOMER:</span>
+                <span>&#8377;${Number(totalCustomerDueOwed).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div style="margin-top: 12px; padding-top: 4px; border-top: 1px dashed #333; font-size: 9.5px;">
               <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                 <span>Customer Signature:</span>
                 <span>_______________________</span>
               </div>
-              <div style="font-size: 8.5px; color: #555; text-align: center;">I acknowledge and agree to clear the outstanding due amount.</div>
+              <div style="font-size: 8.5px; color: #555; text-align: center;">
+                I acknowledge and agree to clear the total outstanding due of &#8377;${Number(totalCustomerDueOwed).toFixed(2)}.
+              </div>
             </div>
-          ` : ''}
-        ` : ''}
+          `;
+        })()}
 
         <!-- Secondary Legal info below total -->
         <div class="center" style="font-size: 9.5px; margin-top: 6px; color: #222;">

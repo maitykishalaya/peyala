@@ -66,6 +66,9 @@ import {
   Percent,
   Banknote,
   UserCheck,
+  User,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 import { customersApi, Customer } from '@/lib/api';
 import {
@@ -295,6 +298,166 @@ export default function TablesPage() {
   const [selectedDueCustomer, setSelectedDueCustomer] = useState<Customer | null>(null);
   const [dueCustomerName, setDueCustomerName] = useState('');
   const [dueCustomerPhone, setDueCustomerPhone] = useState('');
+  const [dueCustomerAddress, setDueCustomerAddress] = useState('');
+
+  // Cart Customer Details (Optional) state
+  const [cartCustomerName, setCartCustomerName] = useState('');
+  const [cartCustomerPhone, setCartCustomerPhone] = useState('');
+  const [cartCustomerAddress, setCartCustomerAddress] = useState('');
+  const [cartCustomerId, setCartCustomerId] = useState<string | null>(null);
+  const [cartCustomerDue, setCartCustomerDue] = useState<number | null>(null);
+  const [cartCustomerSuggestions, setCartCustomerSuggestions] = useState<Customer[]>([]);
+  const [showCartCustomerSuggestions, setShowCartCustomerSuggestions] = useState(false);
+  const [isSearchingCartCustomer, setIsSearchingCartCustomer] = useState(false);
+  const cartCustomerDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleCartCustomerQueryChange = (field: 'phone' | 'name' | 'address', val: string) => {
+    if (field === 'phone') {
+      setCartCustomerPhone(val);
+      setCartCustomerId(null);
+      setCartCustomerDue(null);
+    } else if (field === 'name') {
+      setCartCustomerName(val);
+    } else {
+      setCartCustomerAddress(val);
+    }
+
+    const query = field === 'phone' ? val : field === 'name' ? val : '';
+    if (query.trim().length >= 2) {
+      if (cartCustomerDebounceRef.current) clearTimeout(cartCustomerDebounceRef.current);
+      cartCustomerDebounceRef.current = setTimeout(async () => {
+        try {
+          setIsSearchingCartCustomer(true);
+          const res = await customersApi.search(query.trim());
+          setCartCustomerSuggestions(res.data || []);
+          setShowCartCustomerSuggestions((res.data || []).length > 0);
+        } catch (_) {
+          setCartCustomerSuggestions([]);
+          setShowCartCustomerSuggestions(false);
+        } finally {
+          setIsSearchingCartCustomer(false);
+        }
+      }, 150);
+    } else {
+      setCartCustomerSuggestions([]);
+      setShowCartCustomerSuggestions(false);
+    }
+  };
+
+  const handleSelectCartCustomer = (cust: Customer) => {
+    setCartCustomerName(cust.name || '');
+    setCartCustomerPhone(cust.phone || '');
+    setCartCustomerAddress(cust.address || '');
+    setCartCustomerId(cust._id || null);
+    setCartCustomerDue(cust.totalDue !== undefined ? cust.totalDue : null);
+    setShowCartCustomerSuggestions(false);
+    setCartCustomerSuggestions([]);
+  };
+
+  const handleClearCartCustomer = () => {
+    setCartCustomerName('');
+    setCartCustomerPhone('');
+    setCartCustomerAddress('');
+    setCartCustomerId(null);
+    setCartCustomerDue(null);
+    setShowCartCustomerSuggestions(false);
+    setCartCustomerSuggestions([]);
+  };
+
+  const renderCartCustomerBox = (isMobile: boolean = false) => (
+    <div className="bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 rounded-xl p-2.5 my-2 space-y-2 shrink-0">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs font-black uppercase text-blue-900 dark:text-blue-200 tracking-wide">
+          <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span>Customer Details (Optional)</span>
+        </div>
+        {(cartCustomerPhone || cartCustomerName || cartCustomerAddress) && (
+          <button
+            type="button"
+            onClick={handleClearCartCustomer}
+            className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Outstanding Due Alert if regular customer */}
+      {cartCustomerDue !== null && cartCustomerDue > 0 && (
+        <div className="flex items-center justify-between px-2 py-1 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-lg text-xs font-bold text-amber-900 dark:text-amber-200">
+          <span>⚠️ Total Amount Owed:</span>
+          <span className="font-extrabold text-amber-700 dark:text-amber-300">{formatCurrency(cartCustomerDue)}</span>
+        </div>
+      )}
+
+      {/* Inputs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 relative">
+        {/* Phone with Auto-lookup */}
+        <div className="relative">
+          <div className="relative">
+            <Phone className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="tel"
+              value={cartCustomerPhone}
+              onChange={(e) => handleCartCustomerQueryChange('phone', e.target.value)}
+              placeholder="Phone number..."
+              className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Autocomplete Dropdown */}
+          {showCartCustomerSuggestions && cartCustomerSuggestions.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+              {cartCustomerSuggestions.map((cust) => (
+                <button
+                  key={cust._id}
+                  type="button"
+                  onClick={() => handleSelectCartCustomer(cust)}
+                  className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-between text-xs cursor-pointer"
+                >
+                  <div>
+                    <div className="font-bold text-gray-900 dark:text-white">{cust.name}</div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400">{cust.phone}</div>
+                  </div>
+                  {cust.totalDue > 0 ? (
+                    <span className="text-[10px] font-extrabold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                      Due: {formatCurrency(cust.totalDue)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-emerald-600 font-bold">Clear</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Customer Name */}
+        <div className="relative">
+          <User className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={cartCustomerName}
+            onChange={(e) => handleCartCustomerQueryChange('name', e.target.value)}
+            placeholder="Customer Name..."
+            className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      {/* Address */}
+      <div className="relative">
+        <MapPin className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={cartCustomerAddress}
+          onChange={(e) => handleCartCustomerQueryChange('address', e.target.value)}
+          placeholder="Address (Optional)..."
+          className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+    </div>
+  );
 
   // Print Station state
   const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
@@ -634,6 +797,11 @@ export default function TablesPage() {
               tokenNo: bJob.tokenNo,
               tableNumber: bJob.tableNumber,
               billerName: bJob.billerName,
+              customerName: bJob.customerName,
+              customerPhone: bJob.customerPhone,
+              customerAddress: bJob.customerAddress,
+              customerTotalDue: bJob.customerTotalDue,
+              dueAmount: bJob.dueAmount,
               createdAt: bJob.createdAt,
               items: bJob.items,
               subtotal: bJob.subtotal,
@@ -859,6 +1027,7 @@ export default function TablesPage() {
     setActiveOrder(null);
     setIsRound2Mode(false);
     setCart({});
+    handleClearCartCustomer();
     setServiceType('dine_in');
     setGuestCount(table.capacity || 1);
     setOrderNotes('');
@@ -882,9 +1051,16 @@ export default function TablesPage() {
         if (res.data.orderNotes) {
           setOrderNotes(res.data.orderNotes);
         }
+        setCartCustomerName(res.data.customerName || (typeof res.data.customer === 'object' ? (res.data.customer as any)?.name : '') || '');
+        setCartCustomerPhone(res.data.customerPhone || (typeof res.data.customer === 'object' ? (res.data.customer as any)?.phone : '') || '');
+        setCartCustomerAddress(res.data.customerAddress || (typeof res.data.customer === 'object' ? (res.data.customer as any)?.address : '') || '');
+        setCartCustomerId(typeof res.data.customer === 'object' ? (res.data.customer as any)?._id : (res.data.customer || null));
+        setCartCustomerDue(typeof res.data.customer === 'object' ? (res.data.customer as any)?.totalDue : null);
         setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
         setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
         setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
+      } else {
+        handleClearCartCustomer();
       }
       setActiveView('pos_order');
     } catch (err) {
@@ -904,6 +1080,18 @@ export default function TablesPage() {
       const res = await ordersApi.getActiveForTable(table._id);
       setActiveOrder(res.data);
       if (res.data) {
+        if (res.data.customerName || (typeof res.data.customer === 'object' && (res.data.customer as any)?.name)) {
+          setDueCustomerName(res.data.customerName || (res.data.customer as any)?.name || '');
+        }
+        if (res.data.customerPhone || (typeof res.data.customer === 'object' && (res.data.customer as any)?.phone)) {
+          setDueCustomerPhone(res.data.customerPhone || (res.data.customer as any)?.phone || '');
+        }
+        if (res.data.customerAddress || (typeof res.data.customer === 'object' && (res.data.customer as any)?.address)) {
+          setDueCustomerAddress(res.data.customerAddress || (res.data.customer as any)?.address || '');
+        }
+        if (typeof res.data.customer === 'object' && res.data.customer) {
+          setSelectedDueCustomer(res.data.customer as any);
+        }
         setDiscountType((res.data?.discountType as 'flat' | 'percentage') || 'flat');
         setDiscountInput(res.data?.discountValue !== undefined ? res.data.discountValue : (res.data?.discount || 0));
         setSettlementInput(res.data?.settledAmount !== null && res.data?.settledAmount !== undefined ? String(res.data.settledAmount) : String(res.data?.total || 0));
@@ -1061,6 +1249,7 @@ export default function TablesPage() {
     setActiveOrder(null);
     setIsRound2Mode(false);
     setCart({});
+    handleClearCartCustomer();
     setServiceType('dine_in');
     setGuestCount(1);
     setOrderNotes('');
@@ -1257,6 +1446,10 @@ export default function TablesPage() {
         const res = await ordersApi.addItems(effectiveOrder._id, payloadItems, {
           shouldPrint,
           orderNotes: orderNotes.trim() || undefined,
+          customerName: cartCustomerName.trim() || undefined,
+          customerPhone: cartCustomerPhone.trim() || undefined,
+          customerAddress: cartCustomerAddress.trim() || undefined,
+          customerId: cartCustomerId || undefined,
         });
         const updatedOrder = res.data;
 
@@ -1311,6 +1504,10 @@ export default function TablesPage() {
           items: payloadItems,
           shouldPrint,
           orderNotes: orderNotes.trim() || undefined,
+          customerName: cartCustomerName.trim() || undefined,
+          customerPhone: cartCustomerPhone.trim() || undefined,
+          customerAddress: cartCustomerAddress.trim() || undefined,
+          customerId: cartCustomerId || undefined,
         });
         const createdOrder = res.data;
 
@@ -1362,6 +1559,7 @@ export default function TablesPage() {
 
       // Clear cart & return to Table View per user requirement!
       setCart({});
+      handleClearCartCustomer();
       setOrderNotes('');
       setSelectedTable(null);
       setActiveOrder(null);
@@ -1404,17 +1602,28 @@ export default function TablesPage() {
         }));
 
         if (targetOrder) {
-          const addRes = await ordersApi.addItems(targetOrder._id, payloadItems, { shouldPrint: false });
+          const addRes = await ordersApi.addItems(targetOrder._id, payloadItems, {
+            shouldPrint: false,
+            customerName: cartCustomerName.trim() || undefined,
+            customerPhone: cartCustomerPhone.trim() || undefined,
+            customerAddress: cartCustomerAddress.trim() || undefined,
+            customerId: cartCustomerId || undefined,
+          });
           targetOrder = addRes.data;
         } else {
           const createRes = await ordersApi.create({
             tableId: selectedTable?._id || tables[0]?._id,
             items: payloadItems,
             shouldPrint: false,
+            customerName: cartCustomerName.trim() || undefined,
+            customerPhone: cartCustomerPhone.trim() || undefined,
+            customerAddress: cartCustomerAddress.trim() || undefined,
+            customerId: cartCustomerId || undefined,
           });
           targetOrder = createRes.data;
         }
         setCart({});
+        handleClearCartCustomer();
       }
 
       if (!targetOrder) {
@@ -1482,12 +1691,23 @@ export default function TablesPage() {
     const billerDisplayName = user?.name || 'Staff';
     const isPaid = isPaidStatus || targetOrder.status === 'paid';
 
+    const custName = targetOrder.customerName || (typeof targetOrder.customer === 'object' ? (targetOrder.customer as any)?.name : undefined) || (dueCustomerName.trim() || cartCustomerName.trim() || undefined);
+    const custPhone = targetOrder.customerPhone || (typeof targetOrder.customer === 'object' ? (targetOrder.customer as any)?.phone : undefined) || (dueCustomerPhone.trim() || cartCustomerPhone.trim() || undefined);
+    const custAddress = targetOrder.customerAddress || (typeof targetOrder.customer === 'object' ? (targetOrder.customer as any)?.address : undefined) || (dueCustomerAddress.trim() || cartCustomerAddress.trim() || undefined);
+    const custTotalDue = (typeof targetOrder.customer === 'object' ? (targetOrder.customer as any)?.totalDue : undefined) ?? (selectedDueCustomer?.totalDue ?? (cartCustomerDue !== null ? cartCustomerDue : undefined));
+
     printCustomerBill({
       billNumber: targetOrder.billNumber,
       orderNumber: targetOrder.orderNumber,
       tokenNo: targetOrder.orderNumber ? String(targetOrder.orderNumber).slice(-2) : targetOrder._id.slice(-2),
       tableNumber: selectedTable?.tableNumber || (targetOrder.table as any)?.tableNumber || 'Takeaway',
       billerName: billerDisplayName,
+      customerName: custName,
+      customerPhone: custPhone,
+      customerAddress: custAddress,
+      customerTotalDue: custTotalDue,
+      dueAmount: targetOrder.dueAmount,
+      isReprint: targetOrder.status === 'paid' || targetOrder.billPrinted,
       createdAt: new Date((targetOrder as any).billPrintedAt || (targetOrder as any).billedAt || (targetOrder as any).paidAt || targetOrder.createdAt || Date.now()),
       items: printableBillItems,
       subtotal: targetOrder.subtotal,
@@ -1586,10 +1806,11 @@ export default function TablesPage() {
     }
 
     // Validation for Customer Khata if Due is selected or included in part payment
-    let customerInfoPayload: { name: string; phone: string; notes?: string } | undefined = undefined;
+    let customerInfoPayload: { name: string; phone: string; address?: string; notes?: string } | undefined = undefined;
     if (paymentMethod === 'due' || (paymentMethod === 'part' && numPartDue > 0)) {
-      const finalName = (dueCustomerName || selectedDueCustomer?.name || '').trim();
-      const finalPhone = (dueCustomerPhone || selectedDueCustomer?.phone || '').trim();
+      const finalName = (dueCustomerName || selectedDueCustomer?.name || activeOrder.customerName || '').trim();
+      const finalPhone = (dueCustomerPhone || selectedDueCustomer?.phone || activeOrder.customerPhone || '').trim();
+      const finalAddress = (dueCustomerAddress || (typeof activeOrder.customer === 'object' ? (activeOrder.customer as any)?.address : activeOrder.customerAddress) || '').trim();
       if (!finalName) {
         toast.error('Customer name is required for Due / Khata settlement.');
         return;
@@ -1598,7 +1819,13 @@ export default function TablesPage() {
         toast.error('Please enter a valid 10-digit mobile number for Due / Khata settlement.');
         return;
       }
-      customerInfoPayload = { name: finalName, phone: finalPhone };
+      customerInfoPayload = { name: finalName, phone: finalPhone, address: finalAddress || undefined };
+    } else if (dueCustomerPhone.trim() || dueCustomerName.trim() || dueCustomerAddress.trim()) {
+      customerInfoPayload = {
+        name: dueCustomerName.trim() || (selectedDueCustomer?.name || activeOrder.customerName || ''),
+        phone: dueCustomerPhone.trim() || (selectedDueCustomer?.phone || activeOrder.customerPhone || ''),
+        address: dueCustomerAddress.trim() || (typeof activeOrder.customer === 'object' ? (activeOrder.customer as any)?.address : activeOrder.customerAddress) || undefined,
+      };
     }
 
     if (paymentMethod === 'part') {
@@ -1648,6 +1875,7 @@ export default function TablesPage() {
         setSelectedDueCustomer(null);
         setDueCustomerName('');
         setDueCustomerPhone('');
+        setDueCustomerAddress('');
         setCustomerSearchQuery('');
         setPartDue('');
         await loadData();
@@ -1702,6 +1930,7 @@ export default function TablesPage() {
       setSelectedDueCustomer(null);
       setDueCustomerName('');
       setDueCustomerPhone('');
+      setDueCustomerAddress('');
       setCustomerSearchQuery('');
       setPartDue('');
       await loadData();
@@ -2880,6 +3109,9 @@ export default function TablesPage() {
                   </div>
                 </div>
 
+                {/* Customer Details Card (Optional) */}
+                {renderCartCustomerBox(false)}
+
                 {/* Financial Summary */}
                 <div className="space-y-1.5 pt-2.5 border-t border-gray-200 dark:border-gray-800 text-sm">
                   <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
@@ -3248,6 +3480,9 @@ export default function TablesPage() {
                         />
                       </div>
                     </div>
+
+                    {/* Customer Details Card (Optional - Mobile) */}
+                    {renderCartCustomerBox(true)}
 
                     {/* Financial Summary */}
                     <div className="space-y-1.5 pt-2 border-t border-gray-200 dark:border-gray-800 text-sm">
@@ -3975,6 +4210,18 @@ export default function TablesPage() {
                                   className="input h-8 text-xs font-bold w-full"
                                 />
                               </div>
+                              <div className="col-span-1 sm:col-span-2">
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase">
+                                  Customer Address (Optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={dueCustomerAddress}
+                                  onChange={(e) => setDueCustomerAddress(e.target.value)}
+                                  placeholder="e.g. Street / Delivery Address"
+                                  className="input h-8 text-xs font-bold w-full"
+                                />
+                              </div>
                             </div>
                             <p className="text-[10px] text-gray-500">
                               ℹ️ Customer will be saved in Khata. Dues accumulate across visits and can be cleared anytime at month-end.
@@ -4163,6 +4410,13 @@ export default function TablesPage() {
                                   onChange={(e) => setDueCustomerPhone(e.target.value.replace(/\D/g, ''))}
                                   placeholder="10-digit Mobile No *"
                                   className="input h-8 text-xs font-bold"
+                                />
+                                <input
+                                  type="text"
+                                  value={dueCustomerAddress}
+                                  onChange={(e) => setDueCustomerAddress(e.target.value)}
+                                  placeholder="Address (Optional)"
+                                  className="input h-8 text-xs font-bold col-span-1 sm:col-span-2"
                                 />
                               </div>
                             )}

@@ -312,6 +312,9 @@ export default function CustomerDuesPage() {
         billerName: (fullOrder.createdBy as any)?.name || 'Staff',
         customerName: fullOrder.customerName || (typeof fullOrder.customer === 'object' ? (fullOrder.customer as any)?.name : undefined),
         customerPhone: fullOrder.customerPhone || (typeof fullOrder.customer === 'object' ? (fullOrder.customer as any)?.phone : undefined),
+        customerAddress: fullOrder.customerAddress || (typeof fullOrder.customer === 'object' ? (fullOrder.customer as any)?.address : undefined),
+        customerTotalDue: typeof fullOrder.customer === 'object' ? (fullOrder.customer as any)?.totalDue : undefined,
+        dueAmount: fullOrder.dueAmount || fullOrder.total,
         createdAt: fullOrder.createdAt,
         items: (fullOrder.items || []).map((i: any) => ({
           name: i.name,

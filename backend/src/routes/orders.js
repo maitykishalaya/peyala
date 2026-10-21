@@ -19,6 +19,100 @@ router.use(auth);
 // Concurrency lock to prevent simultaneous table transfers / double clicks / race conditions
 const activeTransferLocks = new Set();
 
+// Helper to safely deduplicate, create or update customer, preventing E11000 duplicate keys
+async function resolveAndLinkCustomer({ name, phone, address, customerId } = {}) {
+  const cleanPhone = (phone || '').toString().trim();
+  const cleanName = (name || '').toString().trim();
+  const cleanAddress = (address || '').toString().trim();
+
+  let customerDoc = null;
+
+  if (customerId) {
+    try {
+      customerDoc = await Customer.findById(customerId);
+    } catch (_) {}
+  }
+
+  if (!customerDoc && cleanPhone) {
+    customerDoc = await Customer.findOne({ phone: cleanPhone });
+  }
+
+  if (customerDoc) {
+    let updated = false;
+    if (cleanName && customerDoc.name !== cleanName) {
+      customerDoc.name = cleanName;
+      updated = true;
+    }
+    if (cleanAddress && customerDoc.address !== cleanAddress) {
+      customerDoc.address = cleanAddress;
+      updated = true;
+    }
+    customerDoc.lastVisit = new Date();
+    customerDoc.totalOrders = (customerDoc.totalOrders || 0) + 1;
+    await customerDoc.save();
+    return {
+      customer: customerDoc._id,
+      customerName: customerDoc.name,
+      customerPhone: customerDoc.phone,
+      customerAddress: customerDoc.address || cleanAddress,
+      customerDoc,
+    };
+  }
+
+  // If cleanPhone is provided but no customer found in DB, create new customer
+  if (cleanPhone) {
+    try {
+      customerDoc = await Customer.create({
+        name: cleanName || 'Valued Customer',
+        phone: cleanPhone,
+        address: cleanAddress || '',
+        totalDue: 0,
+        totalOrders: 1,
+        lastVisit: new Date(),
+      });
+      return {
+        customer: customerDoc._id,
+        customerName: customerDoc.name,
+        customerPhone: customerDoc.phone,
+        customerAddress: customerDoc.address || cleanAddress,
+        customerDoc,
+      };
+    } catch (err) {
+      // Concurrency safety: if another request created a customer with this phone simultaneously
+      if (err.code === 11000) {
+        customerDoc = await Customer.findOne({ phone: cleanPhone });
+        if (customerDoc) {
+          if (cleanAddress && !customerDoc.address) {
+            customerDoc.address = cleanAddress;
+            await customerDoc.save();
+          }
+          return {
+            customer: customerDoc._id,
+            customerName: customerDoc.name,
+            customerPhone: customerDoc.phone,
+            customerAddress: customerDoc.address || cleanAddress,
+            customerDoc,
+          };
+        }
+      }
+      throw err;
+    }
+  }
+
+  // If no phone provided, but name or address provided, return for order storage without creating orphan customer doc
+  if (cleanName || cleanAddress) {
+    return {
+      customer: null,
+      customerName: cleanName,
+      customerPhone: '',
+      customerAddress: cleanAddress,
+      customerDoc: null,
+    };
+  }
+
+  return null;
+}
+
 // Helper to populate order consistently
 const populateOrder = (query) => {
   return query
@@ -28,7 +122,7 @@ const populateOrder = (query) => {
       select: 'name price isVeg isAvailable category',
       populate: { path: 'category', select: 'name' },
     })
-    .populate('customer', 'name phone totalDue')
+    .populate('customer', 'name phone address totalDue')
     .populate('createdBy', 'name');
 };
 
@@ -195,6 +289,7 @@ router.get('/pending-bills', async (req, res) => {
     })
       .populate('table', 'tableNumber')
       .populate('createdBy', 'name')
+      .populate('customer', 'name phone address totalDue')
       .sort({ billPrintQueuedAt: 1, updatedAt: 1 });
 
     const pending = pendingOrders.map((order) => {
@@ -220,6 +315,11 @@ router.get('/pending-bills', async (req, res) => {
         tokenNo: order.orderNumber ? String(order.orderNumber).slice(-2) : String(order._id).slice(-2),
         tableNumber: order.table ? order.table.tableNumber : 'Takeaway',
         billerName: order.createdBy ? order.createdBy.name : 'Staff',
+        customerName: order.customerName || order.customer?.name || '',
+        customerPhone: order.customerPhone || order.customer?.phone || '',
+        customerAddress: order.customerAddress || order.customer?.address || '',
+        customerTotalDue: order.customer?.totalDue || 0,
+        dueAmount: order.dueAmount || 0,
         createdAt: order.billPrintedAt || order.billedAt || order.paidAt || order.createdAt,
         items: activeItems,
         subtotal: order.subtotal,
@@ -732,7 +832,18 @@ router.get('/:id', async (req, res) => {
 router.post('/', staffOrAdmin, async (req, res) => {
   let claimedTableId = null;
   try {
-    const { tableId, items, shouldPrint, orderNotes, notes } = req.body;
+    const {
+      tableId,
+      items,
+      shouldPrint,
+      orderNotes,
+      notes,
+      customerName,
+      customerPhone,
+      customerAddress,
+      customerId,
+      customerInfo,
+    } = req.body;
     const customerInstruction = (orderNotes || notes || '').trim();
 
     if (!tableId) {
@@ -741,6 +852,13 @@ router.post('/', staffOrAdmin, async (req, res) => {
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'At least one menu item is required to open an order' });
     }
+
+    const resolvedCust = await resolveAndLinkCustomer({
+      name: customerName || customerInfo?.name,
+      phone: customerPhone || customerInfo?.phone,
+      address: customerAddress || customerInfo?.address,
+      customerId: customerId || customerInfo?.customerId || customerInfo?._id,
+    });
 
     // Atomically claim table to prevent double-booking race condition
     const table = await Table.findOneAndUpdate(
@@ -763,6 +881,10 @@ router.post('/', staffOrAdmin, async (req, res) => {
             items,
             shouldPrint,
             orderNotes: customerInstruction,
+            customerName: resolvedCust?.customerName || customerName,
+            customerPhone: resolvedCust?.customerPhone || customerPhone,
+            customerAddress: resolvedCust?.customerAddress || customerAddress,
+            customerId: resolvedCust?.customer || customerId,
             user: req.user,
           });
           return res.json(populated);
@@ -871,6 +993,10 @@ router.post('/', staffOrAdmin, async (req, res) => {
       items: snapshottedItems,
       kotRounds: [initialKotRound],
       orderNotes: customerInstruction,
+      customer: resolvedCust?.customer || null,
+      customerName: resolvedCust?.customerName || undefined,
+      customerPhone: resolvedCust?.customerPhone || undefined,
+      customerAddress: resolvedCust?.customerAddress || undefined,
       status: 'open',
       subtotal: totals.subtotal,
       taxAmount: totals.taxAmount,
@@ -905,7 +1031,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
 });
 
 // Helper: append items and create a new KOT round for an order
-async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes, user }) {
+async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes, customerName, customerPhone, customerAddress, customerId, customerInfo, user }) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items array is required');
   }
@@ -916,6 +1042,22 @@ async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes
   const customerInstruction = (orderNotes || notes || '').trim();
   if (customerInstruction) {
     order.orderNotes = customerInstruction;
+  }
+
+  const custInput = {
+    name: customerName || customerInfo?.name,
+    phone: customerPhone || customerInfo?.phone,
+    address: customerAddress || customerInfo?.address,
+    customerId: customerId || customerInfo?.customerId || customerInfo?._id,
+  };
+  if (custInput.name || custInput.phone || custInput.address || custInput.customerId) {
+    const resolvedCust = await resolveAndLinkCustomer(custInput);
+    if (resolvedCust) {
+      if (resolvedCust.customer) order.customer = resolvedCust.customer;
+      if (resolvedCust.customerName) order.customerName = resolvedCust.customerName;
+      if (resolvedCust.customerPhone) order.customerPhone = resolvedCust.customerPhone;
+      if (resolvedCust.customerAddress) order.customerAddress = resolvedCust.customerAddress;
+    }
   }
 
   // Fetch and snapshot MenuItems
@@ -1071,6 +1213,11 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
       shouldPrint: req.body.shouldPrint,
       orderNotes: req.body.orderNotes,
       notes: req.body.notes,
+      customerName: req.body.customerName,
+      customerPhone: req.body.customerPhone,
+      customerAddress: req.body.customerAddress,
+      customerId: req.body.customerId,
+      customerInfo: req.body.customerInfo,
       user: req.user,
     });
     res.json(populated);
@@ -1378,11 +1525,12 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
 
     // Process Customer Due / Khata if any due portion is present
     const duePortion = paymentMethod === 'due' ? finalSettled : (orderPaymentBreakdown.due || 0);
-    if (duePortion > 0) {
-      const customerInfo = req.body.customerInfo || {};
-      const custName = String(customerInfo.name || req.body.customerName || '').trim();
-      const custPhone = String(customerInfo.phone || req.body.customerPhone || '').trim();
+    const customerInfo = req.body.customerInfo || {};
+    const custName = String(customerInfo.name || req.body.customerName || order.customerName || '').trim();
+    const custPhone = String(customerInfo.phone || req.body.customerPhone || order.customerPhone || '').trim();
+    const custAddress = String(customerInfo.address || req.body.customerAddress || order.customerAddress || '').trim();
 
+    if (duePortion > 0) {
       if (!custName || !custPhone) {
         return res.status(400).json({ message: 'Customer Name and Phone Number are required to settle as Due / Khata.' });
       }
@@ -1393,6 +1541,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
         customerDoc = await Customer.create({
           name: custName,
           phone: custPhone,
+          address: custAddress,
           totalDue: duePortion,
           totalOrders: 1,
           lastVisit: new Date(),
@@ -1400,6 +1549,9 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       } else {
         if (custName && customerDoc.name !== custName) {
           customerDoc.name = custName;
+        }
+        if (custAddress && customerDoc.address !== custAddress) {
+          customerDoc.address = custAddress;
         }
         customerDoc.totalDue = Math.round(((customerDoc.totalDue || 0) + duePortion) * 100) / 100;
         customerDoc.totalOrders = (customerDoc.totalOrders || 0) + 1;
@@ -1410,9 +1562,24 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       order.customer = customerDoc._id;
       order.customerName = customerDoc.name;
       order.customerPhone = customerDoc.phone;
+      order.customerAddress = customerDoc.address || custAddress;
       order.dueAmount = duePortion;
       order.dueSettled = false;
       order.dueSettledAmount = 0;
+    } else if (custPhone || custName || custAddress) {
+      // Settle via cash/upi/card/etc. with customer details entered/updated
+      const resolvedCust = await resolveAndLinkCustomer({
+        name: custName,
+        phone: custPhone,
+        address: custAddress,
+        customerId: order.customer,
+      });
+      if (resolvedCust) {
+        if (resolvedCust.customer) order.customer = resolvedCust.customer;
+        if (resolvedCust.customerName) order.customerName = resolvedCust.customerName;
+        if (resolvedCust.customerPhone) order.customerPhone = resolvedCust.customerPhone;
+        if (resolvedCust.customerAddress) order.customerAddress = resolvedCust.customerAddress;
+      }
     }
 
     // 1. Record settled amount, waived amount, payment breakdown, mark order paid

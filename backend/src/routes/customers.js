@@ -30,7 +30,7 @@ router.get('/search', async (req, res) => {
         { name: regex },
       ],
     })
-      .select('name phone totalDue totalOrders lastVisit')
+      .select('name phone address totalDue totalOrders lastVisit')
       .sort({ totalDue: -1, lastVisit: -1 })
       .limit(10)
       .lean();
@@ -41,7 +41,7 @@ router.get('/search', async (req, res) => {
 
     // If fewer than 10 results (e.g. typos or spacing variations), fuzzy search active customers
     const allActive = await Customer.find({ isActive: true })
-      .select('name phone totalDue totalOrders lastVisit')
+      .select('name phone address totalDue totalOrders lastVisit')
       .sort({ totalDue: -1, lastVisit: -1 })
       .lean();
 
@@ -382,7 +382,7 @@ router.post('/:id/collect-due', async (req, res) => {
 // ── 5. Create New Customer Directly ──────────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const { name, phone, notes } = req.body;
+    const { name, phone, address, notes } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ message: 'Name and Phone are required' });
     }
@@ -396,6 +396,7 @@ router.post('/', async (req, res) => {
     const customer = await Customer.create({
       name: String(name).trim(),
       phone: cleanPhone,
+      address: address ? String(address).trim() : '',
       notes: notes ? String(notes).trim() : '',
     });
 

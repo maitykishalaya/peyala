@@ -90,6 +90,7 @@ const orderSchema = new mongoose.Schema({
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   customerName: { type: String, trim: true },
   customerPhone: { type: String, trim: true },
+  customerAddress: { type: String, trim: true, default: '' },
   dueAmount: { type: Number, default: 0 },
   dueSettled: { type: Boolean, default: false },
   dueSettledAmount: { type: Number, default: 0 },

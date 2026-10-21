@@ -114,9 +114,10 @@ export interface Order {
     due?: number;
     other?: number;
   };
-  customer?: { _id: string; name: string; phone: string; totalDue?: number } | string | null;
+  customer?: { _id: string; name: string; phone: string; address?: string; totalDue?: number } | string | null;
   customerName?: string;
   customerPhone?: string;
+  customerAddress?: string;
   dueAmount?: number;
   dueSettled?: boolean;
   dueSettledAmount?: number;
@@ -295,6 +296,11 @@ export interface PendingBillJob {
   tokenNo?: string | number;
   tableNumber: string;
   billerName?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  customerTotalDue?: number;
+  dueAmount?: number;
   createdAt: string;
   items: Array<{
     name: string;
@@ -355,10 +361,41 @@ export const ordersApi = {
     api.get<Order>(`/orders/${id}`),
   getActiveForTable: (tableId: string) =>
     api.get<Order | null>(`/orders/table/${tableId}/active`),
-  create: (data: { tableId: string; items: OrderInputItem[]; shouldPrint?: boolean; orderNotes?: string }) =>
+  create: (data: {
+    tableId: string;
+    items: OrderInputItem[];
+    shouldPrint?: boolean;
+    orderNotes?: string;
+    customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
+    customerId?: string;
+    customerInfo?: { name?: string; phone?: string; address?: string };
+  }) =>
     api.post<Order>('/orders', data),
-  addItems: (id: string, items: OrderInputItem[], options?: { shouldPrint?: boolean; orderNotes?: string }) =>
-    api.post<Order>(`/orders/${id}/items`, { items, shouldPrint: options?.shouldPrint, orderNotes: options?.orderNotes }),
+  addItems: (
+    id: string,
+    items: OrderInputItem[],
+    options?: {
+      shouldPrint?: boolean;
+      orderNotes?: string;
+      customerName?: string;
+      customerPhone?: string;
+      customerAddress?: string;
+      customerId?: string;
+      customerInfo?: { name?: string; phone?: string; address?: string };
+    }
+  ) =>
+    api.post<Order>(`/orders/${id}/items`, {
+      items,
+      shouldPrint: options?.shouldPrint,
+      orderNotes: options?.orderNotes,
+      customerName: options?.customerName,
+      customerPhone: options?.customerPhone,
+      customerAddress: options?.customerAddress,
+      customerId: options?.customerId,
+      customerInfo: options?.customerInfo,
+    }),
   updateItem: (id: string, itemId: string, data: { status?: string; quantity?: number; notes?: string }) =>
     api.patch<Order>(`/orders/${id}/items/${itemId}`, data),
   cancelItem: (id: string, itemId: string) =>
@@ -374,7 +411,7 @@ export const ordersApi = {
     paymentMethod: 'cash' | 'card' | 'upi' | 'due' | 'other' | 'part',
     settlementAmount?: number,
     paymentBreakdown?: { cash?: number; upi?: number; card?: number; due?: number; other?: number },
-    customerInfo?: { name: string; phone: string; notes?: string }
+    customerInfo?: { name: string; phone: string; address?: string; notes?: string }
   ) =>
     api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount, paymentBreakdown, customerInfo }),
   cancel: (id: string) =>

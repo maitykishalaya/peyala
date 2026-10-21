@@ -276,6 +276,7 @@ export interface Customer {
   _id: string;
   name: string;
   phone: string;
+  address?: string;
   totalDue: number;
   totalOrders: number;
   lastVisit?: string;
@@ -325,7 +326,7 @@ export const customersApi = {
   getById: (id: string) => api.get<any>(`/customers/${id}`),
   collectDue: (customerId: string, data: { amount: number; paymentMethod: 'cash' | 'upi' | 'card'; accountId?: string; notes?: string }) =>
     api.post<{ success: boolean; message: string; customer: Customer; paymentRecord: any }>(`/customers/${customerId}/collect-due`, data),
-  create: (data: { name: string; phone: string; notes?: string }) => api.post<Customer>('/customers', data),
+  create: (data: { name: string; phone: string; address?: string; notes?: string }) => api.post<Customer>('/customers', data),
 };
 
 export const analyticsApi = {

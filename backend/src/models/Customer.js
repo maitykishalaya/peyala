@@ -13,6 +13,11 @@ const customerSchema = new mongoose.Schema({
     unique: true,
     index: true,
   },
+  address: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   totalDue: {
     type: Number,
     default: 0,
