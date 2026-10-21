@@ -856,5 +856,23 @@ Whenever changes are made, run this validation suite before concluding:
     - Refactored `handlePointerDown` to only invoke `window.focus()` when `document.hasFocus()` is `false`.
     - Removed `focusin` listener calling `window.focus()` that previously caused Chromium on Windows to steal caret focus from active textboxes.
 
+- **Customer Details & Due Bill Thermal Printing**:
+  - **POS Ordering**: Optional customer name, phone number, and address fields on desktop and mobile cart panels.
+  - **Deduplication & Atomic Linking**: Backend automatically deduplicates customer records by phone number, upserts customer address, and links to settled orders.
+  - **Thermal Bill Printing**: Thermal receipts print customer details (Name, Phone, Address) when provided, and print total outstanding due owed by the customer (`Customer Owed Due`) on all due bills and reprints.
+- **Audit-Grade 30-Day Day-wise GST Collection on Liabilities Page (`/balancesheet`)**:
+  - **Exact Government Tax Alignment**: Day-wise GST aggregation (`backend/src/utils/gstHistory.js`) directly aggregates finalized POS orders (`status: 'paid'`) and daily `SalesEntry` turnover with integer-paise precision (`CGST 2.5% + SGST 2.5% = Total GST 5%`, zero floating-point drift).
+  - **Calendar Completeness**: Provides a 30-calendar-day descending breakdown (from Today back 30 days) with:
+    - Date & Recency Badges (Today / Yesterday)
+    - Paid Bills Count & Sequential Invoice Ranges (`#564 – #795`)
+    - Taxable Turnover
+    - CGST (2.5%) & SGST (2.5%)
+    - Total GST Collected
+    - Total Gross Sales
+    - Government GST Remittances (`Paid ₹... to Govt`)
+  - **30-Day Summary Bar**: Displays aggregate 30-day GST collected, taxable sales, gross sales, bill count, and net liability change.
+  - **Tabbed Interface**: Offers dual tabs: `Day-wise (30D)` (default) and `Raw Log` (for raw ledger events), with an `Active Trading Days Only` toggle and direct cross-link to `/analytics?tab=gst`.
+  - **API Endpoints**: `GET /api/balancesheet` embeds `gstDailyHistory`, with a dedicated on-demand endpoint `GET /api/balancesheet/gst-daily-history?days=30`.
+
 ---
 *Last Updated: October 2026 · Peyala v10.0 Engineering*
