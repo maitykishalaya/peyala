@@ -44,7 +44,7 @@ const posSettingSchema = new mongoose.Schema({
 
 // Singleton pattern helper to retrieve or initialize the single configuration document
 posSettingSchema.statics.getSingleton = async function() {
-  let setting = await this.findOne();
+  let setting = await this.findOne().sort({ updatedAt: -1 });
   if (!setting) {
     setting = await this.create({
       maxDiscountStaffPercent: 10,
@@ -57,4 +57,8 @@ posSettingSchema.statics.getSingleton = async function() {
   return setting;
 };
 
+const syncPlugin = require('../utils/syncPlugin');
+posSettingSchema.plugin(syncPlugin, { modelName: 'POSSetting' });
+
 module.exports = mongoose.model('POSSetting', posSettingSchema);
+

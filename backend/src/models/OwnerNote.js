@@ -6,11 +6,14 @@ const ownerNoteSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 ownerNoteSchema.statics.getSingleton = async function() {
-  let note = await this.findOne();
+  let note = await this.findOne().sort({ updatedAt: -1 });
   if (!note) {
     note = await this.create({ text: '', lastUpdatedBy: '' });
   }
   return note;
 };
+
+const syncPlugin = require('../utils/syncPlugin');
+ownerNoteSchema.plugin(syncPlugin, { modelName: 'OwnerNote' });
 
 module.exports = mongoose.model('OwnerNote', ownerNoteSchema);

@@ -38,4 +38,8 @@ const paymentCategorySchema = new mongoose.Schema({
 // categories.js queries find({ isActive: true }).sort('order name').
 paymentCategorySchema.index({ isActive: 1, order: 1, name: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+paymentCategorySchema.plugin(syncPlugin, { modelName: 'PaymentCategory' });
+
 module.exports = mongoose.model('PaymentCategory', paymentCategorySchema);
+

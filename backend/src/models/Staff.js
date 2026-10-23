@@ -38,4 +38,8 @@ staffSchema.virtual('totalPaid').get(function() {
 
 staffSchema.set('toJSON', { virtuals: true });
 
+const syncPlugin = require('../utils/syncPlugin');
+staffSchema.plugin(syncPlugin, { modelName: 'Staff' });
+
 module.exports = mongoose.model('Staff', staffSchema);
+

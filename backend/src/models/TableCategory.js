@@ -31,4 +31,8 @@ tableCategorySchema.statics.seedDefaults = async function() {
   }
 };
 
+const syncPlugin = require('../utils/syncPlugin');
+tableCategorySchema.plugin(syncPlugin, { modelName: 'TableCategory' });
+
 module.exports = mongoose.model('TableCategory', tableCategorySchema);
+

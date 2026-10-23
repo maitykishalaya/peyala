@@ -308,6 +308,11 @@ class SyncEngine {
       inventorycategory: 'inventorycategories',
       tablecategory: 'tablecategories',
       customerduepayment: 'customerduepayments',
+      possetting: 'possettings',
+      ownernote: 'ownernotes',
+      paymentcategory: 'paymentcategories',
+      addon: 'addons',
+      staff: 'staffs',
     };
     const lower = modelName.toLowerCase();
     if (map[lower]) return map[lower];
@@ -342,6 +347,9 @@ class SyncEngine {
         'attendances',
         'wastages',
         'ownernotes',
+        'possettings',
+        'paymentcategories',
+        'addons',
       ];
 
       let pulledCount = 0;
@@ -365,7 +373,7 @@ class SyncEngine {
 
           let query = syncFilter;
           // Small master collections: always pull all to guarantee 100% real-time fidelity
-          if (['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons'].includes(colName) || !this.lastInboundSync) {
+          if (['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories'].includes(colName) || !this.lastInboundSync) {
             query = {};
           } else if (colName === 'orders') {
             // Always pull any open/preparing/served order, plus recent orders
@@ -391,20 +399,45 @@ class SyncEngine {
 
           const docs = await centralCol.find(query).toArray();
           if (docs.length > 0) {
-            const ops = docs.map(doc => ({
-              replaceOne: {
-                filter: { _id: doc._id },
-                replacement: doc,
-                upsert: true,
-              },
-            }));
-            await localCol.bulkWrite(ops, { ordered: false });
-            pulledCount += docs.length;
+            const docIds = docs.map(d => d._id);
+            const existingLocals = await localCol.find(
+              { _id: { $in: docIds } },
+              { projection: { _id: 1, updatedAt: 1 } }
+            ).toArray();
+            const localMap = new Map(existingLocals.map(l => [String(l._id), l]));
+
+            const ops = [];
+            for (const doc of docs) {
+              const localDoc = localMap.get(String(doc._id));
+              if (localDoc && localDoc.updatedAt && doc.updatedAt) {
+                const localTime = new Date(localDoc.updatedAt).getTime();
+                const centralTime = new Date(doc.updatedAt).getTime();
+                // Last-Write-Wins: If local write is newer than incoming cloud doc, protect local data!
+                if (localTime > centralTime) {
+                  // Ensure local newer version gets pushed to central
+                  this.recordMutation(colName, localDoc._id, 'update', localDoc).catch(() => {});
+                  continue;
+                }
+              }
+              ops.push({
+                replaceOne: {
+                  filter: { _id: doc._id },
+                  replacement: doc,
+                  upsert: true,
+                },
+              });
+            }
+
+            if (ops.length > 0) {
+              await localCol.bulkWrite(ops, { ordered: false });
+              pulledCount += ops.length;
+            }
           }
         } catch (colErr) {
           console.warn(`[SyncEngine] Inbound pull error for ${colName}:`, colErr.message);
         }
       }
+
 
       this.lastInboundSync = new Date();
       if (pulledCount > 0) {

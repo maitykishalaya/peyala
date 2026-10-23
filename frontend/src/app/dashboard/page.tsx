@@ -121,6 +121,7 @@ export default function DashboardPage() {
 
     const unsubs = [
       realtime.on('DATA_SYNCED_FROM_CLOUD', handleLiveUpdate),
+      realtime.on('OWNERNOTE_UPDATED', handleLiveUpdate),
       realtime.on('ACCOUNT_UPDATED', handleLiveUpdate),
       realtime.on('PURCHASE_CREATED', handleLiveUpdate),
       realtime.on('PAYMENT_CREATED', handleLiveUpdate),

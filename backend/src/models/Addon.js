@@ -10,4 +10,8 @@ const addonSchema = new mongoose.Schema({
 
 addonSchema.index({ isActive: 1, sortOrder: 1, name: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+addonSchema.plugin(syncPlugin, { modelName: 'Addon' });
+
 module.exports = mongoose.model('Addon', addonSchema);
+

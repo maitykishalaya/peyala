@@ -10,4 +10,8 @@ const inventoryCategorySchema = new mongoose.Schema({
 
 inventoryCategorySchema.index({ name: 1 });
 
+const syncPlugin = require('../utils/syncPlugin');
+inventoryCategorySchema.plugin(syncPlugin, { modelName: 'InventoryCategory' });
+
 module.exports = mongoose.model('InventoryCategory', inventoryCategorySchema);
+
