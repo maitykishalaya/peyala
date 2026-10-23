@@ -1144,7 +1144,7 @@ export default function ReportsPage() {
                     <option value="cash">Cash</option>
                     <option value="upi">UPI</option>
                     <option value="card">Card</option>
-                    <option value="other">Other / Bank</option>
+                    <option value="other_dues">Other / Dues</option>
                     <option value="part">Part Payment</option>
                   </select>
                 </div>
@@ -1277,7 +1277,7 @@ export default function ReportsPage() {
                       </div>
                       <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
                         <Building2 className="w-3.5 h-3.5" />
-                        <span>Other: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.other || 0)}</span>
+                        <span>Other / Dues: {isViewer ? '••••••' : formatCurrency(salesData.summary?.paymentBreakdown?.other || 0)}</span>
                       </div>
                     </div>
                   </div>
@@ -1430,7 +1430,12 @@ export default function ReportsPage() {
                                       const m = (o.paymentMethod || 'other').toLowerCase();
                                       let color = 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
                                       let Icon = Building2;
-                                      if (m === 'cash') {
+                                      let displayLabel = m;
+                                      if (o.dueSettled || (o.dueSettledAmount && o.dueSettledAmount > 0)) {
+                                        color = 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800';
+                                        Icon = CheckCircle;
+                                        displayLabel = 'Due Settled';
+                                      } else if (m === 'cash') {
                                         color = 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800';
                                         Icon = Wallet;
                                       } else if (m === 'upi') {
@@ -1442,12 +1447,18 @@ export default function ReportsPage() {
                                       } else if (m === 'part') {
                                         color = 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-300 dark:border-amber-800';
                                         Icon = Layers;
+                                      } else if (m === 'due') {
+                                        color = 'bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300 border border-orange-300 dark:border-orange-800';
+                                        Icon = Clock;
+                                        displayLabel = 'Due / Khata';
+                                      } else if (m === 'other' || m === 'other_dues') {
+                                        displayLabel = 'Other / Dues';
                                       }
                                       return (
                                         <div className="inline-flex flex-col items-center">
                                           <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold uppercase', color)}>
                                             <Icon className="w-3 h-3" />
-                                            {m}
+                                            {displayLabel}
                                           </span>
                                           {m === 'part' && o.paymentBreakdown && (
                                             <span className="text-[10px] text-gray-500 font-medium mt-0.5 whitespace-nowrap">

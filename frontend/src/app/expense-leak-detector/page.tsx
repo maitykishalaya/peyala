@@ -1024,13 +1024,31 @@ export default function ExpenseLeakDetectorPage() {
                                     )}
                                   </div>
                                 ) : (
-                                  <div>
-                                    <span className="text-[11px] text-gray-700 dark:text-gray-300 block line-clamp-2">
-                                      {ord.itemsSummary || `${ord.itemsCount || 0} item(s) ordered`}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400">
-                                      Order Status: <strong className="capitalize">{ord.orderStatus}</strong>
-                                    </span>
+                                  <div className="space-y-1.5">
+                                    {ord.cancelReason && (
+                                      <div className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200">
+                                        <span className="font-bold uppercase tracking-wider text-[10px] text-amber-700 dark:text-amber-400 block">Cancellation Reason:</span>
+                                        <span className="font-semibold italic">&ldquo;{ord.cancelReason}&rdquo;</span>
+                                      </div>
+                                    )}
+                                    {Array.isArray(ord.items) && ord.items.length > 0 ? (
+                                      <div className="space-y-0.5">
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide block">Ordered Items:</span>
+                                        {ord.items.map((it: any, itemIdx: number) => (
+                                          <div key={itemIdx} className="text-gray-800 dark:text-gray-200 text-[11px] flex items-center justify-between gap-2">
+                                            <span>• {it.name}{it.variantName ? ` (${it.variantName})` : ''} × {it.quantity}</span>
+                                            <span className="text-gray-500 font-medium">{formatCurrency(it.lineTotal || (it.price || 0) * (it.quantity || 1))}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] text-gray-700 dark:text-gray-300 block line-clamp-2">
+                                        {ord.itemsSummary || `${ord.itemsCount || 0} item(s) ordered`}
+                                      </span>
+                                    )}
+                                    <div className="text-[10px] text-gray-400">
+                                      Order Status: <strong className="capitalize text-red-600 dark:text-red-400">{ord.orderStatus}</strong>
+                                    </div>
                                   </div>
                                 )}
                               </td>

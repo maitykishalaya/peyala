@@ -6,6 +6,7 @@ const Supplier = require('../models/Supplier');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { matchesSearch } = require('../utils/search');
+const { withOptionalTransaction } = require('../utils/transaction');
 
 const parseDate = (value) => {
   if (!value) return null;
@@ -141,14 +142,9 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const session = await Payment.startSession();
-  session.startTransaction();
-
   try {
     const amount = getPaymentAmount(req.body.amount);
     if (amount === null || amount <= 0) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({ message: 'Amount must be a positive number' });
     }
 
@@ -163,25 +159,25 @@ router.post('/', async (req, res) => {
       paymentData.paidFrom = null;
       paymentData.isPending = true;
     } else if (!paymentData.paidFrom) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({ message: 'paidFrom is required for non-due payments' });
     }
 
-    const [payment] = await Payment.create([paymentData], { session });
+    const createdPayment = await withOptionalTransaction(async (session) => {
+      const opts = session ? { session } : undefined;
+      const [payment] = await Payment.create([paymentData], opts);
 
-    if (payment.paidFrom) {
-      await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: -payment.amount } }, { session });
-    }
+      if (payment.paidFrom) {
+        await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: -payment.amount } }, session ? { session } : {});
+      }
 
-    if (payment.supplier) {
-      await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: payment.amount } }, { session });
-    }
+      if (payment.supplier) {
+        await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: payment.amount } }, session ? { session } : {});
+      }
 
-    await session.commitTransaction();
-    session.endSession();
+      return payment;
+    });
 
-    const populated = await Payment.findById(payment._id)
+    const populated = await Payment.findById(createdPayment._id)
       .populate('paidFrom', 'name')
       .populate('createdBy', 'name')
       .populate('supplier', 'name')
@@ -191,209 +187,187 @@ router.post('/', async (req, res) => {
       user: req.user,
       action: 'CREATE',
       module: 'Payments',
-      description: `${req.user.name} recorded payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
+      description: `${req.user.name} recorded payment to ${createdPayment.payee} — ₹${createdPayment.amount} [${createdPayment.category}]`,
     }).catch(() => {});
 
     res.status(201).json(populated);
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    res.status(400).json({ message: err.message });
+    res.status(err.statusCode || 400).json({ message: err.message });
   }
 });
 
 router.put('/:id', async (req, res) => {
-  const session = await Payment.startSession();
-  session.startTransaction();
-
   try {
-    const oldPayment = await Payment.findById(req.params.id).session(session);
-    if (!oldPayment) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Payment not found' });
-    }
-
-    const oldAmount = oldPayment.amount;
-    const oldPaidFrom = oldPayment.paidFrom ? oldPayment.paidFrom.toString() : null;
-    const oldSupplier = oldPayment.supplier ? oldPayment.supplier.toString() : null;
-    const oldMode = oldPayment.paymentMode;
-
-    // ── Purchase-linked payments ──────────────────────────────────
-    // For payments created from a Purchase (relatedPurchase set), the
-    // account balance and supplier totalPaid are already fully managed
-    // by the Purchases route (create / edit / clear-due / delete). If we
-    // also let this route move money for these payments, the same
-    // amount gets counted twice — that's the "double deduction from
-    // supplier dues" bug. So for these payments, amount/paidFrom/supplier
-    // are locked (edit the purchase itself instead) — only category,
-    // subcategory, description, and notes remain freely editable, and
-    // this route never touches Account or Supplier balances for them.
-    if (oldPayment.relatedPurchase) {
-      if (req.body.amount !== undefined && Number(req.body.amount) !== oldAmount) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the amount from the Purchases section instead.' });
-      }
-      if (req.body.paidFrom !== undefined && (req.body.paidFrom || null) !== oldPaidFrom) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the payment account from the Purchases section instead.' });
-      }
-      if (req.body.supplier !== undefined && (req.body.supplier || null) !== oldSupplier) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ message: 'This payment is linked to a purchase — edit the supplier from the Purchases section instead.' });
+    const updatedPayment = await withOptionalTransaction(async (session) => {
+      const query = Payment.findById(req.params.id);
+      if (session) query.session(session);
+      const oldPayment = await query;
+      if (!oldPayment) {
+        const error = new Error('Payment not found');
+        error.statusCode = 404;
+        throw error;
       }
 
-      const updatedPayment = {
+      const oldAmount = oldPayment.amount;
+      const oldPaidFrom = oldPayment.paidFrom ? oldPayment.paidFrom.toString() : null;
+      const oldSupplier = oldPayment.supplier ? oldPayment.supplier.toString() : null;
+      const oldMode = oldPayment.paymentMode;
+
+      // ── Purchase-linked payments ──────────────────────────────────
+      if (oldPayment.relatedPurchase) {
+        if (req.body.amount !== undefined && Number(req.body.amount) !== oldAmount) {
+          const error = new Error('This payment is linked to a purchase — edit the amount from the Purchases section instead.');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (req.body.paidFrom !== undefined && (req.body.paidFrom || null) !== oldPaidFrom) {
+          const error = new Error('This payment is linked to a purchase — edit the payment account from the Purchases section instead.');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (req.body.supplier !== undefined && (req.body.supplier || null) !== oldSupplier) {
+          const error = new Error('This payment is linked to a purchase — edit the supplier from the Purchases section instead.');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const paymentUpdateData = {
+          ...req.body,
+          amount: oldAmount,
+          paidFrom: oldPayment.paidFrom,
+          supplier: oldPayment.supplier,
+          paymentMode: oldMode,
+          isPending: oldPayment.isPending,
+        };
+
+        const payment = await Payment.findByIdAndUpdate(req.params.id, paymentUpdateData, {
+          new: true,
+          runValidators: true,
+          ...(session ? { session } : {}),
+        })
+          .populate('paidFrom', 'name type')
+          .populate('createdBy', 'name')
+          .populate('supplier', 'name')
+          .populate('staff', 'name position');
+
+        return payment;
+      }
+
+      const amount = req.body.amount !== undefined ? getPaymentAmount(req.body.amount) : oldAmount;
+      if (amount === null || amount <= 0) {
+        const error = new Error('Amount must be a positive number');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const paymentUpdateData = {
         ...req.body,
-        amount: oldAmount,
-        paidFrom: oldPayment.paidFrom,
-        supplier: oldPayment.supplier,
-        paymentMode: oldMode,
-        isPending: oldPayment.isPending,
+        amount,
       };
 
-      const payment = await Payment.findByIdAndUpdate(req.params.id, updatedPayment, {
+      const newMode = req.body.paymentMode || oldMode;
+      const shouldBeDue = newMode === 'due' || paymentUpdateData.paidFrom === null || (paymentUpdateData.paidFrom === undefined && oldPaidFrom === null);
+      if (shouldBeDue) {
+        paymentUpdateData.paidFrom = null;
+        paymentUpdateData.isPending = true;
+      } else if (!paymentUpdateData.paidFrom) {
+        const error = new Error('paidFrom is required for non-due payments');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const newPaidFrom = paymentUpdateData.paidFrom ? paymentUpdateData.paidFrom.toString() : null;
+      const newSupplier = paymentUpdateData.supplier ? paymentUpdateData.supplier.toString() : null;
+
+      const opts = session ? { session } : {};
+
+      if (oldPaidFrom && oldMode !== 'due') {
+        await Account.findByIdAndUpdate(oldPaidFrom, { $inc: { currentBalance: oldAmount } }, opts);
+      }
+
+      if (newPaidFrom && newMode !== 'due') {
+        await Account.findByIdAndUpdate(newPaidFrom, { $inc: { currentBalance: -amount } }, opts);
+      }
+
+      if (oldSupplier && oldSupplier !== newSupplier) {
+        await Supplier.findByIdAndUpdate(oldSupplier, { $inc: { totalPaid: -oldAmount } }, opts);
+      }
+
+      if (newSupplier) {
+        const supplierDelta = oldSupplier === newSupplier ? amount - oldAmount : amount;
+        if (supplierDelta !== 0) {
+          await Supplier.findByIdAndUpdate(newSupplier, { $inc: { totalPaid: supplierDelta } }, opts);
+        }
+      }
+
+      const payment = await Payment.findByIdAndUpdate(req.params.id, paymentUpdateData, {
         new: true,
         runValidators: true,
-        session,
+        ...(session ? { session } : {}),
       })
         .populate('paidFrom', 'name type')
         .populate('createdBy', 'name')
         .populate('supplier', 'name')
         .populate('staff', 'name position');
 
-      await session.commitTransaction();
-      session.endSession();
-
-      log({
-        user: req.user,
-        action: 'UPDATE',
-        module: 'Payments',
-        description: `${req.user.name} updated payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
-      }).catch(() => {});
-
-      return res.json(payment);
-    }
-
-    const amount = req.body.amount !== undefined ? getPaymentAmount(req.body.amount) : oldAmount;
-    if (amount === null || amount <= 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'Amount must be a positive number' });
-    }
-
-    const updatedPayment = {
-      ...req.body,
-      amount,
-    };
-
-    const newMode = req.body.paymentMode || oldMode;
-    const shouldBeDue = newMode === 'due' || updatedPayment.paidFrom === null || (updatedPayment.paidFrom === undefined && oldPaidFrom === null);
-    if (shouldBeDue) {
-      updatedPayment.paidFrom = null;
-      updatedPayment.isPending = true;
-    } else if (!updatedPayment.paidFrom) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'paidFrom is required for non-due payments' });
-    }
-
-    const newPaidFrom = updatedPayment.paidFrom ? updatedPayment.paidFrom.toString() : null;
-    const newSupplier = updatedPayment.supplier ? updatedPayment.supplier.toString() : null;
-
-    if (oldPaidFrom && oldMode !== 'due') {
-      await Account.findByIdAndUpdate(oldPaidFrom, { $inc: { currentBalance: oldAmount } }, { session });
-    }
-
-    if (newPaidFrom && newMode !== 'due') {
-      await Account.findByIdAndUpdate(newPaidFrom, { $inc: { currentBalance: -amount } }, { session });
-    }
-
-    if (oldSupplier && oldSupplier !== newSupplier) {
-      await Supplier.findByIdAndUpdate(oldSupplier, { $inc: { totalPaid: -oldAmount } }, { session });
-    }
-
-    if (newSupplier) {
-      const supplierDelta = oldSupplier === newSupplier ? amount - oldAmount : amount;
-      if (supplierDelta !== 0) {
-        await Supplier.findByIdAndUpdate(newSupplier, { $inc: { totalPaid: supplierDelta } }, { session });
-      }
-    }
-
-    const payment = await Payment.findByIdAndUpdate(req.params.id, updatedPayment, {
-      new: true,
-      runValidators: true,
-      session,
-    })
-      .populate('paidFrom', 'name type')
-      .populate('createdBy', 'name')
-      .populate('supplier', 'name')
-      .populate('staff', 'name position');
-
-    await session.commitTransaction();
-    session.endSession();
+      return payment;
+    });
 
     log({
       user: req.user,
       action: 'UPDATE',
       module: 'Payments',
-      description: `${req.user.name} updated payment to ${payment.payee} — ₹${payment.amount} [${payment.category}]`,
+      description: `${req.user.name} updated payment to ${updatedPayment.payee} — ₹${updatedPayment.amount} [${updatedPayment.category}]`,
     }).catch(() => {});
 
-    res.json(payment);
+    res.json(updatedPayment);
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    res.status(400).json({ message: err.message });
+    res.status(err.statusCode || 400).json({ message: err.message });
   }
 });
 
 router.delete('/:id', async (req, res) => {
-  const session = await Payment.startSession();
-  session.startTransaction();
-
   try {
-    const payment = await Payment.findById(req.params.id).session(session);
-    if (!payment) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Payment not found' });
-    }
+    const deletedPayment = await withOptionalTransaction(async (session) => {
+      const query = Payment.findById(req.params.id);
+      if (session) query.session(session);
+      const payment = await query;
+      if (!payment) {
+        const error = new Error('Payment not found');
+        error.statusCode = 404;
+        throw error;
+      }
 
-    if (payment.relatedPurchase) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'Delete this from Purchase Section' });
-    }
+      if (payment.relatedPurchase) {
+        const error = new Error('Delete this from Purchase Section');
+        error.statusCode = 400;
+        throw error;
+      }
 
-    if (payment.paidFrom) {
-      await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } }, { session });
-    }
+      const opts = session ? { session } : {};
 
-    if (payment.supplier) {
-      await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } }, { session });
-    }
+      if (payment.paidFrom) {
+        await Account.findByIdAndUpdate(payment.paidFrom, { $inc: { currentBalance: payment.amount } }, opts);
+      }
 
-    await Payment.findByIdAndDelete(req.params.id, { session });
+      if (payment.supplier) {
+        await Supplier.findByIdAndUpdate(payment.supplier, { $inc: { totalPaid: -payment.amount } }, opts);
+      }
 
-    await session.commitTransaction();
-    session.endSession();
+      await Payment.findByIdAndDelete(req.params.id, opts);
+      return payment;
+    });
 
     log({
       user: req.user,
       action: 'DELETE',
       module: 'Payments',
-      description: `${req.user.name} deleted payment of ₹${payment.amount}`,
+      description: `${req.user.name} deleted payment of ₹${deletedPayment.amount}`,
     }).catch(() => {});
 
     res.json({ message: 'Payment deleted' });
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 });
 

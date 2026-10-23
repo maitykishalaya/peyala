@@ -16,27 +16,12 @@ dotenv.config({ path: path.join(backendDir, '.env') });
 
 const { MongoClient } = require(path.join(backendDir, 'node_modules/mongodb'));
 
-const LIVE_URI = process.env.MONGODB_URI;
-if (!LIVE_URI) {
-  throw new Error('MONGODB_URI is not defined in backend/.env');
-}
-
-// Derive Test URI pointing to isolated test database
+const LIVE_LOCAL_DB = process.env.MONGODB_LOCAL_DB || 'peyala_local';
+const LIVE_LOCAL_PORT = process.env.MONGODB_LOCAL_PORT || '27017';
+const LIVE_URI = `mongodb://127.0.0.1:${LIVE_LOCAL_PORT}/${LIVE_LOCAL_DB}`;
 function getTestDbUri(dbName = 'peyala_loadtest') {
-  try {
-    const u = new URL(LIVE_URI);
-    u.pathname = `/${dbName}`;
-    return u.toString();
-  } catch (e) {
-    if (LIVE_URI.includes('?')) {
-      const parts = LIVE_URI.split('?');
-      const base = parts[0].replace(/\/+$/, '');
-      return `${base}/${dbName}?${parts[1]}`;
-    }
-    return `${LIVE_URI.replace(/\/+$/, '')}/${dbName}`;
-  }
+  return `mongodb://127.0.0.1:${LIVE_LOCAL_PORT}/${dbName}`;
 }
-
 const TEST_DB_NAME = 'peyala_loadtest';
 const TEST_URI = getTestDbUri(TEST_DB_NAME);
 
@@ -48,7 +33,7 @@ async function cloneLiveToTestDb() {
   await client.connect();
 
   try {
-    const liveDb = client.db(); // Default live database ('test')
+    const liveDb = client.db(LIVE_LOCAL_DB);
     const testDb = client.db(TEST_DB_NAME);
 
     console.log(`[TestDbManager] Live DB: "${liveDb.databaseName}" -> Target Test DB: "${TEST_DB_NAME}"`);
@@ -137,7 +122,16 @@ async function purgeTestDb() {
 function checkHealth(url) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
-      resolve(res.statusCode === 200);
+      let data = '';
+      res.on('data', (d) => { data += d; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(res.statusCode === 200 && parsed.dbStatus === 'connected');
+        } catch (_) {
+          resolve(false);
+        }
+      });
     });
     req.on('error', () => resolve(false));
     req.setTimeout(1500, () => {
@@ -173,6 +167,7 @@ async function startIsolatedServer({ port = 4001, verbose = false } = {}) {
   const env = Object.assign({}, process.env, {
     PORT: String(port),
     MONGODB_URI: TEST_URI,
+    MONGODB_LOCAL_DB: TEST_DB_NAME,
     NODE_ENV: 'test',
   });
 

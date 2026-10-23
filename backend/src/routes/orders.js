@@ -6,6 +6,7 @@ const SalesEntry = require('../models/SalesEntry');
 const Account = require('../models/Account');
 const BalanceSheet = require('../models/BalanceSheet');
 const Customer = require('../models/Customer');
+const POSSetting = require('../models/POSSetting');
 const { auth, adminOnly, managerOrAdmin, staffOrAdmin } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
@@ -1329,6 +1330,33 @@ router.patch('/:id/discount', staffOrAdmin, async (req, res) => {
     const type = discountType === 'percentage' ? 'percentage' : 'flat';
     const val = discountValue !== undefined ? Number(discountValue) : Number(discount) || 0;
 
+    // Check role-based discount limits (Admin has unrestricted authority)
+    const userRole = (req.user && req.user.role) || 'staff';
+    if (userRole !== 'admin' && val > 0) {
+      const posSetting = await POSSetting.getSingleton();
+      const maxDiscountPct = userRole === 'manager'
+        ? (posSetting.maxDiscountManagerPercent ?? 20)
+        : (posSetting.maxDiscountStaffPercent ?? 10);
+
+      const baseTotals = Order.calcTotals(order.items, 0, 'flat');
+      const baseSubtotal = baseTotals.subtotal;
+
+      let requestedPct = 0;
+      if (type === 'percentage') {
+        requestedPct = val;
+      } else {
+        requestedPct = baseSubtotal > 0 ? (val / baseSubtotal) * 100 : 0;
+      }
+
+      if (requestedPct > maxDiscountPct + 0.001) {
+        const roleLabel = userRole === 'manager' ? 'Manager' : 'Staff';
+        const maxValInRs = Math.round(((baseSubtotal * maxDiscountPct) / 100) * 100) / 100;
+        return res.status(400).json({
+          message: `${roleLabel} cannot give more than ${maxDiscountPct}% discount (maximum allowed: ₹${maxValInRs.toFixed(2)} on subtotal ₹${baseSubtotal.toFixed(2)}). Exceeding this limit is blocked.`
+        });
+      }
+    }
+
     const totals = Order.calcTotals(order.items, val, type);
     order.subtotal = totals.subtotal;
     order.taxAmount = totals.taxAmount;
@@ -1523,6 +1551,25 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
       else orderPaymentBreakdown.other = finalSettled;
     }
 
+    // Role-based Cash Shortage / Waive-off validation (Admin is exempt)
+    const userRole = (req.user && req.user.role) || 'staff';
+    if (userRole !== 'admin' && waivedAmount > 0) {
+      const posSetting = await POSSetting.getSingleton();
+      const maxWaivePct = userRole === 'manager'
+        ? (posSetting.maxWaiveManagerPercent ?? 5)
+        : (posSetting.maxWaiveStaffPercent ?? 2);
+
+      const maxShortage = Math.round(((order.total * maxWaivePct) / 100) * 100) / 100;
+      const minRequiredSettlement = Math.round((order.total - maxShortage) * 100) / 100;
+
+      if (waivedAmount > maxShortage + 0.001) {
+        const roleLabel = userRole === 'manager' ? 'Manager' : 'Staff';
+        return res.status(400).json({
+          message: `${roleLabel} cannot waive off more than ${maxWaivePct}% (max shortage ₹${maxShortage.toFixed(2)} on bill ₹${order.total.toFixed(2)}). Minimum required settlement is ₹${minRequiredSettlement.toFixed(2)}. Cash counter discrepancies cannot be cleared and must be paid by ${roleLabel.toLowerCase()}.`
+        });
+      }
+    }
+
     // Process Customer Due / Khata if any due portion is present
     const duePortion = paymentMethod === 'due' ? finalSettled : (orderPaymentBreakdown.due || 0);
     const customerInfo = req.body.customerInfo || {};
@@ -1704,8 +1751,14 @@ router.post('/:id/cancel', staffOrAdmin, async (req, res) => {
     if (order.status === 'paid') {
       return res.status(400).json({ message: 'Cannot cancel an already paid order' });
     }
+    const rawReason = (req.body?.reason || req.body?.cancelReason || '').trim();
+    if (!rawReason && req.user.role === 'staff') {
+      return res.status(400).json({ message: 'A reason is required to cancel this order and free the table.' });
+    }
+    const finalReason = rawReason || 'No reason provided';
 
     order.status = 'cancelled';
+    order.cancelReason = finalReason;
     await order.save();
 
     const tableDoc = await Table.findById(order.table);
@@ -1717,9 +1770,9 @@ router.post('/:id/cancel', staffOrAdmin, async (req, res) => {
 
     await log({
       user: req.user,
-      action: 'UPDATE',
+      action: 'CANCEL',
       module: 'Orders',
-      description: `${req.user.name} cancelled order for Table ${tableDoc ? tableDoc.tableNumber : ''}`,
+      description: `${req.user.name} cancelled order for Table ${tableDoc ? tableDoc.tableNumber : ''} (Total: ₹${order.total || 0}). Reason: ${finalReason}`,
     });
 
     const populated = await populateOrder(Order.findById(order._id));
@@ -2243,18 +2296,19 @@ router.post('/:orderId/reprint', async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    const activeItems = order.items
-      .filter((i) => i.status !== 'cancelled')
+    const reprintItems = (order.items || [])
       .map((i) => ({
         name: i.name,
         quantity: i.quantity,
         notes: i.notes || '',
         variantName: i.variant?.name || '',
         addons: (i.selectedAddons || []).map((a) => a.name),
+        status: i.status || 'pending',
+        isCancelled: i.status === 'cancelled',
       }));
 
-    if (activeItems.length === 0) {
-      return res.status(400).json({ message: 'No active items to reprint' });
+    if (reprintItems.length === 0) {
+      return res.status(400).json({ message: 'No items to reprint' });
     }
 
     if (!Array.isArray(order.kotRounds)) {
@@ -2265,7 +2319,7 @@ router.post('/:orderId/reprint', async (req, res) => {
     order.kotRounds.push({
       roundNumber: newRoundNumber,
       roundTag: '[KOT REPRINT]',
-      items: activeItems,
+      items: reprintItems,
       printed: false,
     });
 

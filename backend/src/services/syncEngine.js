@@ -22,12 +22,25 @@ class SyncEngine {
    */
   async init() {
     console.log('[SyncEngine] Initializing background delta sync engine...');
-    console.log(`[SyncEngine] High-frequency sync interval: ${this.syncIntervalMs / 1000}s`);
+
+    // Load persisted dynamic sync interval from POSSetting
+    try {
+      const POSSetting = require('../models/POSSetting');
+      const setting = await POSSetting.getSingleton();
+      if (setting && setting.dbSyncIntervalMinutes && process.env.SYNC_INTERVAL_MS !== '999999999') {
+        this.syncIntervalMs = Math.round(setting.dbSyncIntervalMinutes * 60 * 1000);
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Could not load dynamic interval from POSSetting, using default:', err.message);
+    }
+
+    console.log(`[SyncEngine] High-frequency sync interval: ${this.syncIntervalMs / 1000}s (${(this.syncIntervalMs / 60000).toFixed(1)}m)`);
 
     // Attempt initial connection to central DB
     await this.checkConnectivity();
 
     // Start background periodic interval
+    if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => {
       this.syncNow().catch((err) => {
         console.warn('[SyncEngine] Scheduled sync encountered error:', err.message);
@@ -38,6 +51,26 @@ class SyncEngine {
     setTimeout(() => {
       this.syncNow().catch(() => {});
     }, 2000);
+  }
+
+  /**
+   * Dynamically update sync interval timer at runtime
+   * @param {number} minutes
+   */
+  setIntervalMinutes(minutes) {
+    const mins = Math.max(0.2, Math.min(1440, Number(minutes) || 15));
+    this.syncIntervalMs = Math.round(mins * 60 * 1000);
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+    this.timer = setInterval(() => {
+      this.syncNow().catch((err) => {
+        console.warn('[SyncEngine] Scheduled sync encountered error:', err.message);
+      });
+    }, this.syncIntervalMs);
+    console.log(`[SyncEngine] Dynamically updated sync interval to ${mins} minutes (${this.syncIntervalMs / 1000}s)`);
+    this.notifyStatus();
+    return this.syncIntervalMs;
   }
 
   /**
@@ -426,7 +459,8 @@ class SyncEngine {
       pendingCount: pending,
       lastSyncTime: this.lastSyncTime,
       lastError: this.lastSyncError,
-      syncIntervalMinutes: Math.round(this.syncIntervalMs / 60000),
+      syncIntervalMinutes: Math.round((this.syncIntervalMs / 60000) * 10) / 10,
+      syncIntervalSeconds: Math.round(this.syncIntervalMs / 1000),
       consecutiveFailures: this.consecutiveFailures,
     };
   }

@@ -313,8 +313,10 @@ router.get('/sales', async (req, res) => {
         { billedAt: null, billPrintedAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
         // 3. Order with paidAt timestamp
         { billedAt: null, billPrintedAt: null, paidAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
-        // 4. Legacy order fallback to createdAt
-        { billedAt: null, billPrintedAt: null, paidAt: null, createdAt: { ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } }
+        // 4. Order with due settlement timestamp (due settled in selected period)
+        { dueSettledAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
+        // 5. Legacy order fallback to createdAt
+        { billedAt: null, billPrintedAt: null, paidAt: null, dueSettledAt: null, createdAt: { ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } }
       ];
     }
 
@@ -325,9 +327,37 @@ router.get('/sales', async (req, res) => {
       filter.status = 'paid';
     }
 
-    // Payment method filter
+    // Payment method filter (Other / Dues filter shows bills that are due settled in the selected period or paid as other)
     if (paymentMethod && paymentMethod !== 'all') {
-      filter.paymentMethod = paymentMethod;
+      if (paymentMethod === 'other' || paymentMethod === 'other_dues' || paymentMethod === 'dues') {
+        const otherDuesCondition = {
+          $or: [
+            { paymentMethod: 'other' },
+            { paymentMethod: 'due' },
+            { dueSettled: true },
+            { dueSettledAmount: { $gt: 0 } },
+            { 'paymentBreakdown.other': { $gt: 0 } },
+            { 'paymentBreakdown.due': { $gt: 0 } }
+          ]
+        };
+
+        if (filter.$or) {
+          filter.$and = [
+            { $or: filter.$or },
+            otherDuesCondition
+          ];
+          delete filter.$or;
+        } else {
+          Object.assign(filter, otherDuesCondition);
+        }
+
+        // If status wasn't explicitly given, allow both 'paid' and 'billed' for due orders
+        if (!status) {
+          filter.status = { $in: ['paid', 'billed'] };
+        }
+      } else {
+        filter.paymentMethod = paymentMethod;
+      }
     }
 
     // Populate order details - sort by billNumber descending, then billing/creation time

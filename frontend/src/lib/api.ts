@@ -343,4 +343,28 @@ export const analyticsApi = {
     api.post<any>(`/analytics/suggestions/${encodeURIComponent(id)}/action`, data),
 };
 
+export interface POSSetting {
+  _id?: string;
+  maxDiscountStaffPercent: number;
+  maxDiscountManagerPercent: number;
+  maxWaiveStaffPercent: number;
+  maxWaiveManagerPercent: number;
+  dbSyncIntervalMinutes?: number;
+  lastUpdatedBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const posSettingsApi = {
+  get: () => api.get<POSSetting>('/pos-settings'),
+  update: (data: Partial<POSSetting>) => api.put<POSSetting>('/pos-settings', data),
+};
+
+export const syncApi = {
+  getStatus: () => api.get<any>('/sync/status'),
+  trigger: () => api.post<any>('/sync/trigger'),
+  getOutbox: (params?: { limit?: number; status?: string }) => api.get<any>('/sync/outbox', { params }),
+  updateInterval: (intervalMinutes: number) => api.put<any>('/sync/interval', { intervalMinutes }),
+};
+
 

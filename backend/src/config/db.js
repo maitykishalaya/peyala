@@ -90,6 +90,24 @@ function startLocalDbRecovery() {
 }
 
 const connectDB = async () => {
+  // If running in test mode with explicit MONGODB_URI (e.g. load testing sandbox)
+  if (process.env.NODE_ENV === 'test' && process.env.MONGODB_URI) {
+    try {
+      const conn = await mongoose.connect(process.env.MONGODB_URI, {
+        maxPoolSize: 100,
+        minPoolSize: 10,
+        serverSelectionTimeoutMS: 4000,
+        socketTimeoutMS: 45000,
+        family: 4,
+      });
+      console.log(`[Peyala Backend] Test Sandbox MongoDB Connected: ${conn.connection.host} / DB: ${conn.connection.name}`);
+      await seedBaselineIfNeeded(conn);
+      return conn;
+    } catch (testDbErr) {
+      console.warn(`[Peyala Backend] Test sandbox connection failed: ${testDbErr.message}`);
+    }
+  }
+
   let localUri = null;
 
   try {

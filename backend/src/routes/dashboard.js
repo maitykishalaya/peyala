@@ -95,21 +95,11 @@ router.get('/summary', async (req, res) => {
 
     // Yesterday's purchases (all entries, summed)
     const yesterdayPurchasesAgg = await PurchaseEntry.aggregate([
-      {
-        $match: {
-          $or: [
-            { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
-            { createdAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
-          ],
-        },
-      },
+      { $match: { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } } },
       { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
     ]);
     const yesterdayPurchases = await PurchaseEntry.find({
-      $or: [
-        { date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
-        { createdAt: { $gte: yesterdayRange.start, $lte: yesterdayRange.end } },
-      ],
+      date: { $gte: yesterdayRange.start, $lte: yesterdayRange.end },
     })
       .populate('supplier', 'name')
       .select('supplier totalAmount isPaid date createdAt')
@@ -117,21 +107,11 @@ router.get('/summary', async (req, res) => {
 
     // Today's purchases (all entries, summed)
     const todayPurchasesAgg = await PurchaseEntry.aggregate([
-      {
-        $match: {
-          $or: [
-            { date: { $gte: todayRange.start, $lte: todayRange.end } },
-            { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
-          ],
-        },
-      },
+      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
       { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
     ]);
     const todayPurchases = await PurchaseEntry.find({
-      $or: [
-        { date: { $gte: todayRange.start, $lte: todayRange.end } },
-        { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
-      ],
+      date: { $gte: todayRange.start, $lte: todayRange.end },
     })
       .populate('supplier', 'name')
       .select('supplier totalAmount isPaid date createdAt')
@@ -204,14 +184,7 @@ router.get('/summary', async (req, res) => {
 
     // Today's expenses by category
     const todayExpenses = await Payment.aggregate([
-      {
-        $match: {
-          $or: [
-            { date: { $gte: todayRange.start, $lte: todayRange.end } },
-            { createdAt: { $gte: todayRange.start, $lte: todayRange.end } },
-          ],
-        },
-      },
+      { $match: { date: { $gte: todayRange.start, $lte: todayRange.end } } },
       { $group: { _id: '$category', total: { $sum: '$amount' } } }
     ]);
 

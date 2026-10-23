@@ -69,6 +69,7 @@ app.use('/api/customers', require('./routes/customers'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/sync', require('./routes/sync'));
 app.use('/api/maintenance', require('./routes/maintenance'));
+app.use('/api/pos-settings', require('./routes/posSettings'));
 
 // Health check endpoints for Render, Docker, and local pinging
 const mongoose = require('mongoose');
@@ -89,7 +90,7 @@ app.get('/', (req, res) =>
     app: 'Peyala Business Admin - Backend API',
     mode: 'local-first',
     health: '/health',
-    version: '11.0.0',
+    version: '12.0.0',
   })
 );
 

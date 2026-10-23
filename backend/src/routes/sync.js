@@ -4,7 +4,7 @@ const syncEngine = require('../services/syncEngine');
 const localDbRunner = require('../services/localDbRunner');
 const realtimeHub = require('../services/realtimeHub');
 const SyncOutbox = require('../models/SyncOutbox');
-const { auth, staffOrAdmin } = require('../middleware/auth');
+const { auth, staffOrAdmin, adminOnly } = require('../middleware/auth');
 
 /**
  * GET /api/sync/status
@@ -67,6 +67,40 @@ router.get('/outbox', auth, staffOrAdmin, async (req, res) => {
       success: true,
       count: items.length,
       items,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * PUT /api/sync/interval
+ * Admin dynamically configures the DB sync interval (in minutes)
+ */
+router.put('/interval', auth, adminOnly, async (req, res) => {
+  try {
+    const { intervalMinutes } = req.body;
+    const mins = Number(intervalMinutes);
+    if (isNaN(mins) || mins < 0.2 || mins > 1440) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sync interval must be between 0.2 minutes (12 seconds) and 1440 minutes (24 hours)',
+      });
+    }
+
+    const POSSetting = require('../models/POSSetting');
+    const setting = await POSSetting.getSingleton();
+    setting.dbSyncIntervalMinutes = Math.round(mins * 10) / 10;
+    setting.lastUpdatedBy = req.user.name;
+    await setting.save();
+
+    syncEngine.setIntervalMinutes(setting.dbSyncIntervalMinutes);
+
+    res.json({
+      success: true,
+      dbSyncIntervalMinutes: setting.dbSyncIntervalMinutes,
+      syncIntervalMs: syncEngine.syncIntervalMs,
+      message: `Database sync interval updated to ${setting.dbSyncIntervalMinutes} minute(s)`,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

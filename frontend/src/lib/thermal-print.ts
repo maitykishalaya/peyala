@@ -47,6 +47,8 @@ export interface KOTItem {
   variantName?: string;
   variant?: { name: string; price?: number } | string;
   addons?: Array<string | { name: string; price?: number }>;
+  isCancelled?: boolean;
+  status?: string;
 }
 
 export interface KOTPrintData {
@@ -56,6 +58,7 @@ export interface KOTPrintData {
   tokenNo?: string | number;
   billerName?: string;
   roundTag?: string; // e.g. '[INITIAL ORDER]' or '[ROUND 2 - ADD-ON]'
+  isReprint?: boolean;
   createdAt?: string | Date;
   items: KOTItem[];
   orderNotes?: string;
@@ -96,6 +99,68 @@ export interface BillPrintData {
   paymentBreakdown?: { cash?: number; upi?: number; card?: number; due?: number; other?: number };
   isPaid?: boolean;
   isReprint?: boolean;
+  mergeSameItems?: boolean;
+}
+
+// ── Merge Bill Items Helper & Setting ────
+const MERGE_BILL_ITEMS_KEY = 'peyala_merge_bill_items';
+
+export function getSavedMergeBillItems(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(MERGE_BILL_ITEMS_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveMergeBillItems(merge: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(MERGE_BILL_ITEMS_KEY, merge ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('peyala_merge_bill_items_changed', { detail: merge }));
+  } catch {}
+}
+
+export function mergeBillItems(items: BillItem[]): BillItem[] {
+  const merged: BillItem[] = [];
+  const map = new Map<string, BillItem>();
+
+  for (const it of items) {
+    const rawVariant =
+      it.variantName ||
+      (typeof (it as any).variant === 'string'
+        ? (it as any).variant
+        : (it as any).variant?.name) ||
+      '';
+    const vName = typeof rawVariant === 'string' ? rawVariant.trim().toLowerCase() : '';
+    const addonsKey = Array.isArray(it.addons)
+      ? it.addons
+          .map((a: any) => (typeof a === 'string' ? a : a.name || ''))
+          .filter(Boolean)
+          .sort()
+          .join('|')
+      : '';
+    const key = `${it.name.trim().toLowerCase()}_${it.price}_${vName}_${addonsKey}`;
+
+    if (map.has(key)) {
+      const existing = map.get(key)!;
+      existing.quantity += Number(it.quantity) || 1;
+    } else {
+      const copy: BillItem = {
+        name: it.name,
+        quantity: Number(it.quantity) || 1,
+        price: it.price,
+        taxPercent: it.taxPercent,
+        variantName: it.variantName,
+        addons: it.addons ? [...it.addons] : undefined,
+      };
+      map.set(key, copy);
+      merged.push(copy);
+    }
+  }
+
+  return merged;
 }
 
 // ── Helper: Get or create single permanent hidden print iframe ────
@@ -206,12 +271,15 @@ function formatPrintDate(d: Date = new Date()): { dateStr: string; timeStr: stri
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = String(d.getFullYear()).slice(-2);
-  const hours = String(d.getHours()).padStart(2, '0');
+  const rawH = d.getHours();
   const mins = String(d.getMinutes()).padStart(2, '0');
+  const ampm = rawH >= 12 ? 'PM' : 'AM';
+  const h12 = rawH % 12 || 12;
+  const timeStr = `${String(h12).padStart(2, '0')}:${mins} ${ampm}`;
 
   return {
     dateStr: `${day}/${month}/${year}`,
-    timeStr: `${hours}:${mins}`,
+    timeStr,
   };
 }
 
@@ -223,7 +291,10 @@ export function generateKOTHtml(data: KOTPrintData): string {
     data.createdAt ? new Date(data.createdAt) : new Date()
   );
 
-  const totalQty = data.items.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+  const isReprint = Boolean(data.isReprint || data.roundTag?.includes('REPRINT'));
+  const activeItems = (data.items || []).filter((it) => !it.isCancelled && it.status !== 'cancelled');
+  const cancelledItems = (data.items || []).filter((it) => it.isCancelled || it.status === 'cancelled');
+  const totalQty = activeItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
   const roundTag = data.roundTag || '[INITIAL ORDER]';
   const kotDisplay = data.kotNumber
     ? String(data.kotNumber)
@@ -244,8 +315,11 @@ export function generateKOTHtml(data: KOTPrintData): string {
     `
     : '';
 
-  // Food items first, beverage section items appear after food items
+  // Sort: Active food first, active beverages next, cancelled items at the bottom with strike-through
   const sortedItems = [...(data.items || [])].sort((a, b) => {
+    const aCanc = (a.isCancelled || a.status === 'cancelled') ? 1 : 0;
+    const bCanc = (b.isCancelled || b.status === 'cancelled') ? 1 : 0;
+    if (aCanc !== bCanc) return aCanc - bCanc;
     const aBev = isBeverageItem(a) ? 1 : 0;
     const bBev = isBeverageItem(b) ? 1 : 0;
     return aBev - bBev;
@@ -253,6 +327,12 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
   const rows = sortedItems
     .map((item, idx) => {
+      const isCancelled = Boolean(item.isCancelled || item.status === 'cancelled');
+      const itemDecoration = isCancelled ? 'text-decoration: line-through; text-decoration-thickness: 2px; color: #333;' : '';
+      const cancelledBadge = isCancelled
+        ? ` <span style="display: inline-block; font-size: 10px; font-weight: 900; background: #000; color: #fff; padding: 1px 4px; border-radius: 2px; margin-left: 4px; text-transform: uppercase; letter-spacing: 0.3px;">[CANCELLED / REMOVED]</span>`
+        : '';
+
       const rawVariant =
         item.variantName ||
         (typeof (item as any).variant === 'string'
@@ -261,13 +341,13 @@ export function generateKOTHtml(data: KOTPrintData): string {
         '';
       const vName = typeof rawVariant === 'string' ? rawVariant.trim() : '';
       const variantHtml = vName
-        ? ` <span style="font-size: 12.5px; font-weight: 900; color: #000; text-transform: uppercase;">[${escapeHtml(vName)}]</span>`
+        ? ` <span style="font-size: 12.5px; font-weight: 900; color: #000; text-transform: uppercase; ${itemDecoration}">[${escapeHtml(vName)}]</span>`
         : '';
       const addonsList = Array.isArray(item.addons)
         ? item.addons.map((a: any) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean)
         : [];
       const addonsHtml = addonsList.length > 0
-        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: 700; color: #000; margin-top: 1px;">
+        ? `<div style="padding-left: 12px; font-size: 11px; font-weight: 700; color: #000; margin-top: 1px; ${itemDecoration}">
              + ${addonsList.map(escapeHtml).join(', ')}
            </div>`
         : '';
@@ -278,14 +358,17 @@ export function generateKOTHtml(data: KOTPrintData): string {
         : '';
 
       return `
-        <tr>
-          <td style="width: 22px; vertical-align: top; font-weight: bold; font-size: 13px;">${idx + 1}.</td>
+        <tr style="${isCancelled ? 'opacity: 0.9; background-color: #f7f7f7;' : ''}">
+          <td style="width: 22px; vertical-align: top; font-weight: bold; font-size: 13px; ${itemDecoration}">${idx + 1}.</td>
           <td style="vertical-align: top; font-size: 13px; font-weight: 600; padding-right: 4px;">
-            ${escapeHtml(item.name)}${variantHtml}
+            <span style="${itemDecoration}">
+              ${escapeHtml(item.name)}${variantHtml}
+            </span>
+            ${cancelledBadge}
             ${addonsHtml}
             ${notesHtml}
           </td>
-          <td style="width: 38px; text-align: right; vertical-align: top; font-size: 15px; font-weight: 900; padding-right: 2px;">
+          <td style="width: 38px; text-align: right; vertical-align: top; font-size: 15px; font-weight: 900; padding-right: 2px; ${itemDecoration}">
             ${item.quantity}
           </td>
         </tr>
@@ -368,25 +451,24 @@ export function generateKOTHtml(data: KOTPrintData): string {
         <div class="center" style="font-size: 14px; font-weight: 900; letter-spacing: 0.5px; line-height: 1.1; margin: 0; padding: 0;">
           ${STORE_INFO.name}
         </div>
-        <div class="center" style="font-size: 11px; font-weight: 700; margin: 1px 0 2px 0; letter-spacing: 0.5px;">
-          KITCHEN ORDER TICKET (KOT)
+        <div class="center" style="font-size: 11px; font-weight: 800; margin: 1px 0 2px 0; letter-spacing: 0.5px;">
+          ${isReprint ? '*** REPRINT KOT ***' : 'KITCHEN ORDER TICKET (KOT)'}
         </div>
 
-        <!-- Big & Bold Table + KOT Number Box -->
+        <!-- Big & Bold Table + KOT Number & Time Box -->
         <div class="table-box">
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px;">
-            <span style="font-size: 15px; font-weight: 900; letter-spacing: 0.5px;">KOT NO: #${escapeHtml(String(kotDisplay))}</span>
-            <span class="round-tag">${escapeHtml(roundTag)}</span>
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 3px; margin-bottom: 3px;">
+            <span style="font-size: 20px; font-weight: 900; letter-spacing: 0.5px;">KOT NO: #${escapeHtml(String(kotDisplay))}</span>
+            <span style="font-size: 17px; font-weight: 900; letter-spacing: 0.5px;">TIME: ${timeStr}</span>
           </div>
           <div class="table-title">TABLE: ${escapeHtml(data.tableNumber)}</div>
+          <div class="round-tag" style="border-top: 1.5px dashed #000; padding-top: 2px; margin-top: 3px;">
+            ${escapeHtml(isReprint && !roundTag.includes('REPRINT') ? `[REPRINT - ${roundTag.replace(/[\[\]]/g, '')}]` : roundTag)}
+          </div>
         </div>
 
         <!-- Meta Info -->
-        <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 2px;">
-          <div><b>KOT No:</b> #${escapeHtml(String(kotDisplay))}</div>
-          <div style="padding-right: 2px;"><b>Time:</b> ${timeStr}</div>
-        </div>
-        <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <div style="font-size: 11.5px; display: flex; justify-content: space-between; margin-bottom: 4px;">
           <div><b>Date:</b> ${dateStr}</div>
           <div style="padding-right: 2px;"><b>Server:</b> ${escapeHtml(data.billerName || 'Staff')}</div>
         </div>
@@ -413,8 +495,8 @@ export function generateKOTHtml(data: KOTPrintData): string {
 
         <!-- Bottom Total Quantity -->
         <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; margin-top: 3px;">
-          <span>Total Quantity:</span>
-          <span style="padding-right: 2px;">${totalQty}</span>
+          <span>Total Active Qty:</span>
+          <span style="padding-right: 2px;">${totalQty}${cancelledItems.length > 0 ? ` (${cancelledItems.length} cancelled)` : ''}</span>
         </div>
 
         ${instruction ? `
@@ -424,7 +506,7 @@ export function generateKOTHtml(data: KOTPrintData): string {
         ` : ''}
 
         <div class="divider" style="margin-top: 8px;"></div>
-        <div class="center" style="font-size: 10px; color: #333;">*** Kitchen Copy ***</div>
+        <div class="center" style="font-size: 10px; color: #333;">*** ${isReprint ? 'Kitchen Reprint Copy' : 'Kitchen Copy'} ***</div>
       </body>
     </html>
   `;
@@ -455,7 +537,9 @@ export function generateBillHtml(data: BillPrintData): string {
     data.createdAt ? new Date(data.createdAt) : new Date()
   );
 
-  const totalQty = data.items.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+  const shouldMerge = data.mergeSameItems ?? getSavedMergeBillItems();
+  const printableItems = shouldMerge ? mergeBillItems(data.items || []) : (data.items || []);
+  const totalQty = printableItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
 
   // 5% GST split: 2.5% CGST + 2.5% SGST (Calculated on discounted base)
   const halfTax = Math.round((data.taxAmount / 2) * 100) / 100;
@@ -464,7 +548,7 @@ export function generateBillHtml(data: BillPrintData): string {
   const rawCalculatedTotal = discountedBase + halfTax * 2;
   const roundOff = Math.round((roundedBillTotal - rawCalculatedTotal) * 100) / 100;
 
-  const rows = data.items
+  const rows = printableItems
     .map((item, idx) => {
       const lineTotal = item.price * item.quantity;
       const rawVariant =

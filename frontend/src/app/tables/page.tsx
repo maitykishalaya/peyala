@@ -10,6 +10,8 @@ import {
   menuApi,
   addonsApi,
   tableCategoriesApi,
+  posSettingsApi,
+  POSSetting,
   Table,
   Order,
   MenuItem,
@@ -37,6 +39,7 @@ import {
   Trash2,
   ChevronRight,
   AlertCircle,
+  AlertTriangle,
   CreditCard,
   Wallet,
   Smartphone,
@@ -78,6 +81,7 @@ import {
   setPrintMode,
   PrintMode,
   BillItem,
+  KOTItem,
 } from '@/lib/thermal-print';
 import DiningTableIcon from '@/components/ui/DiningTableIcon';
 
@@ -278,6 +282,12 @@ export default function TablesPage() {
   const [addonSearch, setAddonSearch] = useState('');
 
   // Billing, Discount & Payment state
+  const [posLimits, setPosLimits] = useState<POSSetting>({
+    maxDiscountStaffPercent: 10,
+    maxDiscountManagerPercent: 20,
+    maxWaiveStaffPercent: 2,
+    maxWaiveManagerPercent: 5,
+  });
   const [discountType, setDiscountType] = useState<'flat' | 'percentage'>('flat');
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [settlementInput, setSettlementInput] = useState<string>('');
@@ -364,100 +374,150 @@ export default function TablesPage() {
     setCartCustomerSuggestions([]);
   };
 
-  const renderCartCustomerBox = (isMobile: boolean = false) => (
-    <div className="bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 rounded-xl p-2.5 my-2 space-y-2 shrink-0">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-black uppercase text-blue-900 dark:text-blue-200 tracking-wide">
-          <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-          <span>Customer Details (Optional)</span>
+  // Item-wise instruction editing state
+  const [editingNoteCartKey, setEditingNoteCartKey] = useState<string | null>(null);
+  const [inlineNoteText, setInlineNoteText] = useState<string>('');
+
+  // Compact Collapsible cart sections (to keep cart items prominent)
+  const [isInstructionExpanded, setIsInstructionExpanded] = useState<boolean>(false);
+  const [isCustomerDetailsExpanded, setIsCustomerDetailsExpanded] = useState<boolean>(false);
+
+  // Cancellation Modal state (Reason mandatory for staff & leak detector)
+  const [cancelOrderModalOpen, setCancelOrderModalOpen] = useState<boolean>(false);
+  const [cancelReasonText, setCancelReasonText] = useState<string>('');
+  const [cancelReasonError, setCancelReasonError] = useState<string>('');
+  const [isCancellingOrder, setIsCancellingOrder] = useState<boolean>(false);
+
+  // Reprint KOT Modal state
+  const [reprintKotModalOpen, setReprintKotModalOpen] = useState<boolean>(false);
+  const [reprintSelectedRound, setReprintSelectedRound] = useState<number | 'all'>('all');
+
+  const renderCartCustomerBox = (isMobile: boolean = false) => {
+    const hasCustomerData = Boolean(cartCustomerPhone || cartCustomerName || cartCustomerAddress);
+    return (
+      <div className="bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 rounded-xl p-2 my-1.5 shrink-0 transition-all">
+        <div
+          onClick={() => setIsCustomerDetailsExpanded((prev) => !prev)}
+          className="flex items-center justify-between cursor-pointer select-none"
+        >
+          <div className="flex items-center gap-1.5 text-xs font-black uppercase text-blue-900 dark:text-blue-200 tracking-wide">
+            <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span>Customer Details</span>
+            {hasCustomerData ? (
+              <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700 max-w-[140px] truncate">
+                {cartCustomerName || cartCustomerPhone}
+              </span>
+            ) : (
+              <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            {hasCustomerData && (
+              <button
+                type="button"
+                onClick={handleClearCartCustomer}
+                className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsCustomerDetailsExpanded((prev) => !prev)}
+              className="text-blue-600 dark:text-blue-400 p-0.5 hover:bg-blue-100/50 dark:hover:bg-blue-900/40 rounded cursor-pointer"
+              title={isCustomerDetailsExpanded ? 'Collapse' : 'Expand'}
+            >
+              {isCustomerDetailsExpanded ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
         </div>
-        {(cartCustomerPhone || cartCustomerName || cartCustomerAddress) && (
-          <button
-            type="button"
-            onClick={handleClearCartCustomer}
-            className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
-          >
-            Clear
-          </button>
+
+        {/* Collapsible Content */}
+        {isCustomerDetailsExpanded && (
+          <div className="space-y-2 mt-2 pt-2 border-t border-blue-200/50 dark:border-blue-900/40 animate-in fade-in-50 duration-150">
+            {/* Outstanding Due Alert if regular customer */}
+            {cartCustomerDue !== null && cartCustomerDue > 0 && (
+              <div className="flex items-center justify-between px-2 py-1 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-lg text-xs font-bold text-amber-900 dark:text-amber-200">
+                <span>⚠️ Amount Owed:</span>
+                <span className="font-extrabold text-amber-700 dark:text-amber-300">{formatCurrency(cartCustomerDue)}</span>
+              </div>
+            )}
+
+            {/* Inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 relative">
+              {/* Phone with Auto-lookup */}
+              <div className="relative">
+                <div className="relative">
+                  <Phone className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type="tel"
+                    value={cartCustomerPhone}
+                    onChange={(e) => handleCartCustomerQueryChange('phone', e.target.value)}
+                    placeholder="Phone number..."
+                    className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Autocomplete Dropdown */}
+                {showCartCustomerSuggestions && cartCustomerSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                    {cartCustomerSuggestions.map((cust) => (
+                      <button
+                        key={cust._id}
+                        type="button"
+                        onClick={() => handleSelectCartCustomer(cust)}
+                        className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-between text-xs cursor-pointer"
+                      >
+                        <div>
+                          <div className="font-bold text-gray-900 dark:text-white">{cust.name}</div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">{cust.phone}</div>
+                        </div>
+                        {cust.totalDue > 0 ? (
+                          <span className="text-[10px] font-extrabold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                            Due: {formatCurrency(cust.totalDue)}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-emerald-600 font-bold">Clear</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Customer Name */}
+              <div className="relative">
+                <User className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={cartCustomerName}
+                  onChange={(e) => handleCartCustomerQueryChange('name', e.target.value)}
+                  placeholder="Customer Name..."
+                  className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Address */}
+            <div className="relative">
+              <MapPin className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={cartCustomerAddress}
+                onChange={(e) => handleCartCustomerQueryChange('address', e.target.value)}
+                placeholder="Address (Optional)..."
+                className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Outstanding Due Alert if regular customer */}
-      {cartCustomerDue !== null && cartCustomerDue > 0 && (
-        <div className="flex items-center justify-between px-2 py-1 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-lg text-xs font-bold text-amber-900 dark:text-amber-200">
-          <span>⚠️ Total Amount Owed:</span>
-          <span className="font-extrabold text-amber-700 dark:text-amber-300">{formatCurrency(cartCustomerDue)}</span>
-        </div>
-      )}
-
-      {/* Inputs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 relative">
-        {/* Phone with Auto-lookup */}
-        <div className="relative">
-          <div className="relative">
-            <Phone className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            <input
-              type="tel"
-              value={cartCustomerPhone}
-              onChange={(e) => handleCartCustomerQueryChange('phone', e.target.value)}
-              placeholder="Phone number..."
-              className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Autocomplete Dropdown */}
-          {showCartCustomerSuggestions && cartCustomerSuggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-              {cartCustomerSuggestions.map((cust) => (
-                <button
-                  key={cust._id}
-                  type="button"
-                  onClick={() => handleSelectCartCustomer(cust)}
-                  className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-between text-xs cursor-pointer"
-                >
-                  <div>
-                    <div className="font-bold text-gray-900 dark:text-white">{cust.name}</div>
-                    <div className="text-[11px] text-gray-500 dark:text-gray-400">{cust.phone}</div>
-                  </div>
-                  {cust.totalDue > 0 ? (
-                    <span className="text-[10px] font-extrabold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-                      Due: {formatCurrency(cust.totalDue)}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-emerald-600 font-bold">Clear</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Customer Name */}
-        <div className="relative">
-          <User className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            value={cartCustomerName}
-            onChange={(e) => handleCartCustomerQueryChange('name', e.target.value)}
-            placeholder="Customer Name..."
-            className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      {/* Address */}
-      <div className="relative">
-        <MapPin className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        <input
-          type="text"
-          value={cartCustomerAddress}
-          onChange={(e) => handleCartCustomerQueryChange('address', e.target.value)}
-          placeholder="Address (Optional)..."
-          className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-      </div>
-    </div>
-  );
+    );
+  };
 
   // Print Station state
   const [isPrintStation, setIsPrintStation] = useState<boolean>(false);
@@ -558,19 +618,28 @@ export default function TablesPage() {
         // High-speed low-overhead background polling for low-end hardware: only fetch tables
         tableRes = await tablesApi.list();
       } else {
-        // Initial / manual load fetches full menu catalogs
-        const [tRes, itemRes, catRes, addonRes, tableCatRes] = await Promise.all([
+        // Initial / manual load fetches full menu catalogs & POS role limits
+        const [tRes, itemRes, catRes, addonRes, tableCatRes, posLimitsRes] = await Promise.all([
           tablesApi.list(),
           menuApi.listItems({ availableOnly: true }),
           menuApi.listCategories(),
           addonsApi.list(),
           tableCategoriesApi.list().catch(() => ({ data: [] })),
+          posSettingsApi.get().catch(() => ({ data: null })),
         ]);
         tableRes = tRes;
         setMenuItems(itemRes.data || []);
         setCategories(catRes.data || []);
         setAddons(addonRes.data || []);
         setTableCategories(tableCatRes.data || []);
+        if (posLimitsRes.data) {
+          setPosLimits({
+            maxDiscountStaffPercent: posLimitsRes.data.maxDiscountStaffPercent ?? 10,
+            maxDiscountManagerPercent: posLimitsRes.data.maxDiscountManagerPercent ?? 20,
+            maxWaiveStaffPercent: posLimitsRes.data.maxWaiveStaffPercent ?? 2,
+            maxWaiveManagerPercent: posLimitsRes.data.maxWaiveManagerPercent ?? 5,
+          });
+        }
       }
 
       const tableData = tableRes.data || [];
@@ -1028,6 +1097,11 @@ export default function TablesPage() {
     setIsRound2Mode(false);
     setCart({});
     handleClearCartCustomer();
+    setMenuSearch('');
+    setSelectedCategory('all');
+    setIsInstructionExpanded(false);
+    setIsCustomerDetailsExpanded(false);
+    setEditingNoteCartKey(null);
     setServiceType('dine_in');
     setGuestCount(table.capacity || 1);
     setOrderNotes('');
@@ -1039,6 +1113,11 @@ export default function TablesPage() {
     setSelectedTable(table);
     setIsRound2Mode(true);
     setCart({});
+    setMenuSearch('');
+    setSelectedCategory('all');
+    setIsInstructionExpanded(false);
+    setIsCustomerDetailsExpanded(false);
+    setEditingNoteCartKey(null);
     setServiceType('dine_in');
     setGuestCount(table.capacity || 1);
     setOrderNotes('');
@@ -1250,6 +1329,11 @@ export default function TablesPage() {
     setIsRound2Mode(false);
     setCart({});
     handleClearCartCustomer();
+    setMenuSearch('');
+    setSelectedCategory('all');
+    setIsInstructionExpanded(false);
+    setIsCustomerDetailsExpanded(false);
+    setEditingNoteCartKey(null);
     setServiceType('dine_in');
     setGuestCount(1);
     setOrderNotes('');
@@ -1560,6 +1644,11 @@ export default function TablesPage() {
       // Clear cart & return to Table View per user requirement!
       setCart({});
       handleClearCartCustomer();
+      setMenuSearch('');
+      setSelectedCategory('all');
+      setIsInstructionExpanded(false);
+      setIsCustomerDetailsExpanded(false);
+      setEditingNoteCartKey(null);
       setOrderNotes('');
       setSelectedTable(null);
       setActiveOrder(null);
@@ -1659,6 +1748,11 @@ export default function TablesPage() {
       setSelectedTable(null);
       setActiveOrder(null);
       setIsRound2Mode(false);
+      setMenuSearch('');
+      setSelectedCategory('all');
+      setIsInstructionExpanded(false);
+      setIsCustomerDetailsExpanded(false);
+      setEditingNoteCartKey(null);
       await loadData();
       setActiveView('table_view');
     } catch (err: any) {
@@ -1724,6 +1818,87 @@ export default function TablesPage() {
     });
   };
 
+  // Reprint KOT for Table (Shows cancelled items with cut-through line and new/active items for a round)
+  const handleReprintKotClick = () => {
+    if (!activeOrder) return;
+    const rounds = activeOrder.kotRounds || [];
+    if (rounds.length > 1) {
+      setReprintSelectedRound('all');
+      setReprintKotModalOpen(true);
+    } else {
+      handleExecuteReprintKot(rounds.length === 1 ? 1 : undefined);
+    }
+  };
+
+  const handleExecuteReprintKot = async (roundNum?: number | 'all') => {
+    if (!activeOrder) return;
+    try {
+      setActionLoading(true);
+      const isAll = !roundNum || roundNum === 'all';
+      const targetItems = (activeOrder.items || []).filter((it: any) => {
+        if (isAll) return true;
+        return Number(it.roundNumber) === Number(roundNum);
+      });
+
+      if (targetItems.length === 0) {
+        toast.error('No items found for the selected round');
+        return;
+      }
+
+      const printableItems: KOTItem[] = targetItems.map((it: any) => ({
+        name: it.name || 'Item',
+        quantity: it.quantity || 1,
+        notes: it.notes,
+        variantName: getOrderItemVariant(it, activeOrder) || it.variant?.name,
+        addons: (it.selectedAddons && it.selectedAddons.length > 0)
+          ? it.selectedAddons.map((a: any) => a.name)
+          : getOrderItemAddons(it, activeOrder).map((a: any) => a.name),
+        status: it.status,
+        isCancelled: it.status === 'cancelled',
+      }));
+
+      const activeCount = printableItems.filter((i) => !i.isCancelled).length;
+      const cancelledCount = printableItems.filter((i) => i.isCancelled).length;
+
+      let roundKotNum = `KOT-${activeOrder.orderNumber || activeOrder._id.slice(-4)}`;
+      if (!isAll && typeof roundNum === 'number') {
+        const foundRound = activeOrder.kotRounds?.find((r) => r.roundNumber === roundNum);
+        if (foundRound?.kotNumber) {
+          roundKotNum = String(foundRound.kotNumber);
+        } else {
+          roundKotNum = `${roundKotNum}-R${roundNum}`;
+        }
+      }
+
+      printKOT({
+        tableNumber: selectedTable?.tableNumber || (activeOrder.table as any)?.tableNumber || 'Table',
+        kotNumber: roundKotNum,
+        orderNumber: activeOrder.orderNumber,
+        tokenNo: activeOrder.orderNumber ? String(activeOrder.orderNumber).slice(-2) : undefined,
+        billerName: user?.name || 'Staff',
+        roundTag: isAll ? '[REPRINT KOT - ALL ITEMS]' : `[REPRINT - ROUND ${roundNum}]`,
+        createdAt: new Date(),
+        items: printableItems,
+        orderNotes: activeOrder.orderNotes,
+        isReprint: true,
+      });
+
+      // Also notify print station if remote print station is active
+      try {
+        await ordersApi.reprintOrderKot(activeOrder._id);
+      } catch (_) {}
+
+      setReprintKotModalOpen(false);
+      toast.success(
+        `KOT Reprinted: ${activeCount} active, ${cancelledCount} cancelled item(s)`
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to reprint KOT');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Cancel Item inside Order
   const handleCancelItem = async (itemId: string, itemName: string) => {
     if (!activeOrder) return;
@@ -1744,6 +1919,27 @@ export default function TablesPage() {
   // Apply Discount
   const handleApplyDiscount = async () => {
     if (!activeOrder) return;
+
+    // Validate role-based discount limit (Admin has unlimited authority)
+    if (user?.role !== 'admin' && discountInput > 0) {
+      const maxDiscPct = user?.role === 'manager'
+        ? (posLimits.maxDiscountManagerPercent ?? 20)
+        : (posLimits.maxDiscountStaffPercent ?? 10);
+
+      const effectivePct = discountType === 'percentage'
+        ? discountInput
+        : (activeOrder.subtotal > 0 ? (discountInput / activeOrder.subtotal) * 100 : 0);
+
+      if (effectivePct > maxDiscPct + 0.001) {
+        const roleLabel = user?.role === 'manager' ? 'Manager' : 'Staff';
+        const maxValInRs = Math.round(((activeOrder.subtotal * maxDiscPct) / 100) * 100) / 100;
+        toast.error(
+          `${roleLabel} cannot give more than ${maxDiscPct}% discount (Max allowed: ${formatCurrency(maxValInRs)} on subtotal ${formatCurrency(activeOrder.subtotal)}).`
+        );
+        return;
+      }
+    }
+
     try {
       setActionLoading(true);
       const res = await ordersApi.applyDiscount(activeOrder._id, {
@@ -1835,6 +2031,24 @@ export default function TablesPage() {
       }
 
       const waived = partRemaining;
+
+      // Role-based Cash Shortage / Waive-off validation (Admin has unlimited authority)
+      if (user?.role !== 'admin' && waived > 0) {
+        const maxWaivePct = user?.role === 'manager'
+          ? (posLimits.maxWaiveManagerPercent ?? 5)
+          : (posLimits.maxWaiveStaffPercent ?? 2);
+        const maxAllowedShortage = Math.round(((activeOrder.total * maxWaivePct) / 100) * 100) / 100;
+        const minSettlement = Math.round((activeOrder.total - maxAllowedShortage) * 100) / 100;
+
+        if (waived > maxAllowedShortage + 0.001) {
+          const roleLabel = user?.role === 'manager' ? 'Manager' : 'Staff';
+          toast.error(
+            `${roleLabel} cannot waive off more than ${maxWaivePct}% (max shortage ${formatCurrency(maxAllowedShortage)} on bill ${formatCurrency(activeOrder.total)}). Minimum required settlement is ${formatCurrency(minSettlement)}.`
+          );
+          return;
+        }
+      }
+
       const partsSummary = [
         numPartCash > 0 ? `Cash: ${formatCurrency(numPartCash)}` : null,
         numPartUpi > 0 ? `UPI: ${formatCurrency(numPartUpi)}` : null,
@@ -1896,6 +2110,24 @@ export default function TablesPage() {
 
     const waived = Math.max(0, Math.round((activeOrder.total - enteredSettlement) * 100) / 100);
     const changeDue = Math.max(0, Math.round((enteredSettlement - activeOrder.total) * 100) / 100);
+
+    // Role-based Cash Shortage / Waive-off validation (Admin has unlimited authority)
+    if (user?.role !== 'admin' && waived > 0) {
+      const maxWaivePct = user?.role === 'manager'
+        ? (posLimits.maxWaiveManagerPercent ?? 5)
+        : (posLimits.maxWaiveStaffPercent ?? 2);
+      const maxAllowedShortage = Math.round(((activeOrder.total * maxWaivePct) / 100) * 100) / 100;
+      const minSettlement = Math.round((activeOrder.total - maxAllowedShortage) * 100) / 100;
+
+      if (waived > maxAllowedShortage + 0.001) {
+        const roleLabel = user?.role === 'manager' ? 'Manager' : 'Staff';
+        toast.error(
+          `${roleLabel} cannot waive off more than ${maxWaivePct}% (max shortage ${formatCurrency(maxAllowedShortage)} on bill ${formatCurrency(activeOrder.total)}). Minimum required settlement is ${formatCurrency(minSettlement)}.`
+        );
+        return;
+      }
+    }
+
     const confirmMsg = paymentMethod === 'due'
       ? `Settle ${formatCurrency(enteredSettlement)} as DUE / KHATA for ${customerInfoPayload?.name} (${customerInfoPayload?.phone}) and free Table ${selectedTable?.tableNumber}?`
       : changeDue > 0
@@ -1942,24 +2174,47 @@ export default function TablesPage() {
     }
   };
 
-  // Cancel entire order
-  const handleCancelOrder = async () => {
+  // Cancel entire order (Modal enforcing mandatory reason for audit & leak detector)
+  const handleOpenCancelOrderModal = () => {
     if (!activeOrder) return;
-    if (!confirm(`Cancel entire order for Table ${selectedTable?.tableNumber}? This will free the table.`)) return;
+    setCancelReasonText('');
+    setCancelReasonError('');
+    setCancelOrderModalOpen(true);
+  };
+
+  const handleConfirmCancelOrder = async () => {
+    if (!activeOrder) return;
+    const trimmed = cancelReasonText.trim();
+    if (!trimmed) {
+      setCancelReasonError('Please select or enter a cancellation reason.');
+      return;
+    }
+
     try {
-      setActionLoading(true);
-      await ordersApi.cancel(activeOrder._id);
+      setIsCancellingOrder(true);
+      await ordersApi.cancel(activeOrder._id, trimmed);
       toast.success(`Order for Table ${selectedTable?.tableNumber} cancelled`);
+      setCancelOrderModalOpen(false);
       setShowOrderDetailsModal(false);
       setActiveOrder(null);
       setSelectedTable(null);
+      setMenuSearch('');
+      setSelectedCategory('all');
+      setIsInstructionExpanded(false);
+      setIsCustomerDetailsExpanded(false);
+      setEditingNoteCartKey(null);
       await loadData();
       setActiveView('table_view');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to cancel order');
     } finally {
-      setActionLoading(false);
+      setIsCancellingOrder(false);
     }
+  };
+
+  // Backwards-compatible alias for any callers
+  const handleCancelOrder = () => {
+    handleOpenCancelOrderModal();
   };
 
   // Table CRUD handlers
@@ -2589,8 +2844,15 @@ export default function TablesPage() {
             <div className="bg-white dark:bg-gray-900 p-2.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setActiveView('table_view')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 font-bold text-xs hover:bg-red-100 transition-colors"
+                  onClick={() => {
+                    setMenuSearch('');
+                    setSelectedCategory('all');
+                    setIsInstructionExpanded(false);
+                    setIsCustomerDetailsExpanded(false);
+                    setEditingNoteCartKey(null);
+                    setActiveView('table_view');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 font-bold text-xs hover:bg-red-100 transition-colors cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   Table View
@@ -2757,10 +3019,14 @@ export default function TablesPage() {
                 <div className="relative shrink-0">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
+                    id="pos-menu-search-input"
                     type="text"
                     value={menuSearch}
                     onChange={(e) => setMenuSearch(e.target.value)}
                     placeholder="Search item..."
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className="input pl-9 text-sm h-10 bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700"
                   />
                   {menuSearch && (
@@ -2946,7 +3212,7 @@ export default function TablesPage() {
                   </div>
 
                   {/* Cart Items List with indented addons (Matches Image 1 & 3) */}
-                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-0 pr-0.5 flex flex-col justify-start items-stretch touch-pan-y">
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-[220px] max-h-[55vh] pr-0.5 flex flex-col justify-start items-stretch touch-pan-y">
                     {/* If occupied in Round 2, show previous rounds collapsible */}
                     {isRound2Mode && activeOrder && (
                       <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 dark:border-amber-900/40 shrink-0">
@@ -2971,20 +3237,20 @@ export default function TablesPage() {
                         const lineTotal = d.unitPrice * d.quantity;
 
                         return (
-                          <div key={cartKey} className="p-2.5 text-sm space-y-1 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
-                            <div className="grid grid-cols-12 items-start gap-1">
+                          <div key={cartKey} className="p-2.5 text-sm space-y-1.5 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
+                            <div className="grid grid-cols-12 items-start gap-1.5">
                               {/* Col: Delete + Name + Indented Addons */}
                               <div className="col-span-6 flex items-start gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => removeCartEntry(cartKey)}
-                                  className="text-red-500 hover:text-red-700 mt-0.5 p-0.5"
+                                  className="text-red-500 hover:text-red-700 mt-0.5 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
                                   title="Delete Item"
                                 >
                                   <X className="w-4 h-4 stroke-[2.5]" />
                                 </button>
-                                <div>
-                                  <p className="text-sm sm:text-base font-bold text-gray-900 dark:text-white leading-tight">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white leading-tight">
                                     {item.name}
                                   </p>
                                   {d.variant?.name && (
@@ -2997,42 +3263,113 @@ export default function TablesPage() {
                                       {d.selectedAddons.map((a) => `${a.name}`).join(', ')}
                                     </p>
                                   )}
-                                  {d.notes && (
-                                    <p className="text-xs text-amber-600 dark:text-amber-400 pl-2 font-medium mt-0.5">
-                                      Note: {d.notes}
-                                    </p>
-                                  )}
                                 </div>
                               </div>
 
                               {/* Col: Check Items */}
-                              <div className="col-span-2 flex justify-center items-center pt-0.5">
+                              <div className="col-span-2 flex justify-center items-center pt-1">
                                 <CheckSquare className="w-4 h-4 text-emerald-600" />
                               </div>
 
                               {/* Col: Qty Stepper [-] 1 [+] */}
-                              <div className="col-span-2 flex items-center justify-center gap-1.5 pt-0.5">
+                              <div className="col-span-2 flex items-center justify-center gap-1 pt-0.5">
                                 <button
                                   type="button"
                                   onClick={() => updateCartEntryQty(cartKey, -1)}
-                                  className="text-gray-500 hover:text-red-600 p-0.5"
+                                  className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-600 transition-colors cursor-pointer"
                                 >
                                   <MinusCircle className="w-4 h-4" />
                                 </button>
-                                <span className="font-extrabold text-sm sm:text-base min-w-[1.25rem] text-center">{d.quantity}</span>
+                                <span className="font-extrabold text-base sm:text-lg min-w-[1.5rem] text-center">{d.quantity}</span>
                                 <button
                                   type="button"
                                   onClick={() => updateCartEntryQty(cartKey, 1)}
-                                  className="text-gray-500 hover:text-emerald-600 p-0.5"
+                                  className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-600 transition-colors cursor-pointer"
                                 >
                                   <PlusCircle className="w-4 h-4" />
                                 </button>
                               </div>
 
                               {/* Col: Price */}
-                              <div className="col-span-2 text-right font-extrabold text-sm sm:text-base text-gray-900 dark:text-white pt-0.5">
+                              <div className="col-span-2 text-right font-extrabold text-base sm:text-lg text-gray-900 dark:text-white pt-1">
                                 {formatCurrency(lineTotal)}
                               </div>
+                            </div>
+
+                            {/* Item-Wise Instruction Row (Requirement 3) */}
+                            <div className="pl-6 pt-0.5">
+                              {editingNoteCartKey === cartKey ? (
+                                <div className="flex items-center gap-1.5 mt-1 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    value={inlineNoteText}
+                                    onChange={(e) => setInlineNoteText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        updateCartEntryNotes(cartKey, inlineNoteText.trim());
+                                        setEditingNoteCartKey(null);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingNoteCartKey(null);
+                                      }
+                                    }}
+                                    placeholder="Special instruction for this item (optional)..."
+                                    className="flex-1 text-xs px-2 py-1 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded text-gray-900 dark:text-white focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateCartEntryNotes(cartKey, inlineNoteText.trim());
+                                      setEditingNoteCartKey(null);
+                                    }}
+                                    className="px-2 py-1 text-xs font-bold bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingNoteCartKey(null)}
+                                    className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : d.notes ? (
+                                <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/80 dark:border-amber-900/60 w-fit">
+                                  <ChefHat className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span className="font-medium">Note: {d.notes}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setInlineNoteText(d.notes);
+                                      setEditingNoteCartKey(cartKey);
+                                    }}
+                                    className="text-[10px] underline ml-1 text-amber-800 dark:text-amber-200 hover:text-amber-950 font-bold cursor-pointer"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCartEntryNotes(cartKey, '')}
+                                    className="text-[10px] text-red-500 hover:text-red-700 ml-0.5 cursor-pointer"
+                                    title="Remove note"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setInlineNoteText('');
+                                    setEditingNoteCartKey(cartKey);
+                                  }}
+                                  className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 flex items-center gap-1 hover:underline cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  Add note (optional)
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -3041,72 +3378,100 @@ export default function TablesPage() {
                   </div>
                 </div>
 
-                {/* Customer Instruction / Cooking Note (Mobile & Desktop Friendly) */}
-                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2.5 my-2 space-y-1.5 shrink-0">
-                  <div className="flex items-center justify-between">
+                {/* Customer Instruction / Cooking Note (Collapsible to save vertical space) */}
+                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2 my-1.5 shrink-0 transition-all">
+                  <div
+                    onClick={() => setIsInstructionExpanded((prev) => !prev)}
+                    className="flex items-center justify-between cursor-pointer select-none"
+                  >
                     <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
                       <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span>Customer Instruction</span>
+                      {orderNotes ? (
+                        <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[140px] truncate">
+                          "{orderNotes}"
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+                      )}
                     </div>
-                    {orderNotes && (
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      {orderNotes && (
+                        <button
+                          type="button"
+                          onClick={() => setOrderNotes('')}
+                          className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+                        >
+                          Clear
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setOrderNotes('')}
-                        className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
+                        onClick={() => setIsInstructionExpanded((prev) => !prev)}
+                        className="text-amber-600 dark:text-amber-400 p-0.5 hover:bg-amber-100/50 dark:hover:bg-amber-900/40 rounded cursor-pointer"
+                        title={isInstructionExpanded ? 'Collapse' : 'Expand'}
                       >
-                        Clear
+                        {isInstructionExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
                       </button>
-                    )}
+                    </div>
                   </div>
 
-                  {/* Quick Touch Chips for Waiters */}
-                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
-                    {[
-                      'Less Spicy',
-                      'No Onion/Garlic',
-                      'Parcel / Takeaway',
-                      'Extra Spicy',
-                      'Serve Hot',
-                      'Extra Crispy',
-                    ].map((chip) => {
-                      const isSelected = orderNotes.includes(chip);
-                      return (
-                        <button
-                          key={chip}
-                          type="button"
-                          onClick={() => {
-                            if (isSelected) {
-                              const updated = orderNotes
-                                .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
-                                .replace(/^,\s*/, '')
-                                .trim();
-                              setOrderNotes(updated);
-                            } else {
-                              setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
-                            }
-                          }}
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
-                            isSelected
-                              ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
-                              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
-                          )}
-                        >
-                          {isSelected ? '✓ ' : '+ '}{chip}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {isInstructionExpanded && (
+                    <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
+                      {/* Quick Touch Chips for Waiters */}
+                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                        {[
+                          'Less Spicy',
+                          'No Onion/Garlic',
+                          'Parcel / Takeaway',
+                          'Extra Spicy',
+                          'Serve Hot',
+                          'Extra Crispy',
+                        ].map((chip) => {
+                          const isSelected = orderNotes.includes(chip);
+                          return (
+                            <button
+                              key={chip}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  const updated = orderNotes
+                                    .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
+                                    .replace(/^,\s*/, '')
+                                    .trim();
+                                  setOrderNotes(updated);
+                                } else {
+                                  setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
+                                }
+                              }}
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                                isSelected
+                                  ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
+                              )}
+                            >
+                              {isSelected ? '✓ ' : '+ '}{chip}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={orderNotes}
-                      onChange={(e) => setOrderNotes(e.target.value)}
-                      placeholder="Type cooking note (e.g. less salt, serve water first)..."
-                      className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={orderNotes}
+                          onChange={(e) => setOrderNotes(e.target.value)}
+                          placeholder="Type cooking note (e.g. less salt, serve water first)..."
+                          className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Customer Details Card (Optional) */}
@@ -3326,7 +3691,7 @@ export default function TablesPage() {
                         <span className="col-span-2 text-right">PRICE</span>
                       </div>
 
-                      <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[280px] overflow-y-auto pr-0.5 touch-pan-y">
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[360px] min-h-[220px] overflow-y-auto pr-0.5 touch-pan-y">
                         {isRound2Mode && activeOrder && (
                           <div className="p-2 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 shrink-0">
                             <div className="flex items-center justify-between font-bold text-amber-900 dark:text-amber-200">
@@ -3347,19 +3712,19 @@ export default function TablesPage() {
                             const lineTotal = d.unitPrice * d.quantity;
 
                             return (
-                              <div key={cartKey} className="p-2.5 text-sm space-y-1 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
+                              <div key={cartKey} className="p-2.5 text-sm space-y-1.5 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
                                 <div className="grid grid-cols-12 items-start gap-1">
                                   <div className="col-span-6 flex items-start gap-1.5">
                                     <button
                                       type="button"
                                       onClick={() => removeCartEntry(cartKey)}
-                                      className="text-red-500 hover:text-red-700 mt-0.5 p-0.5 cursor-pointer"
+                                      className="text-red-500 hover:text-red-700 mt-0.5 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
                                       title="Delete Item"
                                     >
                                       <X className="w-4 h-4 stroke-[2.5]" />
                                     </button>
-                                    <div>
-                                      <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-base font-bold text-gray-900 dark:text-white leading-tight">
                                         {item.name}
                                       </p>
                                       {d.variant?.name && (
@@ -3372,15 +3737,10 @@ export default function TablesPage() {
                                           {d.selectedAddons.map((a) => `${a.name}`).join(', ')}
                                         </p>
                                       )}
-                                      {d.notes && (
-                                        <p className="text-xs text-amber-600 dark:text-amber-400 pl-2 font-medium mt-0.5">
-                                          Note: {d.notes}
-                                        </p>
-                                      )}
                                     </div>
                                   </div>
 
-                                  <div className="col-span-2 flex justify-center items-center pt-0.5">
+                                  <div className="col-span-2 flex justify-center items-center pt-1">
                                     <CheckSquare className="w-4 h-4 text-emerald-600" />
                                   </div>
 
@@ -3388,23 +3748,99 @@ export default function TablesPage() {
                                     <button
                                       type="button"
                                       onClick={() => updateCartEntryQty(cartKey, -1)}
-                                      className="text-gray-500 hover:text-red-600 p-0.5 cursor-pointer"
+                                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-600 transition-colors cursor-pointer"
                                     >
                                       <MinusCircle className="w-4 h-4" />
                                     </button>
-                                    <span className="font-extrabold text-sm min-w-[1.25rem] text-center">{d.quantity}</span>
+                                    <span className="font-extrabold text-base min-w-[1.25rem] text-center">{d.quantity}</span>
                                     <button
                                       type="button"
                                       onClick={() => updateCartEntryQty(cartKey, 1)}
-                                      className="text-gray-500 hover:text-emerald-600 p-0.5 cursor-pointer"
+                                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-600 transition-colors cursor-pointer"
                                     >
                                       <PlusCircle className="w-4 h-4" />
                                     </button>
                                   </div>
 
-                                  <div className="col-span-2 text-right font-extrabold text-sm text-gray-900 dark:text-white pt-0.5">
+                                  <div className="col-span-2 text-right font-extrabold text-base text-gray-900 dark:text-white pt-1">
                                     {formatCurrency(lineTotal)}
                                   </div>
+                                </div>
+
+                                {/* Item-Wise Instruction Row (Mobile) */}
+                                <div className="pl-6 pt-0.5">
+                                  {editingNoteCartKey === cartKey ? (
+                                    <div className="flex items-center gap-1 mt-1 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                                      <input
+                                        type="text"
+                                        autoFocus
+                                        value={inlineNoteText}
+                                        onChange={(e) => setInlineNoteText(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            updateCartEntryNotes(cartKey, inlineNoteText.trim());
+                                            setEditingNoteCartKey(null);
+                                          } else if (e.key === 'Escape') {
+                                            setEditingNoteCartKey(null);
+                                          }
+                                        }}
+                                        placeholder="Special note (optional)..."
+                                        className="flex-1 text-xs px-2 py-1 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded text-gray-900 dark:text-white focus:outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          updateCartEntryNotes(cartKey, inlineNoteText.trim());
+                                          setEditingNoteCartKey(null);
+                                        }}
+                                        className="px-2 py-1 text-xs font-bold bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingNoteCartKey(null)}
+                                        className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : d.notes ? (
+                                    <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/80 dark:border-amber-900/60 w-fit">
+                                      <ChefHat className="w-3 h-3 text-amber-600 shrink-0" />
+                                      <span className="font-medium">Note: {d.notes}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setInlineNoteText(d.notes);
+                                          setEditingNoteCartKey(cartKey);
+                                        }}
+                                        className="text-[10px] underline ml-1 text-amber-800 dark:text-amber-200 hover:text-amber-950 font-bold cursor-pointer"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCartEntryNotes(cartKey, '')}
+                                        className="text-[10px] text-red-500 hover:text-red-700 ml-0.5 cursor-pointer"
+                                        title="Remove note"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setInlineNoteText('');
+                                        setEditingNoteCartKey(cartKey);
+                                      }}
+                                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 flex items-center gap-1 hover:underline cursor-pointer"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      Add note (optional)
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -3413,72 +3849,100 @@ export default function TablesPage() {
                       </div>
                     </div>
 
-                    {/* Customer Instruction / Cooking Note (Mobile-Friendly) */}
-                    <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2.5 space-y-1.5 shrink-0">
-                      <div className="flex items-center justify-between">
+                    {/* Customer Instruction / Cooking Note (Collapsible on Mobile) */}
+                    <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2 shrink-0 transition-all">
+                      <div
+                        onClick={() => setIsInstructionExpanded((prev) => !prev)}
+                        className="flex items-center justify-between cursor-pointer select-none"
+                      >
                         <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
                           <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                           <span>Customer Instruction</span>
+                          {orderNotes ? (
+                            <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[130px] truncate">
+                              "{orderNotes}"
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+                          )}
                         </div>
-                        {orderNotes && (
+                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          {orderNotes && (
+                            <button
+                              type="button"
+                              onClick={() => setOrderNotes('')}
+                              className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+                            >
+                              Clear
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setOrderNotes('')}
-                            className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer"
+                            onClick={() => setIsInstructionExpanded((prev) => !prev)}
+                            className="text-amber-600 dark:text-amber-400 p-0.5 hover:bg-amber-100/50 dark:hover:bg-amber-900/40 rounded cursor-pointer"
+                            title={isInstructionExpanded ? 'Collapse' : 'Expand'}
                           >
-                            Clear
+                            {isInstructionExpanded ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
                           </button>
-                        )}
+                        </div>
                       </div>
 
-                      {/* Quick Touch Chips for Mobile Waiters */}
-                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
-                        {[
-                          'Less Spicy',
-                          'No Onion/Garlic',
-                          'Parcel / Takeaway',
-                          'Extra Spicy',
-                          'Serve Hot',
-                          'Extra Crispy',
-                        ].map((chip) => {
-                          const isSelected = orderNotes.includes(chip);
-                          return (
-                            <button
-                              key={chip}
-                              type="button"
-                              onClick={() => {
-                                if (isSelected) {
-                                  const updated = orderNotes
-                                    .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
-                                    .replace(/^,\s*/, '')
-                                    .trim();
-                                  setOrderNotes(updated);
-                                } else {
-                                  setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
-                                }
-                              }}
-                              className={cn(
-                                'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
-                                isSelected
-                                  ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
-                                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
-                              )}
-                            >
-                              {isSelected ? '✓ ' : '+ '}{chip}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {isInstructionExpanded && (
+                        <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
+                          {/* Quick Touch Chips for Mobile Waiters */}
+                          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                            {[
+                              'Less Spicy',
+                              'No Onion/Garlic',
+                              'Parcel / Takeaway',
+                              'Extra Spicy',
+                              'Serve Hot',
+                              'Extra Crispy',
+                            ].map((chip) => {
+                              const isSelected = orderNotes.includes(chip);
+                              return (
+                                <button
+                                  key={chip}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      const updated = orderNotes
+                                        .replace(new RegExp(`,?\\s*${chip}`, 'g'), '')
+                                        .replace(/^,\s*/, '')
+                                        .trim();
+                                      setOrderNotes(updated);
+                                    } else {
+                                      setOrderNotes((prev) => (prev ? `${prev}, ${chip}` : chip));
+                                    }
+                                  }}
+                                  className={cn(
+                                    'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                                    isSelected
+                                      ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
+                                  )}
+                                >
+                                  {isSelected ? '✓ ' : '+ '}{chip}
+                                </button>
+                              );
+                            })}
+                          </div>
 
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={orderNotes}
-                          onChange={(e) => setOrderNotes(e.target.value)}
-                          placeholder="Type cooking note (e.g. less salt, serve water first)..."
-                          className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                      </div>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={orderNotes}
+                              onChange={(e) => setOrderNotes(e.target.value)}
+                              placeholder="Type cooking note (e.g. less salt, serve water first)..."
+                              className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Customer Details Card (Optional - Mobile) */}
@@ -3832,6 +4296,15 @@ export default function TablesPage() {
                         : (Boolean(activeOrder.billPrinted || activeOrder.status === 'billed') ? 'Reprint via Printer' : 'Send Bill to Printer')}
                     </button>
                     <button
+                      type="button"
+                      onClick={handleReprintKotClick}
+                      className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1 text-red-700 dark:text-red-400 border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold cursor-pointer"
+                      title="Reprint KOT for kitchen (shows cancelled items struck through and active items)"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Reprint KOT
+                    </button>
+                    <button
                       onClick={() => {
                         setShowOrderDetailsModal(false);
                         handleOpenMoveModal(selectedTable);
@@ -3949,7 +4422,14 @@ export default function TablesPage() {
                 {/* Financial Summary & Discount Box */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/30 p-3 rounded-lg border text-xs">
                   <div>
-                    <label className="label text-xs font-semibold">Apply Discount</label>
+                    <div className="flex items-center justify-between">
+                      <label className="label text-xs font-semibold">Apply Discount</label>
+                      {user?.role !== 'admin' && (
+                        <span className="text-[10px] text-gray-500 font-medium">
+                          Max: {user?.role === 'manager' ? (posLimits.maxDiscountManagerPercent ?? 20) : (posLimits.maxDiscountStaffPercent ?? 10)}%
+                        </span>
+                      )}
+                    </div>
                     <div className="flex gap-2 mt-1">
                       <select
                         value={discountType}
@@ -4301,6 +4781,33 @@ export default function TablesPage() {
                             );
                           }
                           if (diff < 0) {
+                            const shortage = Math.abs(diff);
+                            const maxWaivePct = user?.role === 'manager'
+                              ? (posLimits.maxWaiveManagerPercent ?? 5)
+                              : (posLimits.maxWaiveStaffPercent ?? 2);
+                            const maxAllowedShortage = Math.round(((activeOrder.total * maxWaivePct) / 100) * 100) / 100;
+                            const minRequiredSettlement = Math.round((activeOrder.total - maxAllowedShortage) * 100) / 100;
+                            const isExceeded = user?.role !== 'admin' && shortage > maxAllowedShortage + 0.001;
+
+                            if (isExceeded) {
+                              return (
+                                <div className="p-2.5 rounded-lg bg-rose-100/90 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-700 flex flex-col gap-1 text-xs">
+                                  <div className="flex items-center justify-between font-bold text-rose-900 dark:text-rose-200">
+                                    <span className="flex items-center gap-1.5">
+                                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                                      Shortage Exceeds {user?.role === 'manager' ? 'Manager' : 'Staff'} Limit ({maxWaivePct}%)
+                                    </span>
+                                    <span className="font-black bg-rose-200 dark:bg-rose-900 px-2 py-0.5 rounded text-rose-950 dark:text-rose-100">
+                                      Waived: {formatCurrency(shortage)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-rose-800 dark:text-rose-300 font-medium">
+                                    Max shortage allowed is {formatCurrency(maxAllowedShortage)}. Minimum required settlement is <b>{formatCurrency(minRequiredSettlement)}</b>. Settlement is blocked.
+                                  </p>
+                                </div>
+                              );
+                            }
+
                             return (
                               <div className="p-2.5 rounded-lg bg-amber-100/80 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 flex items-center justify-between text-xs">
                                 <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
@@ -4308,7 +4815,7 @@ export default function TablesPage() {
                                   Receiving Partial: {formatCurrency(enteredAmt)}
                                 </span>
                                 <span className="font-black text-amber-900 dark:text-amber-200 bg-white dark:bg-gray-900 px-2.5 py-0.5 rounded border border-amber-300 shadow-2xs">
-                                  Waived Shortage: {formatCurrency(Math.abs(diff))}
+                                  Waived Shortage: {formatCurrency(shortage)}
                                 </span>
                               </div>
                             );
@@ -4428,7 +4935,20 @@ export default function TablesPage() {
                             Total Split: {formatCurrency(totalPartAllocated)} / {formatCurrency(activeOrder.total)}
                           </span>
                           {partRemaining > 0 ? (
-                            <span className="text-amber-600 font-bold">Waived Shortage: {formatCurrency(partRemaining)}</span>
+                            (() => {
+                              const maxWaivePct = user?.role === 'manager'
+                                ? (posLimits.maxWaiveManagerPercent ?? 5)
+                                : (posLimits.maxWaiveStaffPercent ?? 2);
+                              const maxAllowedShortage = Math.round(((activeOrder.total * maxWaivePct) / 100) * 100) / 100;
+                              const isExceeded = user?.role !== 'admin' && partRemaining > maxAllowedShortage + 0.001;
+                              return isExceeded ? (
+                                <span className="text-rose-600 font-bold flex items-center gap-1">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Exceeds {user?.role === 'manager' ? 'Manager' : 'Staff'} Limit ({formatCurrency(partRemaining)} &gt; {formatCurrency(maxAllowedShortage)})
+                                </span>
+                              ) : (
+                                <span className="text-amber-600 font-bold">Waived Shortage: {formatCurrency(partRemaining)}</span>
+                              );
+                            })()
                           ) : totalPartAllocated > activeOrder.total ? (
                             <span className="text-emerald-600 font-bold">Excess: {formatCurrency(Math.round((totalPartAllocated - activeOrder.total) * 100) / 100)}</span>
                           ) : (
@@ -4528,8 +5048,8 @@ export default function TablesPage() {
                     <div className="pt-1 flex justify-between items-center border-t border-gray-200 dark:border-gray-800">
                       <button
                         type="button"
-                        onClick={handleCancelOrder}
-                        className="text-xs text-red-600 hover:underline font-semibold"
+                        onClick={handleOpenCancelOrderModal}
+                        className="text-xs text-red-600 hover:underline font-semibold cursor-pointer"
                       >
                         Cancel Entire Order &amp; Free Table
                       </button>
@@ -4540,6 +5060,173 @@ export default function TablesPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* CANCEL ORDER MODAL (Reason Mandatory for Leak Detector)   */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={cancelOrderModalOpen}
+        onClose={() => {
+          if (!isCancellingOrder) setCancelOrderModalOpen(false);
+        }}
+        title="Cancel Order & Free Table"
+        size="md"
+      >
+        <div className="space-y-4 text-xs">
+          <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-red-900 dark:text-red-200">
+            <div className="flex items-center gap-2 font-black text-sm">
+              <ShieldAlert className="w-4 h-4 text-red-600" />
+              <span>Mandatory Cancellation Log</span>
+            </div>
+            <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+              Cancelling order for Table <strong>{selectedTable?.tableNumber}</strong> (Order #{activeOrder?.orderNumber || ''}, Total: {formatCurrency(activeOrder?.total || 0)}). All cancelled orders are audited and logged in detail inside the <strong>Expense Leak Detector</strong>.
+            </p>
+          </div>
+
+          <div>
+            <label className="label font-bold text-gray-800 dark:text-gray-200 mb-1.5">
+              Select or Type Cancellation Reason *
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {[
+                'Customer walked out',
+                'Duplicate punch',
+                'Entered wrong table',
+                'Food delay / Guest refused wait',
+                'Guest changed mind',
+                'Order punched for testing',
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => {
+                    setCancelReasonText(chip);
+                    setCancelReasonError('');
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer',
+                    cancelReasonText === chip
+                      ? 'bg-red-600 text-white border-red-700 shadow-xs'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-red-400'
+                  )}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              rows={3}
+              value={cancelReasonText}
+              onChange={(e) => {
+                setCancelReasonText(e.target.value);
+                if (e.target.value.trim()) setCancelReasonError('');
+              }}
+              placeholder="Explain why this entire order was cancelled and table freed..."
+              className={cn(
+                'w-full p-2.5 rounded-lg border text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2',
+                cancelReasonError
+                  ? 'border-red-500 focus:ring-red-400'
+                  : 'border-gray-200 dark:border-gray-700 focus:ring-red-500'
+              )}
+            />
+            {cancelReasonError && (
+              <p className="text-xs text-red-600 font-bold mt-1">{cancelReasonError}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+            <button
+              type="button"
+              disabled={isCancellingOrder}
+              onClick={() => setCancelOrderModalOpen(false)}
+              className="btn-secondary text-xs py-1.5 px-3 cursor-pointer"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              disabled={isCancellingOrder || !cancelReasonText.trim()}
+              onClick={handleConfirmCancelOrder}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs py-1.5 px-4 rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              {isCancellingOrder ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Cancelling Order...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Confirm Cancellation
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* REPRINT KOT MODAL (Choose Round if Multiple Exist)        */}
+      {/* ───────────────────────────────────────────────────────── */}
+      <Modal
+        open={reprintKotModalOpen}
+        onClose={() => setReprintKotModalOpen(false)}
+        title="Reprint Kitchen Order Ticket (KOT)"
+        size="sm"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-gray-600 dark:text-gray-300">
+            Select which round you want to reprint for Table <strong>{selectedTable?.tableNumber}</strong>:
+          </p>
+
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => handleExecuteReprintKot('all')}
+              className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-red-500 hover:bg-red-50/40 dark:hover:bg-red-950/20 transition-all flex items-center justify-between cursor-pointer"
+            >
+              <div>
+                <p className="font-bold text-sm text-gray-900 dark:text-white">All Items (Current State)</p>
+                <p className="text-[11px] text-gray-500">Includes active items and cancelled items with strikethrough</p>
+              </div>
+              <Printer className="w-4 h-4 text-red-600 shrink-0" />
+            </button>
+
+            {activeOrder?.kotRounds?.map((round, idx) => {
+              const rNum = round.roundNumber || idx + 1;
+              return (
+                <button
+                  key={round._id || idx}
+                  type="button"
+                  onClick={() => handleExecuteReprintKot(rNum)}
+                  className="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-red-500 hover:bg-red-50/40 dark:hover:bg-red-950/20 transition-all flex items-center justify-between cursor-pointer"
+                >
+                  <div>
+                    <p className="font-bold text-sm text-gray-900 dark:text-white">
+                      Round {rNum} {round.kotNumber ? `(#${round.kotNumber})` : ''}
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      {round.items?.length || 0} item(s) • {round.roundTag || `Round ${rNum}`}
+                    </p>
+                  </div>
+                  <Printer className="w-4 h-4 text-red-600 shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-gray-100 dark:border-gray-800">
+            <button
+              type="button"
+              onClick={() => setReprintKotModalOpen(false)}
+              className="btn-secondary text-xs py-1.5 px-3 cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* ───────────────────────────────────────────────────────── */}

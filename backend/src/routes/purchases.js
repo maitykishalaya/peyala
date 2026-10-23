@@ -28,6 +28,7 @@ const Supplier = require('../models/Supplier');
 const Payment = require('../models/Payment');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const { withOptionalTransaction } = require('../utils/transaction');
 
 router.use(auth);
 
@@ -263,179 +264,195 @@ router.post('/', async (req, res) => {
 
 // ── PUT /api/purchases/:id ───────────────────────────────────────
 router.put('/:id', async (req, res) => {
-  const session = await PurchaseEntry.startSession();
-  session.startTransaction();
-
   try {
-    const purchase = await PurchaseEntry.findById(req.params.id).session(session);
-    if (!purchase) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Purchase not found' });
-    }
-
-    const { date, supplier, items, paidFrom, paymentMode, notes, referenceNumber } = req.body;
-    const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
-
-    const itemIds = items.filter(i => i.item).map(i => i.item);
-    const inventoryItems = await InventoryItem.find({ _id: { $in: itemIds } }).select('unit name');
-    const unitMap = inventoryItems.reduce((map, inv) => {
-      map[inv._id.toString()] = inv.unit;
-      return map;
-    }, {});
-
-    items.forEach((line, idx) => {
-      if (line.item && unitMap[line.item.toString()] && line.unit !== unitMap[line.item.toString()]) {
-        throw new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory item unit '${unitMap[line.item.toString()]}'.`);
+    const result = await withOptionalTransaction(async (session) => {
+      const opts = session ? { session } : {};
+      const query = PurchaseEntry.findById(req.params.id);
+      if (session) query.session(session);
+      const purchase = await query;
+      if (!purchase) {
+        const error = new Error('Purchase not found');
+        error.statusCode = 404;
+        throw error;
       }
+
+      const { date, supplier, items, paidFrom, paymentMode, notes, referenceNumber } = req.body;
+      const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
+
+      const itemIds = items.filter(i => i.item).map(i => i.item);
+      const inventoryItems = await InventoryItem.find({ _id: { $in: itemIds } }).select('unit name');
+      const unitMap = inventoryItems.reduce((map, inv) => {
+        map[inv._id.toString()] = inv.unit;
+        return map;
+      }, {});
+
+      items.forEach((line, idx) => {
+        if (line.item && unitMap[line.item.toString()] && line.unit !== unitMap[line.item.toString()]) {
+          const error = new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory item unit '${unitMap[line.item.toString()]}'.`);
+          error.statusCode = 400;
+          throw error;
+        }
+      });
+
+      const isDue = paymentMode === 'due';
+      if (!isDue && !paidFrom) {
+        const error = new Error('paidFrom is required for non-due purchases');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const oldSupplierId = purchase.supplier.toString();
+      const oldPaidFromId = purchase.paidFrom ? purchase.paidFrom.toString() : null;
+      const oldAmount = purchase.totalAmount;
+      const oldIsPaid = purchase.isPaid;
+
+      const oldItemMap = purchase.items.reduce((map, item) => {
+        const id = item.item.toString();
+        if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
+        map[id].qty += item.quantity;
+        map[id].totalPrice += item.totalPrice;
+        return map;
+      }, {});
+
+      const newItemMap = items.reduce((map, item) => {
+        const id = item.item.toString();
+        if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
+        map[id].qty += item.quantity;
+        map[id].totalPrice += item.totalPrice;
+        return map;
+      }, {});
+
+      const itemIdsToUpdate = [...new Set([...Object.keys(oldItemMap), ...Object.keys(newItemMap)])];
+      for (const itemId of itemIdsToUpdate) {
+        const oldLine = oldItemMap[itemId] || { qty: 0, totalPrice: 0 };
+        const newLine = newItemMap[itemId] || { qty: 0, totalPrice: 0, pricePerUnit: 0 };
+        const invQuery = InventoryItem.findById(itemId);
+        if (session) invQuery.session(session);
+        const inv = await invQuery;
+        if (!inv) continue;
+
+        if (oldLine.qty > 0) {
+          await InventoryItem.findByIdAndUpdate(itemId, { $inc: { currentStock: -oldLine.qty } }, opts);
+        }
+
+        if (newLine.qty > 0) {
+          const stockBefore = Math.max(0, inv.currentStock - oldLine.qty);
+          const averageCostBefore = inv.averageCost || 0;
+          const addedCost = newLine.totalPrice;
+          const newStock = stockBefore + newLine.qty;
+          const newAverageCost = newStock > 0
+            ? ((stockBefore * averageCostBefore) + addedCost) / newStock
+            : newLine.pricePerUnit;
+
+          await InventoryItem.findByIdAndUpdate(itemId, {
+            $inc: { currentStock: newLine.qty },
+            averageCost: newAverageCost,
+            lastPurchasePrice: newLine.pricePerUnit,
+          }, opts);
+        }
+      }
+
+      if (oldIsPaid && oldPaidFromId) {
+        await Account.findByIdAndUpdate(oldPaidFromId, { $inc: { currentBalance: oldAmount } }, opts);
+      }
+
+      const newIsPaid = !isDue;
+      const supQuery = Supplier.findById(supplier);
+      if (session) supQuery.session(session);
+      const supplierDoc = await supQuery;
+      const supplierName = supplierDoc?.name || 'Supplier';
+
+      if (oldSupplierId !== supplier) {
+        await Supplier.findByIdAndUpdate(oldSupplierId, {
+          $inc: {
+            totalPurchased: -oldAmount,
+            totalPaid: oldIsPaid ? -oldAmount : 0,
+          }
+        }, opts);
+        await Supplier.findByIdAndUpdate(supplier, {
+          $inc: {
+            totalPurchased: totalAmount,
+            totalPaid: newIsPaid ? totalAmount : 0,
+          }
+        }, opts);
+      } else {
+        await Supplier.findByIdAndUpdate(supplier, {
+          $inc: {
+            totalPurchased: totalAmount - oldAmount,
+            totalPaid: (newIsPaid ? totalAmount : 0) - (oldIsPaid ? oldAmount : 0),
+          }
+        }, opts);
+      }
+
+      if (newIsPaid && paidFrom) {
+        await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -totalAmount } }, opts);
+      }
+
+      const purchaseDesc = (req.body.description || notes || '').trim();
+      const paymentDescription = await buildPurchasePaymentDescription(notes, req.body.description, items, supplierName);
+
+      const payQuery = Payment.findOne({ relatedPurchase: purchase._id });
+      if (session) payQuery.session(session);
+      const payment = await payQuery;
+
+      const paymentPayload = {
+        date,
+        paidFrom: newIsPaid ? paidFrom : null,
+        payee: supplierName,
+        category: 'Raw Materials',
+        subcategory: isDue ? 'Due Purchase' : supplierName,
+        description: paymentDescription,
+        amount: totalAmount,
+        paymentMode: isDue ? 'due' : paymentMode,
+        isPending: isDue,
+        supplier,
+        notes: purchaseDesc,
+        relatedPurchase: purchase._id,
+        createdBy: purchase.createdBy,
+      };
+
+      if (payment) {
+        await Payment.findByIdAndUpdate(payment._id, paymentPayload, {
+          new: true,
+          runValidators: true,
+          ...(session ? { session } : {}),
+        });
+      } else {
+        await Payment.create([paymentPayload], session ? { session } : undefined);
+      }
+
+      const updatedPurchase = await PurchaseEntry.findByIdAndUpdate(req.params.id, {
+        date,
+        supplier,
+        items,
+        totalAmount,
+        paidFrom: newIsPaid ? paidFrom : null,
+        paymentMode,
+        isPaid: newIsPaid,
+        notes: purchaseDesc,
+        description: purchaseDesc,
+        referenceNumber,
+      }, {
+        new: true,
+        runValidators: true,
+        ...(session ? { session } : {}),
+      })
+        .populate('supplier', 'name')
+        .populate('paidFrom', 'name type')
+        .populate('items.item', 'name unit')
+        .populate('createdBy', 'name');
+
+      return { updatedPurchase, supplierName, totalAmount };
     });
-
-    const isDue = paymentMode === 'due';
-    if (!isDue && !paidFrom) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'paidFrom is required for non-due purchases' });
-    }
-
-    const oldSupplierId = purchase.supplier.toString();
-    const oldPaidFromId = purchase.paidFrom ? purchase.paidFrom.toString() : null;
-    const oldAmount = purchase.totalAmount;
-    const oldIsPaid = purchase.isPaid;
-
-    const oldItemMap = purchase.items.reduce((map, item) => {
-      const id = item.item.toString();
-      if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
-      map[id].qty += item.quantity;
-      map[id].totalPrice += item.totalPrice;
-      return map;
-    }, {});
-
-    const newItemMap = items.reduce((map, item) => {
-      const id = item.item.toString();
-      if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
-      map[id].qty += item.quantity;
-      map[id].totalPrice += item.totalPrice;
-      return map;
-    }, {});
-
-    const itemIdsToUpdate = [...new Set([...Object.keys(oldItemMap), ...Object.keys(newItemMap)])];
-    for (const itemId of itemIdsToUpdate) {
-      const oldLine = oldItemMap[itemId] || { qty: 0, totalPrice: 0 };
-      const newLine = newItemMap[itemId] || { qty: 0, totalPrice: 0, pricePerUnit: 0 };
-      const inv = await InventoryItem.findById(itemId).session(session);
-      if (!inv) continue;
-
-      if (oldLine.qty > 0) {
-        await InventoryItem.findByIdAndUpdate(itemId, { $inc: { currentStock: -oldLine.qty } }, { session });
-      }
-
-      if (newLine.qty > 0) {
-        const stockBefore = Math.max(0, inv.currentStock - oldLine.qty);
-        const averageCostBefore = inv.averageCost || 0;
-        const addedCost = newLine.totalPrice;
-        const newStock = stockBefore + newLine.qty;
-        const newAverageCost = newStock > 0
-          ? ((stockBefore * averageCostBefore) + addedCost) / newStock
-          : newLine.pricePerUnit;
-
-        await InventoryItem.findByIdAndUpdate(itemId, {
-          $inc: { currentStock: newLine.qty },
-          averageCost: newAverageCost,
-          lastPurchasePrice: newLine.pricePerUnit,
-        }, { session });
-      }
-    }
-
-    if (oldIsPaid && oldPaidFromId) {
-      await Account.findByIdAndUpdate(oldPaidFromId, { $inc: { currentBalance: oldAmount } }, { session });
-    }
-
-    const newIsPaid = !isDue;
-    const supplierDoc = await Supplier.findById(supplier).session(session);
-    const supplierName = supplierDoc?.name || 'Supplier';
-
-    if (oldSupplierId !== supplier) {
-      await Supplier.findByIdAndUpdate(oldSupplierId, {
-        $inc: {
-          totalPurchased: -oldAmount,
-          totalPaid: oldIsPaid ? -oldAmount : 0,
-        }
-      }, { session });
-      await Supplier.findByIdAndUpdate(supplier, {
-        $inc: {
-          totalPurchased: totalAmount,
-          totalPaid: newIsPaid ? totalAmount : 0,
-        }
-      }, { session });
-    } else {
-      await Supplier.findByIdAndUpdate(supplier, {
-        $inc: {
-          totalPurchased: totalAmount - oldAmount,
-          totalPaid: (newIsPaid ? totalAmount : 0) - (oldIsPaid ? oldAmount : 0),
-        }
-      }, { session });
-    }
-
-    if (newIsPaid && paidFrom) {
-      await Account.findByIdAndUpdate(paidFrom, { $inc: { currentBalance: -totalAmount } }, { session });
-    }
-
-    const purchaseDesc = (req.body.description || notes || '').trim();
-    const paymentDescription = await buildPurchasePaymentDescription(notes, req.body.description, items, supplierName);
-
-    const payment = await Payment.findOne({ relatedPurchase: purchase._id }).session(session);
-    const paymentPayload = {
-      date,
-      paidFrom: newIsPaid ? paidFrom : null,
-      payee: supplierName,
-      category: 'Raw Materials',
-      subcategory: isDue ? 'Due Purchase' : supplierName,
-      description: paymentDescription,
-      amount: totalAmount,
-      paymentMode: isDue ? 'due' : paymentMode,
-      isPending: isDue,
-      supplier,
-      notes: purchaseDesc,
-      relatedPurchase: purchase._id,
-      createdBy: purchase.createdBy,
-    };
-
-    if (payment) {
-      await Payment.findByIdAndUpdate(payment._id, paymentPayload, { new: true, runValidators: true, session });
-    } else {
-      await Payment.create([paymentPayload], { session });
-    }
-
-    const updatedPurchase = await PurchaseEntry.findByIdAndUpdate(req.params.id, {
-      date,
-      supplier,
-      items,
-      totalAmount,
-      paidFrom: newIsPaid ? paidFrom : null,
-      paymentMode,
-      isPaid: newIsPaid,
-      notes: purchaseDesc,
-      description: purchaseDesc,
-      referenceNumber,
-    }, { new: true, runValidators: true, session })
-      .populate('supplier', 'name')
-      .populate('paidFrom', 'name type')
-      .populate('items.item', 'name unit')
-      .populate('createdBy', 'name');
-
-    await session.commitTransaction();
-    session.endSession();
 
     await log({
       user: req.user, action: 'UPDATE', module: 'Purchases',
-      description: `${req.user.name} updated purchase from ${supplierName} — ₹${totalAmount}`,
+      description: `${req.user.name} updated purchase from ${result.supplierName} — ₹${result.totalAmount}`,
     });
 
-    res.json(updatedPurchase);
+    res.json(result.updatedPurchase);
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    res.status(400).json({ message: err.message });
+    res.status(err.statusCode || 400).json({ message: err.message });
   }
 });
 

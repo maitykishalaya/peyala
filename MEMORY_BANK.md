@@ -111,6 +111,40 @@ Peyala v8 is a production-grade restaurant operations and management system buil
    - **Stage 4: Generating Bill (`billed`)**: Staff prints or queues customer bill. Table turns **Green** (`Bill Given`) with pulsing status pill. Clicking card body or quick `[ 💵 Settle ]` button directly opens payment collection.
    - **Stage 5: Collecting Payment (`paid`)**: Operator enters payment amount and selects mode (Cash, UPI, Card, Other, Part Payment). Clicking `[ Settle Table & Free ]` commits payment to MongoDB, syncs daily sales accounting and real accounts, prints receipt, and frees table to Available Blank (Stage 1).
 
+3. **Menu Search & Android POS WebView Hygiene**:
+   - Menu search bar query (menuSearch) is automatically reset upon: completing an order, saving an order, opening any dining table, starting a new order, or navigating back to Table View.
+   - Menu search input contains autocomplete, autocorrect off, and spellcheck false.
+4. **Kitchen Order Ticket (KOT) Reprinting with Cut-Through Strikethrough**:
+   - Table details modal features a dedicated Reprint KOT button with round selector modal.
+   - In reprint mode, cancelled items are printed with cut-across strikethrough (text-decoration: line-through) and [CANCELLED / REMOVED] badge, alongside active/new items.
+5. **Optional Item-Wise Cooking Instructions**:
+   - Every cart item features an optional inline cooking instruction control. Notes are saved at OrderInputItem.notes and printed on thermal kitchen tickets directly below item names.
+6. **Staff-Level Mandatory Order Cancellation & Leak Detector Auditing**:
+   - Deleting a whole order and freeing a table at staff level strictly enforces a cancellation reason.
+   - All cancelled bills are tracked in Order.cancelReason and logged in AuditLog.
+   - The Expense Leak Detector (/expense-leak-detector) displays these cancelled orders with full itemized breakdown, staff name, and reason.
+7. **Merged Identical Items on Printed Customer Bills (Admin Toggle)**:
+   - Admin Settings (/settings -> System) includes a toggle: 'Merge Identical Items on Printed Bill'.
+   - When enabled, merges duplicate items across rounds into single lines on printed bills.
+8. **High-Visibility Expanded Cart Layout**:
+   - Customer Details and Customer Instructions prompts are compact collapsible accordions (32px high when idle), saving ~220px of vertical space.
+   - Cart items container is enlarged with larger item typography, steppers, and line totals.
+9. **Sales Report 'Other / Dues' Filter**:
+   - Sales report payment filter changes 'Other / Bank' to 'Other / Dues' (value='other_dues'), querying orders where dueSettled: true or paymentBreakdown.due > 0 with date matching on dueSettledAt.
+10. **Role-Based Discount & Cash Shortage / Waive-Off Enforcement (Admin Configurable)**:
+   - Configurable in Admin Settings (/settings -> System tab): Staff Max Discount % (default: 10%), Manager Max Discount % (default: 20%), Staff Max Cash Shortage % (default: 2%), Manager Max Cash Shortage % (default: 5%).
+   - Stored in singleton POSSetting model (/api/pos-settings).
+   - Server-side and client-side validation strictly blocks any discount exceeding the role percentage limit (or flat rupee equivalent).
+   - Server-side and client-side validation strictly blocks any payment settlement shortage exceeding the role percentage limit (e.g., on a ₹200 bill, staff cannot settle below ₹196 / 2% shortage; anything lower is blocked with clear feedback so cash counter discrepancies must be cleared or paid by the staff).
+   - Admin users have full unrestricted authority (100% discount, full settlement override).
+11. **Dynamic Database Cloud Sync Interval (Admin Configurable)**:
+   - Configurable in Admin Settings (/settings -> System tab and Maintenance tab): Sync Frequency Interval in minutes with quick presets (1 min, 5 min, 10 min, 15 min default, 30 min, 60 min).
+   - Stored in singleton POSSetting model and accessible via /api/pos-settings and PUT /api/sync/interval.
+   - SyncEngine dynamically updates its running background timer immediately at runtime via syncEngine.setIntervalMinutes(minutes) without requiring a server reboot, and automatically reloads the persisted interval on boot.
+   - Real-time status reporting (/api/sync/status) returns live syncIntervalMinutes and syncIntervalSeconds.
+
+
+
 ### 3.2 Dual Discount Engine
 - Operators can toggle between **Flat Discount (₹)** and **Percentage Discount (%)**.
 - Discount is calculated on `subtotal` before taxes.
@@ -874,5 +908,29 @@ Whenever changes are made, run this validation suite before concluding:
   - **Tabbed Interface**: Offers dual tabs: `Day-wise (30D)` (default) and `Raw Log` (for raw ledger events), with an `Active Trading Days Only` toggle and direct cross-link to `/analytics?tab=gst`.
   - **API Endpoints**: `GET /api/balancesheet` embeds `gstDailyHistory`, with a dedicated on-demand endpoint `GET /api/balancesheet/gst-daily-history?days=30`.
 
+- **MongoDB Standalone Transaction Resilience (v11.0.0 Architecture)**:
+  - **Issue**: Standard local MongoDB running in standalone mode (`Topology: Single`, e.g., local WiredTiger `mongod.exe` or `MongoMemoryServer`) does not support replica set multi-document transactions (`startSession()` + `startTransaction()`), throwing `Transaction numbers are only allowed on a replica set member or mongos`.
+  - **Resolution**: Created `backend/src/utils/transaction.js` (`withOptionalTransaction`), which dynamically detects whether the active MongoDB topology supports transactions (`ReplicaSetWithPrimary` or `Sharded`).
+  - **Routes Protected**:
+    - `POST /api/payments`, `PUT /api/payments/:id`, `DELETE /api/payments/:id` in `backend/src/routes/payments.js`.
+    - `PUT /api/purchases/:id` in `backend/src/routes/purchases.js`.
+  - **Guarantees**: Allows adding payments and editing purchase dates/details with zero errors on local standalone installs, while retaining full ACID transactions if connected to a replica set (e.g. MongoDB Atlas). Zero data or database corruption.
+
+- **Dashboard Purchase & Expense Accounting Date Alignment**:
+  - **Issue**: In `backend/src/routes/dashboard.js`, queries for `yesterdayPurchasesAgg`, `yesterdayPurchases`, `todayPurchasesAgg`, `todayPurchases`, and `todayExpenses` used `$or: [{ date: ... }, { createdAt: ... }]`. If a purchase was created today but dated yesterday (or date edited to yesterday), it matched on `date` for yesterday and `createdAt` for today, appearing in both days and double-counting totals.
+  - **Resolution**: Refactored `dashboard.js` to strictly query by canonical transaction `date` (`{ date: { $gte: range.start, $lte: range.end } }`), perfectly aligning with accounting standards, `reports.js`, and `purchases.js`.
+
+- **Version 12.0.0 Release Architecture & Load Optimization**:
+  - **Role-Based Financial Protections**: Configured enforceable discount limits (Manager up to 20%, Staff up to 10%) and maximum waiver allowance (2% underpayment cap). Any unauthorized discount or under-settlement is strictly rejected at the API level and flagged in Leak Detector.
+  - **Dynamic DB Sync Interval**: Admin settings can now configure cloud database sync interval dynamically (`dbSyncIntervalMinutes`, 1 to 1440 minutes). Changes apply immediately without restarting server.
+  - **KOT Reprint with Round Tracking**: Table management supports reprinting KOTs displaying cancelled items with strikethroughs alongside newly added items per round.
+  - **Item-Wise Instructions**: Granular, optional cooking notes on individual menu items formatted cleanly on customer carts and thermal tickets.
+  - **Full Order Cancellation Audit**: Deleting an entire order or clearing an occupied table at staff level mandates a reason and logs detailed financial leakage records into the Expense Leak Review register.
+  - **Consolidated Bill Quantity Punch**: Added admin setting toggle to merge quantities of identical items ordered across different rounds into unified rows on final thermal bills.
+  - **High-Density Cart UI**: Refactored customer prompt into a sleek collapsible card, maximizing order cart viewport visibility for rapid punch-in.
+  - **Enterprise Load & Concurrency Resilience**: Passed all 8 load scenarios (2800+ req/s raw throughput, 15+ concurrent bill allocations with 0 race condition duplicates, 100% table double-booking prevention, libuv thread starvation protection).
+  - **Analytics Cache Stampede Protection**: Implemented in-flight request coalescing on `/api/analytics/overview`, reducing p95 latency from 22.6s to 1.6s under heavy concurrent burst traffic.
+
 ---
-*Last Updated: October 2026 · Peyala v10.0 Engineering*
+*Last Updated: October 2026 · Peyala v12.0 Engineering*
+

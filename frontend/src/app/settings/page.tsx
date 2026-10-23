@@ -6,6 +6,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/lib/auth';
 import api, { authApi, ownerNoteApi } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { cn } from '@/lib/utils';
 import {
   Settings,
   User,
@@ -26,7 +27,12 @@ import {
   WifiOff,
   Layers,
   Clock,
+  Printer,
+  Percent,
+  ShieldCheck,
 } from 'lucide-react';
+import { getSavedMergeBillItems, saveMergeBillItems } from '@/lib/thermal-print';
+import { posSettingsApi, POSSetting } from '@/lib/pos-api';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -38,6 +44,15 @@ export default function SettingsPage() {
   const [pwUpdating, setPwUpdating] = useState(false);
   const [noticeSaving, setNoticeSaving] = useState(false);
   const [testingApi, setTestingApi] = useState(false);
+  const [mergeSameBillItems, setMergeSameBillItems] = useState(false);
+  const [posLimits, setPosLimits] = useState<POSSetting>({
+    maxDiscountStaffPercent: 10,
+    maxDiscountManagerPercent: 20,
+    maxWaiveStaffPercent: 2,
+    maxWaiveManagerPercent: 5,
+    dbSyncIntervalMinutes: 15,
+  });
+  const [posLimitsSaving, setPosLimitsSaving] = useState(false);
 
   // Maintenance & Local Server States
   const [maintenanceData, setMaintenanceData] = useState<any>(null);
@@ -221,7 +236,87 @@ export default function SettingsPage() {
     ownerNoteApi.get()
       .then(res => setOwnerNote(res.data?.note || ''))
       .catch(() => {});
+    setMergeSameBillItems(getSavedMergeBillItems());
+    posSettingsApi.get()
+      .then(res => {
+        if (res.data) {
+          setPosLimits({
+            maxDiscountStaffPercent: res.data.maxDiscountStaffPercent ?? 10,
+            maxDiscountManagerPercent: res.data.maxDiscountManagerPercent ?? 20,
+            maxWaiveStaffPercent: res.data.maxWaiveStaffPercent ?? 2,
+            maxWaiveManagerPercent: res.data.maxWaiveManagerPercent ?? 5,
+            dbSyncIntervalMinutes: res.data.dbSyncIntervalMinutes ?? 15,
+            lastUpdatedBy: res.data.lastUpdatedBy,
+            updatedAt: res.data.updatedAt,
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  const handleSavePosLimits = async () => {
+    if (user?.role !== 'admin') {
+      toast.error('Only Admins can modify POS discount & sync settings');
+      return;
+    }
+    setPosLimitsSaving(true);
+    try {
+      const res = await posSettingsApi.update({
+        maxDiscountStaffPercent: Number(posLimits.maxDiscountStaffPercent) || 0,
+        maxDiscountManagerPercent: Number(posLimits.maxDiscountManagerPercent) || 0,
+        maxWaiveStaffPercent: Number(posLimits.maxWaiveStaffPercent) || 0,
+        maxWaiveManagerPercent: Number(posLimits.maxWaiveManagerPercent) || 0,
+        dbSyncIntervalMinutes: Number(posLimits.dbSyncIntervalMinutes) || 15,
+      });
+      if (res.data) {
+        setPosLimits(res.data);
+      }
+      toast.success('Settings & database sync schedule saved successfully! 🛡️');
+      if (tab === 'maintenance') {
+        loadMaintenanceData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update settings');
+    } finally {
+      setPosLimitsSaving(false);
+    }
+  };
+
+  const handlePresetSyncInterval = async (val: number) => {
+    if (user?.role !== 'admin') {
+      toast.error('Only Admins can modify the DB sync schedule');
+      return;
+    }
+    const updated = { ...posLimits, dbSyncIntervalMinutes: val };
+    setPosLimits(updated);
+    setPosLimitsSaving(true);
+    try {
+      const res = await posSettingsApi.update({
+        dbSyncIntervalMinutes: val,
+      });
+      if (res.data) {
+        setPosLimits(res.data);
+      }
+      toast.success(`Database sync interval updated to ${val} minute(s)! ☁️`);
+      if (tab === 'maintenance') {
+        loadMaintenanceData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update sync interval');
+    } finally {
+      setPosLimitsSaving(false);
+    }
+  };
+
+  const handleToggleMergeSameBillItems = (checked: boolean) => {
+    setMergeSameBillItems(checked);
+    saveMergeBillItems(checked);
+    toast.success(
+      checked
+        ? 'Customer bills will now merge identical items together across rounds'
+        : 'Customer bills will now show items ordered in separate rounds'
+    );
+  };
 
   return (
     <AppLayout>
@@ -410,9 +505,9 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
                   ['Architecture', 'Local-First Operational Data Store'],
-                  ['Application Version', '11.0.0'],
+                  ['Application Version', '12.0.0'],
                   ['Local Database', 'WiredTiger Local MongoDB (Sub-5ms)'],
-                  ['Central Database', 'MongoDB Atlas (Periodic 15-Min Sync)'],
+                  ['Central Database', `MongoDB Atlas (Periodic ${posLimits.dbSyncIntervalMinutes || 15}-Min Sync)`],
                   ['Backend Port', '4000'],
                   ['Frontend Port', '3000'],
                   ['Timezone', 'Asia/Kolkata (IST)'],
@@ -449,6 +544,329 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* Bill Printing Preferences (Requirement 5) */}
+            <div className="card p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Printer className="w-5 h-5 text-brand-600" />
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Customer Bill Printing Preferences</h3>
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Control how repeat items from separate ordering rounds are presented on printed customer bills.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-sm text-gray-900 dark:text-white">Merge Identical Items on Printed Bill</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {mergeSameBillItems
+                      ? 'Enabled: Items ordered across multiple rounds are merged into a single line with their total quantity.'
+                      : 'Disabled: Items are printed in the order/rounds they were punched.'}
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={mergeSameBillItems}
+                    onChange={(e) => handleToggleMergeSameBillItems(e.target.checked)}
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-brand-600"></div>
+                </label>
+              </div>
+            </div>
+
+            {/* Role-Based Discount & Shortage Limits Card */}
+            <div className="card p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Percent className="w-5 h-5 text-brand-600" />
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Role-Based Discount & Cash Shortage Limits</h3>
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Configure maximum discount and cash counter shortage / waive-off permissions by user role. Enforces cash counter discipline and prevents unauthorized write-offs.
+                  </p>
+                </div>
+                {user?.role === 'admin' ? (
+                  <span className="badge-emerald text-xs font-semibold px-2.5 py-1">Admin Configurable</span>
+                ) : (
+                  <span className="badge-gray text-xs font-semibold px-2.5 py-1">View Only</span>
+                )}
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Staff Limits Column */}
+                <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2 dark:border-gray-700">
+                    <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      Staff Permissions
+                    </span>
+                    <span className="text-[11px] text-gray-400 font-medium">Front-desk / Cashier</span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1">
+                      Max Order Discount (%)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        disabled={user?.role !== 'admin'}
+                        value={posLimits.maxDiscountStaffPercent}
+                        onChange={(e) =>
+                          setPosLimits({ ...posLimits, maxDiscountStaffPercent: Math.max(0, Math.min(100, Number(e.target.value))) })
+                        }
+                        className="input h-9 text-sm pr-8 font-semibold"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Staff cannot apply more than {posLimits.maxDiscountStaffPercent}% discount on any order (e.g. ₹{((200 * posLimits.maxDiscountStaffPercent) / 100).toFixed(0)} on ₹200).
+                    </p>
+                  </div>
+
+                  <div className="pt-1">
+                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1">
+                      Max Cash Shortage / Waive-off (%)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        disabled={user?.role !== 'admin'}
+                        value={posLimits.maxWaiveStaffPercent}
+                        onChange={(e) =>
+                          setPosLimits({ ...posLimits, maxWaiveStaffPercent: Math.max(0, Math.min(100, Number(e.target.value))) })
+                        }
+                        className="input h-9 text-sm pr-8 font-semibold"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Staff cannot record settlement below {posLimits.maxWaiveStaffPercent}% shortage (e.g. on ₹200, max shortage ₹{((200 * posLimits.maxWaiveStaffPercent) / 100).toFixed(0)}, min settlement ₹{(200 - (200 * posLimits.maxWaiveStaffPercent) / 100).toFixed(0)}). More is strictly blocked.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Manager Limits Column */}
+                <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2 dark:border-gray-700">
+                    <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      Manager Permissions
+                    </span>
+                    <span className="text-[11px] text-gray-400 font-medium">Floor Supervisor</span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1">
+                      Max Order Discount (%)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        disabled={user?.role !== 'admin'}
+                        value={posLimits.maxDiscountManagerPercent}
+                        onChange={(e) =>
+                          setPosLimits({ ...posLimits, maxDiscountManagerPercent: Math.max(0, Math.min(100, Number(e.target.value))) })
+                        }
+                        className="input h-9 text-sm pr-8 font-semibold"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Managers cannot apply more than {posLimits.maxDiscountManagerPercent}% discount on any order (e.g. ₹{((200 * posLimits.maxDiscountManagerPercent) / 100).toFixed(0)} on ₹200).
+                    </p>
+                  </div>
+
+                  <div className="pt-1">
+                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1">
+                      Max Cash Shortage / Waive-off (%)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        disabled={user?.role !== 'admin'}
+                        value={posLimits.maxWaiveManagerPercent}
+                        onChange={(e) =>
+                          setPosLimits({ ...posLimits, maxWaiveManagerPercent: Math.max(0, Math.min(100, Number(e.target.value))) })
+                        }
+                        className="input h-9 text-sm pr-8 font-semibold"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Managers cannot record settlement below {posLimits.maxWaiveManagerPercent}% shortage (e.g. on ₹200, max shortage ₹{((200 * posLimits.maxWaiveManagerPercent) / 100).toFixed(0)}, min settlement ₹{(200 - (200 * posLimits.maxWaiveManagerPercent) / 100).toFixed(0)}).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Admin Note & Action */}
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>
+                    <b>Admin Authority:</b> Admin users have unrestricted 100% discount and full settlement override authority.
+                  </span>
+                </div>
+
+                {user?.role === 'admin' && (
+                  <button
+                    onClick={handleSavePosLimits}
+                    disabled={posLimitsSaving}
+                    className="btn-primary flex items-center justify-center gap-2 text-xs font-bold px-4 py-2"
+                  >
+                    {posLimitsSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    {posLimitsSaving ? 'Saving Limits...' : 'Save POS Limits'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Central Database Sync Schedule Card */}
+            <div className="card p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-5 h-5 text-blue-600" />
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Central Database Sync Schedule</h3>
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Configure the background schedule for periodic delta synchronization from this Local Server to Central MongoDB Atlas.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="badge-blue text-xs font-semibold px-2.5 py-1 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-blue-500" />
+                    Every {posLimits.dbSyncIntervalMinutes || 15} min
+                  </span>
+                  {user?.role === 'admin' ? (
+                    <span className="badge-emerald text-xs font-semibold px-2.5 py-1">Admin Managed</span>
+                  ) : (
+                    <span className="badge-gray text-xs font-semibold px-2.5 py-1">View Only</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-5 p-4 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/60 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-gray-900 dark:text-white block">
+                      Sync Frequency Interval
+                    </label>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Determines how often buffered local mutations (orders, payments, bills, inventory) are pushed to the cloud.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-32">
+                      <input
+                        type="number"
+                        min="0.5"
+                        max="1440"
+                        step="1"
+                        disabled={user?.role !== 'admin' || posLimitsSaving}
+                        value={posLimits.dbSyncIntervalMinutes || 15}
+                        onChange={(e) =>
+                          setPosLimits({
+                            ...posLimits,
+                            dbSyncIntervalMinutes: Math.max(0.2, Math.min(1440, Number(e.target.value))),
+                          })
+                        }
+                        className="input h-9 text-sm pr-10 font-bold"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">min</span>
+                    </div>
+
+                    {user?.role === 'admin' && (
+                      <button
+                        onClick={handleSavePosLimits}
+                        disabled={posLimitsSaving}
+                        className="btn-primary text-xs font-bold px-3 h-9 flex items-center gap-1.5"
+                      >
+                        {posLimitsSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                        Save
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                {user?.role === 'admin' && (
+                  <div>
+                    <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-2">
+                      Quick Presets:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: '1 Min (Realtime)', val: 1 },
+                        { label: '5 Min (High Frequency)', val: 5 },
+                        { label: '10 Min (Balanced)', val: 10 },
+                        { label: '15 Min (Recommended Default)', val: 15 },
+                        { label: '30 Min (Low Bandwidth)', val: 30 },
+                        { label: '60 Min (Hourly)', val: 60 },
+                      ].map(({ label, val }) => {
+                        const active = posLimits.dbSyncIntervalMinutes === val;
+                        return (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => handlePresetSyncInterval(val)}
+                            className={cn(
+                              'px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-2xs',
+                              active
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-blue-500/20'
+                                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                            )}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Status footer with manual trigger button */}
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>
+                    Local operations run continuously with <b>sub-5ms latency</b>. Sync runs silently in background.
+                  </span>
+                </div>
+
+                <button
+                  onClick={handleManualSync}
+                  disabled={isManualSyncing}
+                  className="btn-secondary text-xs font-bold px-3 py-1.5 flex items-center gap-1.5"
+                >
+                  <RefreshCw className={cn('w-3.5 h-3.5', isManualSyncing && 'animate-spin')} />
+                  {isManualSyncing ? 'Syncing Now...' : 'Trigger Sync Now'}
+                </button>
+              </div>
+            </div>
+
             <div className="card p-6">
               <h3 className="font-medium text-gray-900 dark:text-white mb-2">API Health</h3>
               <p className="text-sm text-gray-400 mb-3">Backend: <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-xs">http://localhost:4000/api</code></p>
@@ -484,7 +902,7 @@ export default function SettingsPage() {
               {/* Cloud Sync */}
               <div className="card p-4 border-l-4 border-l-blue-500 space-y-1">
                 <div className="flex items-center justify-between text-gray-500 text-xs font-semibold">
-                  <span>15-MIN CLOUD SYNC</span>
+                  <span>{posLimits.dbSyncIntervalMinutes || maintenanceData?.sync?.syncIntervalMinutes || 15}-MIN CLOUD SYNC</span>
                   <Cloud className="w-4 h-4 text-blue-500" />
                 </div>
                 <div className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
@@ -522,7 +940,7 @@ export default function SettingsPage() {
                   <History className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="text-lg font-bold text-gray-900 dark:text-white">
-                  v{maintenanceData?.system?.applicationVersion || '11.0.0'}
+                  v{maintenanceData?.system?.applicationVersion || '12.0.0'}
                 </div>
                 <p className="text-[11px] text-gray-400">
                   {restorePoints.length} Restore Points Available
@@ -538,7 +956,7 @@ export default function SettingsPage() {
                     <Cloud className="w-5 h-5 text-blue-600" /> Periodic Cloud Synchronization
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Operational data is saved locally first. Background delta updates sync to MongoDB Atlas every 15 minutes.
+                    Operational data is saved locally first. Background delta updates sync to MongoDB Atlas every {posLimits.dbSyncIntervalMinutes || maintenanceData?.sync?.syncIntervalMinutes || 15} minutes.
                   </p>
                 </div>
                 <button
@@ -561,7 +979,7 @@ export default function SettingsPage() {
                 <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <span className="text-gray-400 block mb-1">Sync Interval</span>
                   <span className="font-bold text-sm text-gray-800 dark:text-gray-200">
-                    Every 15 Minutes (Background Worker)
+                    Every {posLimits.dbSyncIntervalMinutes || maintenanceData?.sync?.syncIntervalMinutes || 15} Minutes (Background Worker)
                   </span>
                 </div>
                 <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">

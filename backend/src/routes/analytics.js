@@ -99,34 +99,27 @@ function resolveDateRanges(period = 'this_month', startDate, endDate) {
   };
 }
 
-// In-memory cache for analytics overview to protect Atlas from heavy repetitive aggregation scans
+// In-memory cache for analytics overview to protect Atlas and local DB from heavy repetitive aggregation scans
 const overviewCache = new Map();
+const inFlightOverview = new Map();
 const OVERVIEW_CACHE_TTL_MS = 20000; // 20 seconds TTL
 
 function invalidateAnalyticsCache() {
   overviewCache.clear();
+  inFlightOverview.clear();
 }
 
-// ─────────────────────────────────────────────────────────────────
-// 1. GET /api/analytics/overview
-// ─────────────────────────────────────────────────────────────────
-router.get('/overview', async (req, res) => {
-  try {
-    const { period = 'this_month', startDate, endDate } = req.query;
-    const cacheKey = `${period}_${startDate || ''}_${endDate || ''}`;
-    const cached = overviewCache.get(cacheKey);
-    const nowMs = Date.now();
-    if (cached && cached.expiresAt > nowMs) {
-      return res.json(cached.data);
-    }
+/**
+ * Worker function to compute overview payload
+ */
+async function computeOverview(period = 'this_month', startDate, endDate) {
+  const { currentStart, currentEnd, previousStart, previousEnd, currentDays } = resolveDateRanges(period, startDate, endDate);
 
-    const { currentStart, currentEnd, previousStart, previousEnd, currentDays } = resolveDateRanges(period, startDate, endDate);
+  const now = new Date();
+  const todayRange = getIstDayRange(now);
 
-    const now = new Date();
-    const todayRange = getIstDayRange(now);
-
-    // Run parallel aggregation queries with slim field projections
-    const [
+  // Run parallel aggregation queries with slim field projections
+  const [
       config,
       currentSalesEntries,
       prevSalesEntries,
@@ -775,8 +768,36 @@ router.get('/overview', async (req, res) => {
       },
     };
 
-    overviewCache.set(cacheKey, { data: payload, expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS });
-    res.json(payload);
+    return payload;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 1. GET /api/analytics/overview
+// ─────────────────────────────────────────────────────────────────
+router.get('/overview', async (req, res) => {
+  try {
+    const { period = 'this_month', startDate, endDate } = req.query;
+    const cacheKey = `${period}_${startDate || ''}_${endDate || ''}`;
+    const cached = overviewCache.get(cacheKey);
+    const nowMs = Date.now();
+    if (cached && cached.expiresAt > nowMs) {
+      return res.json(cached.data);
+    }
+
+    if (inFlightOverview.has(cacheKey)) {
+      const payload = await inFlightOverview.get(cacheKey);
+      return res.json(payload);
+    }
+
+    const computePromise = computeOverview(period, startDate, endDate);
+    inFlightOverview.set(cacheKey, computePromise);
+    try {
+      const payload = await computePromise;
+      overviewCache.set(cacheKey, { data: payload, expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS });
+      return res.json(payload);
+    } finally {
+      inFlightOverview.delete(cacheKey);
+    }
   } catch (err) {
     console.error('Analytics overview error:', err);
     res.status(500).json({ message: err.message });

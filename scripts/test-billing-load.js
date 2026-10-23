@@ -140,8 +140,8 @@ async function runTestScenario(serverInfo) {
     request({ path: '/api/tables' }),
     request({ path: '/api/menu' }),
   ]);
-  const tables = tablesRes.data || [];
-  const menuItems = menuRes.data || [];
+  const tables = Array.isArray(tablesRes.data) ? tablesRes.data : [];
+  const menuItems = Array.isArray(menuRes.data) ? menuRes.data : [];
   const sampleItem = menuItems.find(m => m.isAvailable !== false) || menuItems[0];
 
   assert(tables.length >= 3, `Found ${tables.length} tables for test`);
@@ -218,7 +218,7 @@ async function runTestScenario(serverInfo) {
   // ─────────────────────────────────────────────────────────────────
   console.log('\n[TEST 3] Verifying Detailed Sales Report Order & Effective Bill Time...');
 
-  const salesRes = await request({ path: '/api/reports/sales?status=paid' });
+  const salesRes = await request({ path: '/api/reports/sales?status=paid&limit=2000' });
   assert(salesRes.status === 200, 'Detailed sales report loaded successfully');
 
   const reportOrders = salesRes.data?.orders || [];

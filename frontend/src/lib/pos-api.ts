@@ -414,8 +414,8 @@ export const ordersApi = {
     customerInfo?: { name: string; phone: string; address?: string; notes?: string }
   ) =>
     api.post<Order>(`/orders/${id}/pay`, { paymentMethod, settlementAmount, paymentBreakdown, customerInfo }),
-  cancel: (id: string) =>
-    api.post<Order>(`/orders/${id}/cancel`),
+  cancel: (id: string, reason?: string) =>
+    api.post<Order>(`/orders/${id}/cancel`, { reason, cancelReason: reason }),
   getPendingKots: () =>
     api.get<PendingKotJob[]>('/orders/pending-kots'),
   markKotPrinted: (orderId: string, roundId: string) =>
@@ -514,3 +514,27 @@ export interface KdsActiveResponse {
   fulfilled?: Order[];
   prepNext: KdsPrepNextItem[];
 }
+
+export interface POSSetting {
+  _id?: string;
+  maxDiscountStaffPercent: number;
+  maxDiscountManagerPercent: number;
+  maxWaiveStaffPercent: number;
+  maxWaiveManagerPercent: number;
+  dbSyncIntervalMinutes?: number;
+  lastUpdatedBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const posSettingsApi = {
+  get: () => api.get<POSSetting>('/pos-settings'),
+  update: (data: Partial<POSSetting>) => api.put<POSSetting>('/pos-settings', data),
+};
+
+export const syncApi = {
+  getStatus: () => api.get<any>('/sync/status'),
+  trigger: () => api.post<any>('/sync/trigger'),
+  getOutbox: (params?: { limit?: number; status?: string }) => api.get<any>('/sync/outbox', { params }),
+  updateInterval: (intervalMinutes: number) => api.put<any>('/sync/interval', { intervalMinutes }),
+};
