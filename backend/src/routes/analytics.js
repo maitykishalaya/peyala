@@ -578,7 +578,7 @@ async function computeOverview(period = 'this_month', startDate, endDate) {
         const lineBase = qty * price;
         const disc = Math.round(lineBase * orderDiscPct * 100) / 100;
         const lineNet = Math.max(0, lineBase - disc);
-        const taxRate = Number(it.taxPercent) || 5;
+        const taxRate = it.taxPercent !== undefined && it.taxPercent !== null ? Number(it.taxPercent) : 5;
         const lineTax = Math.round(((lineNet * taxRate) / 100) * 100) / 100;
         const lineGross = lineNet + lineTax;
 
@@ -840,7 +840,7 @@ router.get('/items', async (req, res) => {
         const lineBase = qty * price;
         const disc = Math.round(lineBase * orderDiscPct * 100) / 100;
         const net = Math.max(0, lineBase - disc);
-        const taxRate = Number(it.taxPercent) || 5;
+        const taxRate = it.taxPercent !== undefined && it.taxPercent !== null ? Number(it.taxPercent) : 5;
         const gst = Math.round(((net * taxRate) / 100) * 100) / 100;
         const grossWithGst = Math.round((net + gst) * 100) / 100;
 
@@ -998,7 +998,8 @@ router.get('/item/:id', async (req, res) => {
         const lineBase = qty * price;
         const disc = lineBase * orderDiscPct;
         const net = Math.max(0, lineBase - disc);
-        const tax = (net * (Number(it.taxPercent) || 5)) / 100;
+        const itemTaxRate = it.taxPercent !== undefined && it.taxPercent !== null ? Number(it.taxPercent) : 5;
+        const tax = (net * itemTaxRate) / 100;
         const gross = net + tax;
 
         totalQuantity += qty;
@@ -1192,7 +1193,7 @@ router.get('/gst', async (req, res) => {
         const price = Number(it.price) || 0;
         const lineBase = qty * price;
         const lineTaxable = Math.round(Math.max(0, lineBase * (1 - orderDiscPct)) * 100) / 100;
-        const rate = Number(it.taxPercent) || 5;
+        const rate = it.taxPercent !== undefined && it.taxPercent !== null ? Number(it.taxPercent) : 5;
         const lineGst = Math.round(((lineTaxable * rate) / 100) * 100) / 100;
         const lineCgst = Math.round((lineGst / 2) * 100) / 100;
         const lineSgst = Math.round((lineGst / 2) * 100) / 100;
@@ -1209,6 +1210,9 @@ router.get('/gst', async (req, res) => {
             totalGst: 0,
             invoiceValue: 0,
           });
+        }
+        if (rate === 0) {
+          exemptSalesTotal += lineTaxable;
         }
         const rEntry = rateWiseMap.get(rate);
         rEntry.taxableValue += lineTaxable;
@@ -1328,9 +1332,10 @@ router.get('/gst', async (req, res) => {
     res.json({
       period: { startDate: currentStart, endDate: currentEnd },
       summary: {
+        grossSalesTotal: Math.round(grossSalesTotal),
         grossSales: Math.round(grossSalesTotal),
-        taxableSales: Math.round(taxableSalesTotal),
-        exemptSales: exemptSalesTotal,
+        taxableSales: Math.round(Math.max(0, taxableSalesTotal - exemptSalesTotal)),
+        exemptSales: Math.round(exemptSalesTotal),
         cgst: Math.round(cgstTotal * 100) / 100,
         sgst: Math.round(sgstTotal * 100) / 100,
         totalGst: Math.round(totalGst * 100) / 100,
