@@ -14,6 +14,7 @@ namespace PeyalaPOS
         private static Process backendProcess;
         private static Process frontendProcess;
         private static Process browserProcess;
+        private static Mutex singleInstanceMutex;
         private static string appDir;
         private static string portableNodeDir;
         private static string browserPath;
@@ -22,6 +23,21 @@ namespace PeyalaPOS
         [STAThread]
         static void Main(string[] args)
         {
+            // Enforce single instance to prevent duplicate tray icons and server port conflicts
+            bool createdNew;
+            singleInstanceMutex = new Mutex(true, "Global\\PeyalaPOS_SingleInstance_Mutex_v8", out createdNew);
+            if (!createdNew)
+            {
+                // Another instance of Peyala POS is already running!
+                // Open/focus POS browser portal so cashier immediately sees the screen, then exit cleanly.
+                try
+                {
+                    Process.Start("http://localhost:3000/login");
+                }
+                catch { }
+                return;
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -37,12 +53,6 @@ namespace PeyalaPOS
 
             try
             {
-                // Find Chrome or Edge
-                LocateBrowser();
-
-                // Setup System Tray
-                InitializeTray();
-
                 // Check if dedicated Electron desktop application is available
                 string electronExe = Path.Combine(appDir, "desktop", "node_modules", "electron", "dist", "electron.exe");
                 string desktopDir = Path.Combine(appDir, "desktop");
@@ -56,13 +66,18 @@ namespace PeyalaPOS
                             UseShellExecute = false
                         };
                         browserProcess = Process.Start(eInfo);
-                        Application.Run();
+                        // Electron manages its own dedicated tray icon, single-instance lock, and servers.
+                        // Wait for Electron to close, then exit cleanly without creating duplicate WinForms tray icons.
+                        browserProcess.WaitForExit();
                         return;
                     }
                     catch { }
                 }
 
-                // Fallback: Standalone Web/Kiosk mode (Chrome or Edge)
+                // Fallback mode: Standalone Web/Kiosk mode (Google Chrome or Microsoft Edge)
+                LocateBrowser();
+                InitializeTray();
+
                 if (!IsPortListening(3000) || !IsPortListening(4000))
                 {
                     FreePort(3000);
@@ -141,7 +156,7 @@ namespace PeyalaPOS
         private static void InitializeTray()
         {
             ContextMenu menu = new ContextMenu();
-            MenuItem header = new MenuItem("🍵 Peyala POS Station (Port 3000)");
+            MenuItem header = new MenuItem("🍵 Peyala POS - Version 12.0.0 (Port 3000)");
             header.Enabled = false;
             menu.MenuItems.Add(header);
             menu.MenuItems.Add(new MenuItem("-"));
@@ -158,7 +173,7 @@ namespace PeyalaPOS
             menu.MenuItems.Add(exit);
 
             trayIcon = new NotifyIcon();
-            trayIcon.Text = "Peyala POS (Local Server)";
+            trayIcon.Text = "Peyala POS - Version 12.0.0";
             string iconPath = Path.Combine(appDir, "icon.ico");
             if (File.Exists(iconPath))
             {
@@ -368,6 +383,12 @@ namespace PeyalaPOS
 
             FreePort(3000);
             FreePort(4000);
+
+            if (singleInstanceMutex != null)
+            {
+                try { singleInstanceMutex.ReleaseMutex(); } catch { }
+                singleInstanceMutex.Dispose();
+            }
 
             Application.Exit();
             Environment.Exit(0);

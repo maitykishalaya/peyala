@@ -157,8 +157,22 @@ if "%BROWSER_BIN%"=="" (
     echo Local servers will still start, and default browser will open.
 )
 
-:: 5. Free stale ports 3000 and 4000 if occupied
-echo [*] Freeing ports 3000 and 4000...
+:: 5. Check if servers are already active on ports 3000 and 4000
+set "ALREADY_ACTIVE=0"
+netstat -aon 2>nul | findstr ":3000 " | findstr "LISTENING" >nul && (
+    netstat -aon 2>nul | findstr ":4000 " | findstr "LISTENING" >nul && (
+        set "ALREADY_ACTIVE=1"
+    )
+)
+
+if "!ALREADY_ACTIVE!"=="1" (
+    echo [*] Peyala POS local servers are already running and active.
+    echo [*] Skipping startup to preserve sub-5ms performance and prevent process duplication!
+    goto SERVERS_READY
+)
+
+:: Free stale ports 3000 and 4000 only if servers need fresh startup
+echo [*] Initializing ports 3000 and 4000...
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":3000 " ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a >nul 2>&1
 )
@@ -199,6 +213,8 @@ if errorlevel 1 (
 
 :: Small settle pause
 timeout /t 2 >nul
+
+:SERVERS_READY
 
 :: 9. Ensure isolated profile directory exists
 if not exist "%USER_DATA_DIR%" mkdir "%USER_DATA_DIR%"

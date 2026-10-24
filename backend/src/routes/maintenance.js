@@ -21,7 +21,7 @@ router.get('/overview', auth, adminOnly, async (req, res) => {
     res.json({
       success: true,
       system: {
-        applicationVersion: pkg.version || '10.0.0',
+        applicationVersion: pkg.version || '12.0.0',
         environment: process.env.NODE_ENV || 'production',
         uptime: process.uptime(),
         nodeVersion: process.version,

@@ -830,7 +830,7 @@ export default function LoginPage() {
           </div>
           <div>
             <span className="font-black text-lg text-white tracking-tight">Peyala</span>
-            <span className="text-[10px] text-brand-400 font-bold ml-1.5 uppercase tracking-wider">v10.0</span>
+            <span className="text-[10px] text-brand-400 font-bold ml-1.5 uppercase tracking-wider">Version 12.0.0</span>
           </div>
         </div>
 
@@ -1165,7 +1165,7 @@ export default function LoginPage() {
             >
               <span className="text-emerald-400 text-sm">📱</span>
               <span>Install Staff Android App (APK)</span>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">v10.0</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">Version 12.0.0</span>
             </a>
           </div>
 
@@ -1173,7 +1173,7 @@ export default function LoginPage() {
           <div className="pt-2 text-center border-t border-gray-800/60 space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/60 text-emerald-400 text-[11px] font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>System Operational · v10.0 Production Ready</span>
+              <span>System Operational · Version 12.0.0 Production Ready</span>
             </div>
             <p className="text-[11px] text-gray-400">
               Peyala Café & Restaurant Operations Engine · Midnapore, WB

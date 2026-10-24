@@ -505,7 +505,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
                   ['Architecture', 'Local-First Operational Data Store'],
-                  ['Application Version', '12.0.0'],
+                  ['Application Version', 'Version 12.0.0'],
                   ['Local Database', 'WiredTiger Local MongoDB (Sub-5ms)'],
                   ['Central Database', `MongoDB Atlas (Periodic ${posLimits.dbSyncIntervalMinutes || 15}-Min Sync)`],
                   ['Backend Port', '4000'],
@@ -940,7 +940,7 @@ export default function SettingsPage() {
                   <History className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="text-lg font-bold text-gray-900 dark:text-white">
-                  v{maintenanceData?.system?.applicationVersion || '12.0.0'}
+                  Version {maintenanceData?.system?.applicationVersion || '12.0.0'}
                 </div>
                 <p className="text-[11px] text-gray-400">
                   {restorePoints.length} Restore Points Available
@@ -1047,7 +1047,7 @@ export default function SettingsPage() {
                     <RotateCcw className="w-5 h-5 text-amber-600" /> Versioned Restore Points & Safe Rollback
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Revert the application and data state to any verified release (e.g. "GO BACK TO VERSION 10.0.0").
+                    Revert the application and data state to any verified release (e.g. "GO BACK TO VERSION 12.0.0").
                   </p>
                 </div>
                 <button

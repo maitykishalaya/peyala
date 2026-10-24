@@ -333,7 +333,7 @@ function createMainWindow() {
     minWidth: 1024,
     minHeight: 650,
     icon: ICON_PATH,
-    title: 'Peyala POS — Restaurant Operations & Counter Terminal',
+    title: 'Peyala POS - Version 12.0.0 — Restaurant Operations & Counter Terminal',
     backgroundColor: '#111827', // Slate 900
     autoHideMenuBar: true,
     show: true,
@@ -411,13 +411,13 @@ function getLocalLanIp() {
 function setupTray() {
   try {
     tray = new Tray(ICON_PATH);
-    tray.setToolTip('Peyala POS — Counter Station');
+    tray.setToolTip('Peyala POS - Version 12.0.0');
 
     const lanIp = getLocalLanIp();
     const mobileUrl = `http://${lanIp}:3000`;
 
     const contextMenu = Menu.buildFromTemplate([
-      { label: '🍵 Peyala POS Station (Online)', enabled: false },
+      { label: '🍵 Peyala POS - Version 12.0.0 (Online)', enabled: false },
       {
         label: `📱 Mobile Waiter URL: ${mobileUrl}`,
         click: () => {

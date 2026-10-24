@@ -247,11 +247,94 @@ class SyncEngine {
                 queryId = new mongoose.Types.ObjectId(queryId);
                 docToSync._id = queryId;
               }
-              await centralCol.replaceOne(
-                { _id: queryId },
-                docToSync,
-                { upsert: true }
-              );
+
+              // ── Monetary Delta Reconciliation for Central DB Accounts ──
+              // When local station creates new financial transactions, apply the delta to Central Accounts
+              if (colName === 'payments') {
+                const centralBefore = await centralCol.findOne({ _id: queryId }, { projection: { _id: 1 } });
+                if (!centralBefore && docToSync.paidFrom && docToSync.amount && !docToSync.isPending) {
+                  let paidFromId = docToSync.paidFrom;
+                  if (typeof paidFromId === 'string' && /^[0-9a-fA-F]{24}$/.test(paidFromId)) paidFromId = new mongoose.Types.ObjectId(paidFromId);
+                  await centralConn.db.collection('accounts').updateOne(
+                    { _id: paidFromId },
+                    { $inc: { currentBalance: -Number(docToSync.amount) } }
+                  );
+                }
+              } else if (colName === 'orders') {
+                const centralBefore = await centralCol.findOne({ _id: queryId }, { projection: { _id: 1, status: 1 } });
+                const wasPaidCentral = centralBefore && centralBefore.status === 'paid';
+                if (!wasPaidCentral && docToSync.status === 'paid') {
+                  const pb = docToSync.paymentBreakdown || {};
+                  let cashAmt = Number(pb.cash) || 0;
+                  let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
+                  if (docToSync.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(docToSync.total) || 0;
+                  if (docToSync.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(docToSync.total) || 0;
+
+                  if (cashAmt > 0) {
+                    await centralConn.db.collection('accounts').updateOne(
+                      { type: 'cash', isActive: true },
+                      { $inc: { currentBalance: cashAmt } }
+                    );
+                  }
+                  if (digitalAmt > 0) {
+                    await centralConn.db.collection('accounts').updateOne(
+                      { type: { $in: ['bank', 'digital'] }, isActive: true },
+                      { $inc: { currentBalance: digitalAmt } }
+                    );
+                  }
+                }
+              } else if (colName === 'receipts') {
+                const centralBefore = await centralCol.findOne({ _id: queryId }, { projection: { _id: 1 } });
+                if (!centralBefore && docToSync.receivedIn && docToSync.amount) {
+                  let recId = docToSync.receivedIn;
+                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
+                  await centralConn.db.collection('accounts').updateOne(
+                    { _id: recId },
+                    { $inc: { currentBalance: Number(docToSync.amount) } }
+                  );
+                }
+              } else if (colName === 'transfers') {
+                const centralBefore = await centralCol.findOne({ _id: queryId }, { projection: { _id: 1 } });
+                if (!centralBefore && docToSync.amount) {
+                  let fromId = docToSync.fromAccount;
+                  let toId = docToSync.toAccount;
+                  if (typeof fromId === 'string' && /^[0-9a-fA-F]{24}$/.test(fromId)) fromId = new mongoose.Types.ObjectId(fromId);
+                  if (typeof toId === 'string' && /^[0-9a-fA-F]{24}$/.test(toId)) toId = new mongoose.Types.ObjectId(toId);
+                  if (fromId) await centralConn.db.collection('accounts').updateOne({ _id: fromId }, { $inc: { currentBalance: -Number(docToSync.amount) } });
+                  if (toId) await centralConn.db.collection('accounts').updateOne({ _id: toId }, { $inc: { currentBalance: Number(docToSync.amount) } });
+                }
+              } else if (colName === 'customerduepayments') {
+                const centralBefore = await centralCol.findOne({ _id: queryId }, { projection: { _id: 1 } });
+                if (!centralBefore && docToSync.receivedIn && docToSync.amount) {
+                  let recId = docToSync.receivedIn;
+                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
+                  await centralConn.db.collection('accounts').updateOne(
+                    { _id: recId },
+                    { $inc: { currentBalance: Number(docToSync.amount) } }
+                  );
+                }
+              }
+
+              // Special handling for accounts: protect currentBalance from being clobbered by stale snapshots
+              if (colName === 'accounts') {
+                const centralDoc = await centralCol.findOne({ _id: queryId });
+                if (!centralDoc) {
+                  await centralCol.replaceOne({ _id: queryId }, docToSync, { upsert: true });
+                } else {
+                  const updateFields = { ...docToSync };
+                  delete updateFields.currentBalance;
+                  delete updateFields._id;
+                  if (Object.keys(updateFields).length > 0) {
+                    await centralCol.updateOne({ _id: queryId }, { $set: updateFields });
+                  }
+                }
+              } else {
+                await centralCol.replaceOne(
+                  { _id: queryId },
+                  docToSync,
+                  { upsert: true }
+                );
+              }
             }
           } else if (item.operation === 'delete') {
             let delId = item.documentId;
@@ -366,6 +449,8 @@ class SyncEngine {
           }
         : {};
 
+      const datesToReconcileDailySales = new Set();
+
       for (const colName of inboundCollections) {
         try {
           const centralCol = centralConn.db.collection(colName);
@@ -402,7 +487,7 @@ class SyncEngine {
             const docIds = docs.map(d => d._id);
             const existingLocals = await localCol.find(
               { _id: { $in: docIds } },
-              { projection: { _id: 1, updatedAt: 1 } }
+              { projection: { _id: 1, updatedAt: 1, status: 1 } }
             ).toArray();
             const localMap = new Map(existingLocals.map(l => [String(l._id), l]));
 
@@ -419,13 +504,90 @@ class SyncEngine {
                   continue;
                 }
               }
-              ops.push({
-                replaceOne: {
-                  filter: { _id: doc._id },
-                  replacement: doc,
-                  upsert: true,
-                },
-              });
+
+              // ── Monetary Delta Reconciliation for Local DB Accounts ──
+              // When cloud website created new financial transactions, apply the delta to Local Accounts
+              if (!localDoc) {
+                if (colName === 'payments' && doc.paidFrom && doc.amount && !doc.isPending) {
+                  let paidFromId = doc.paidFrom;
+                  if (typeof paidFromId === 'string' && /^[0-9a-fA-F]{24}$/.test(paidFromId)) paidFromId = new mongoose.Types.ObjectId(paidFromId);
+                  await mongoose.connection.db.collection('accounts').updateOne(
+                    { _id: paidFromId },
+                    { $inc: { currentBalance: -Number(doc.amount) } }
+                  );
+                } else if (colName === 'orders' && doc.status === 'paid') {
+                  const pb = doc.paymentBreakdown || {};
+                  let cashAmt = Number(pb.cash) || 0;
+                  let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
+                  if (doc.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(doc.total) || 0;
+                  if (doc.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(doc.total) || 0;
+
+                  if (cashAmt > 0) {
+                    await mongoose.connection.db.collection('accounts').updateOne(
+                      { type: 'cash', isActive: true },
+                      { $inc: { currentBalance: cashAmt } }
+                    );
+                  }
+                  if (digitalAmt > 0) {
+                    await mongoose.connection.db.collection('accounts').updateOne(
+                      { type: { $in: ['bank', 'digital'] }, isActive: true },
+                      { $inc: { currentBalance: digitalAmt } }
+                    );
+                  }
+                  if (doc.paidAt || doc.createdAt) {
+                    datesToReconcileDailySales.add(new Date(doc.paidAt || doc.createdAt).toISOString().slice(0, 10));
+                  }
+                } else if (colName === 'receipts' && doc.receivedIn && doc.amount) {
+                  let recId = doc.receivedIn;
+                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
+                  await mongoose.connection.db.collection('accounts').updateOne(
+                    { _id: recId },
+                    { $inc: { currentBalance: Number(doc.amount) } }
+                  );
+                } else if (colName === 'transfers' && doc.amount) {
+                  let fromId = doc.fromAccount;
+                  let toId = doc.toAccount;
+                  if (typeof fromId === 'string' && /^[0-9a-fA-F]{24}$/.test(fromId)) fromId = new mongoose.Types.ObjectId(fromId);
+                  if (typeof toId === 'string' && /^[0-9a-fA-F]{24}$/.test(toId)) toId = new mongoose.Types.ObjectId(toId);
+                  if (fromId) await mongoose.connection.db.collection('accounts').updateOne({ _id: fromId }, { $inc: { currentBalance: -Number(doc.amount) } });
+                  if (toId) await mongoose.connection.db.collection('accounts').updateOne({ _id: toId }, { $inc: { currentBalance: Number(doc.amount) } });
+                } else if (colName === 'customerduepayments' && doc.receivedIn && doc.amount) {
+                  let recId = doc.receivedIn;
+                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
+                  await mongoose.connection.db.collection('accounts').updateOne(
+                    { _id: recId },
+                    { $inc: { currentBalance: Number(doc.amount) } }
+                  );
+                }
+              }
+
+              // Special handling for accounts: protect currentBalance from being clobbered by stale snapshots
+              if (colName === 'accounts') {
+                if (!localDoc) {
+                  ops.push({
+                    replaceOne: {
+                      filter: { _id: doc._id },
+                      replacement: doc,
+                      upsert: true,
+                    },
+                  });
+                } else {
+                  const updateFields = { ...doc };
+                  delete updateFields.currentBalance;
+                  delete updateFields._id;
+                  if (Object.keys(updateFields).length > 0) {
+                    await localCol.updateOne({ _id: doc._id }, { $set: updateFields });
+                  }
+                }
+              } else {
+                ops.push({
+                  replaceOne: {
+                    filter: { _id: doc._id },
+                    replacement: doc,
+                    upsert: true,
+                  },
+                });
+              }
             }
 
             if (ops.length > 0) {
@@ -438,6 +600,18 @@ class SyncEngine {
         }
       }
 
+      // Reconcile DailySales for any order dates pulled from cloud
+      for (const dateStr of datesToReconcileDailySales) {
+        try {
+          const { reconcileDailySales } = require('../utils/salesReconciler');
+          await reconcileDailySales(new Date(dateStr));
+        } catch (rErr) {
+          console.warn('[SyncEngine] Daily sales reconciliation notice for', dateStr, rErr.message);
+        }
+      }
+
+      // Ensure local and central account balances are identical and clean rounded
+      await this.reconcileAccountsBalanceConsistency(centralConn);
 
       this.lastInboundSync = new Date();
       if (pulledCount > 0) {
@@ -461,6 +635,37 @@ class SyncEngine {
       }
     } catch (err) {
       console.warn('[SyncEngine] Error during inbound pullFromCentral:', err.message);
+    }
+  }
+
+  /**
+   * Final reconciliation check: Ensure local and central account balances are cleanly rounded and identical
+   */
+  async reconcileAccountsBalanceConsistency(centralConn) {
+    if (!centralConn || centralConn.readyState !== 1) return;
+    try {
+      const localAccCol = mongoose.connection.db.collection('accounts');
+      const centralAccCol = centralConn.db.collection('accounts');
+
+      const localAccs = await localAccCol.find({ isActive: true }).toArray();
+      for (const lAcc of localAccs) {
+        const cAcc = await centralAccCol.findOne({ _id: lAcc._id });
+        if (cAcc) {
+          const lBal = Math.round((Number(lAcc.currentBalance) || 0) * 100) / 100;
+          const cBal = Math.round((Number(cAcc.currentBalance) || 0) * 100) / 100;
+
+          if (lBal !== cBal) {
+            // Reconcile and align Central with Local counter master
+            await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: lBal } });
+          } else {
+            // Ensure clean 2-decimal rounding on both
+            await localAccCol.updateOne({ _id: lAcc._id }, { $set: { currentBalance: lBal } });
+            await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: cBal } });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Account balance consistency check notice:', err.message);
     }
   }
 

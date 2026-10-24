@@ -290,7 +290,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className={cn('rounded-lg flex-shrink-0 overflow-hidden transition-all', sidebarOpen ? 'w-10 h-10' : 'w-8 h-8')}>
             <img src="/icon.png" alt="Peyala" className="w-full h-full object-contain" />
           </div>
-          {sidebarOpen && <div><p className="font-bold text-gray-900 dark:text-white text-sm leading-none">Peyala</p><p className="text-[10px] text-gray-400 mt-0.5">Business Admin</p></div>}
+          {sidebarOpen && (
+            <div>
+              <div className="flex items-center gap-1.5">
+                <p className="font-bold text-gray-900 dark:text-white text-sm leading-none">Peyala</p>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-mono font-bold">
+                  v12.0.0
+                </span>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">Business Admin · Version 12.0.0</p>
+            </div>
+          )}
         </div>
 
         {/* Nav */}
@@ -369,7 +379,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <h1 className="font-semibold text-gray-800 dark:text-gray-200 text-sm truncate">
               {NAV.find(n => pathname.startsWith(n.href))?.label || 'Peyala'}
             </h1>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">Mobile friendly business dashboard</p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">Mobile friendly business dashboard · Version 12.0.0</p>
           </div>
 
           {/* Local Server & Sync Health Status Indicator */}

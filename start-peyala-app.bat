@@ -84,9 +84,14 @@ if not exist "%DESKTOP_DIR%\node_modules\electron\dist\electron.exe" (
     )
 )
 
-:: 6. Launch Peyala POS Windows Desktop Application
-echo [*] Clearing any stale desktop instances to ensure clean startup...
-taskkill /F /IM electron.exe >nul 2>&1
+:: 6. Check if Peyala POS Desktop Application is already active
+tasklist /FI "IMAGENAME eq electron.exe" 2>nul | find /I "electron.exe" >nul
+if not errorlevel 1 (
+    echo [*] Peyala POS Desktop Application is already running!
+    echo [*] Bringing window to front...
+    start http://localhost:3000/login
+    exit /b 0
+)
 
 echo [*] Launching Peyala POS Desktop Application...
 cd /d "%DESKTOP_DIR%"

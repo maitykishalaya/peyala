@@ -201,6 +201,7 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
               <span>{formatDate(new Date())} · Peyala Café</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-100 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 font-mono font-bold">Version 12.0.0</span>
               {lastUpdated && <span className="text-xs text-gray-400">· Cached ({lastUpdated})</span>}
             </p>
           </div>

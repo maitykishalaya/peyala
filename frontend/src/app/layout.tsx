@@ -9,7 +9,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Peyala Business Admin',
+  title: 'Peyala Business Admin - Version 12.0.0',
   description: 'Restaurant & Café Management System',
 };
 

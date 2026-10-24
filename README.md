@@ -1,4 +1,4 @@
-# 🍵 Peyala Business Admin & Dine-In POS
+# 🍵 Peyala Business Admin & Dine-In POS (Version 12.0.0)
 
 A comprehensive, self-hosted restaurant management and Point-of-Sale (POS) system built specifically for **Peyala Café & Restaurant** (Midnapore, West Bengal).
 
@@ -900,5 +900,17 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Uses useDeferredValue across /tables (POS item and table search), /inventory (raw material catalog), and /menu so typing remains 60 FPS without ever locking the browser input router or freezing textboxes.
   - Memoized catalog and category arrays ensure each search filter only computes once per query change instead of multiple times per render.
   - Safeguarded window focus management prevents caret loss in Windows and Chromium browsers.
+
+---
+
+### 4. Local-First Delta Sync Engine & Single-Instance Desktop Launcher
+- **Two-Way Monetary Delta Reconciliation (`backend/src/services/syncEngine.js`)**:
+  - Synchronizes transactions (`orders`, `payments`, `receipts`, `transfers`, `customerduepayments`) between the Local Server and Cloud MongoDB Atlas.
+  - When financial transactions occur simultaneously on both local and cloud while disconnected, the sync engine applies incoming transaction deltas to account balances instead of blindly overwriting `currentBalance` snapshots.
+  - Auto-triggers `reconcileDailySales` for all pulled order dates so daily sales entries match live orders.
+  - Reconciles and verifies final 2-decimal rounded account balances across local and central databases.
+- **Single-Instance Windows Launcher (`PeyalaLauncher.cs` / `PeyalaPOS.exe`)**:
+  - Implements a system-wide named Mutex (`Global\PeyalaPOS_SingleInstance_Mutex_v8`).
+  - Guarantees only one instance of the POS launcher runs at a time, completely preventing duplicate system tray icons, port collisions, and background RAM/CPU overhead on counter laptops.
 
 ---
