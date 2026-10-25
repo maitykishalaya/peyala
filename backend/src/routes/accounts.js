@@ -167,11 +167,24 @@ router.get('/:id/ledger', async (req, res) => {
 // ── POST /api/accounts ────────────────────────────────────────────
 router.post('/', async (req, res) => {
   try {
+    const openingBalance = Number(req.body.openingBalance) || 0;
+    if (openingBalance !== 0 && req.user?.role !== 'admin') {
+      return res.status(403).json({
+        message: 'Only administrators have permission to set a starting balance.',
+      });
+    }
+
     const account = await Account.create({
       ...req.body,
-      currentBalance: req.body.currentBalance !== undefined ? req.body.currentBalance : (req.body.openingBalance || 0),
+      openingBalance,
+      currentBalance: openingBalance,
     });
-    await log({ user: req.user, action: 'CREATE', module: 'Accounts', description: `${req.user.name} created account: ${account.name}` });
+    await log({
+      user: req.user,
+      action: 'CREATE',
+      module: 'Accounts',
+      description: `${req.user.name} created account: ${account.name} (starting balance: ₹${openingBalance})`,
+    });
     res.status(201).json(account);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -185,15 +198,44 @@ router.put('/:id', async (req, res) => {
     if (!existing) return res.status(404).json({ message: 'Account not found' });
 
     const update = { ...req.body };
-    if (req.body.openingBalance !== undefined && req.body.currentBalance === undefined) {
-      const openingDelta = Number(req.body.openingBalance) - (existing.openingBalance || 0);
-      if (!Number.isNaN(openingDelta) && openingDelta !== 0) {
-        update.currentBalance = (existing.currentBalance || 0) + openingDelta;
+    // Never allow direct manual overwriting of live running currentBalance via PUT payload
+    delete update.currentBalance;
+
+    let openingDelta = 0;
+    if (req.body.openingBalance !== undefined) {
+      const oldOpening = Number(existing.openingBalance) || 0;
+      const newOpening = Number(req.body.openingBalance);
+
+      if (Number.isNaN(newOpening)) {
+        return res.status(400).json({ message: 'Opening balance must be a valid number' });
+      }
+
+      openingDelta = newOpening - oldOpening;
+
+      if (openingDelta !== 0) {
+        // Only administrators can change the starting balance
+        if (req.user?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Only administrators have permission to change the starting balance.',
+          });
+        }
+
+        update.openingBalance = newOpening;
+        update.currentBalance = (Number(existing.currentBalance) || 0) + openingDelta;
       }
     }
 
     const account = await Account.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
-    await log({ user: req.user, action: 'UPDATE', module: 'Accounts', description: `${req.user.name} updated account: ${account.name}` });
+
+    const descExtra = openingDelta !== 0
+      ? ` (starting balance changed from ₹${existing.openingBalance || 0} to ₹${req.body.openingBalance}, live balance adjusted by ${openingDelta >= 0 ? '+' : ''}₹${openingDelta})`
+      : '';
+    await log({
+      user: req.user,
+      action: 'UPDATE',
+      module: 'Accounts',
+      description: `${req.user.name} updated account: ${account.name}${descExtra}`,
+    });
     res.json(account);
   } catch (err) {
     res.status(400).json({ message: err.message });

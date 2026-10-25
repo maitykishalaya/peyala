@@ -284,9 +284,9 @@ async function startLocalEngines() {
   if (!p3000) {
     console.log('[Peyala] Launching frontend production server on port 3000 in ' + FRONTEND_DIR + '...');
     const nextCli = path.join(FRONTEND_DIR, 'node_modules', 'next', 'dist', 'bin', 'next');
-    logEngine(`Launching frontend: ${nextCli} start -p 3000`);
+    logEngine(`Launching frontend: ${nextCli} start -p 3000 -H 0.0.0.0`);
 
-    frontendProcess = spawn(nodeBin, [nextCli, 'start', '-p', '3000'], {
+    frontendProcess = spawn(nodeBin, [nextCli, 'start', '-p', '3000', '-H', '0.0.0.0'], {
       cwd: FRONTEND_DIR,
       env: { ...process.env, NODE_ENV: 'production', PORT: '3000' },
       stdio: ['ignore', 'pipe', 'pipe'],

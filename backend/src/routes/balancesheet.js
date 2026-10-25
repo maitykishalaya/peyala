@@ -18,6 +18,7 @@ const Customer = require('../models/Customer');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getGstDailyHistory } = require('../utils/gstHistory');
+const realtimeHub = require('../services/realtimeHub');
 
 // All routes require authentication
 router.use(auth);
@@ -184,6 +185,13 @@ router.put('/', async (req, res) => {
 
     await bs.save();
 
+    realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+      id: bs._id,
+      model: 'BalanceSheet',
+      gstLiability: bs.gstLiability,
+      updatedAt: bs.lastUpdated,
+    });
+
     await log({
       user: req.user,
       action: 'UPDATE',
@@ -230,6 +238,14 @@ router.post('/add-gst', async (req, res) => {
 
     await bs.save();
 
+    realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+      id: bs._id,
+      model: 'BalanceSheet',
+      gstLiability: bs.gstLiability,
+      gstAdded: gstAmount,
+      updatedAt: bs.lastUpdated,
+    });
+
     res.json({ message: 'GST added', gstAdded: gstAmount, totalGst: bs.gstLiability });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -262,6 +278,14 @@ router.post('/pay-gst', async (req, res) => {
     bs.lastUpdated = new Date();
     bs.lastUpdatedBy = req.user.name;
     await bs.save();
+
+    realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+      id: bs._id,
+      model: 'BalanceSheet',
+      gstLiability: bs.gstLiability,
+      gstPaid: payAmount,
+      updatedAt: bs.lastUpdated,
+    });
 
     // Also create a payment record if paidFrom account is provided
     if (paidFrom) {

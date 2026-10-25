@@ -91,6 +91,11 @@ export default function AccountLedger({ account, open, onClose }: AccountLedgerP
             <p className={`text-xl font-bold ${account.currentBalance >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-500'}`}>
               {formatCurrency(account.currentBalance)}
             </p>
+            {account.openingBalance !== undefined && (
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Starting: <span className="font-medium text-gray-600 dark:text-gray-300">{formatCurrency(account.openingBalance || 0)}</span>
+              </p>
+            )}
           </div>
         </div>
 

@@ -89,4 +89,7 @@ balanceSheetSchema.statics.getSingleton = async function() {
   return bs;
 };
 
+const syncPlugin = require('../utils/syncPlugin');
+balanceSheetSchema.plugin(syncPlugin, { modelName: 'BalanceSheet' });
+
 module.exports = mongoose.model('BalanceSheet', balanceSheetSchema);

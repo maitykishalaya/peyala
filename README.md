@@ -7,7 +7,10 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 ---
 
 > [!IMPORTANT]
-> **Maintenance Rule**: Whenever any significant change or new feature is introduced to this codebase, **both `README.md` and `MEMORY_BANK.md` must be updated immediately**.
+> **Mandatory Maintenance & Build Rule**:
+> 1. Whenever any change or new feature is introduced to this codebase, **both `README.md` and `MEMORY_BANK.md` must be updated immediately**.
+> 2. **After EVERY change, the final single-file installers (`INSTALL-PEYALA-ALL-IN-ONE.bat` & `Peyala-POS-AllInOne-Installer.exe`) and the Android build (`Peyala-POS.apk`) MUST be updated and compiled consistently.**
+> 3. Execute `build-all-in-one.bat` (or `powershell -ExecutionPolicy Bypass -File scripts\build-all-in-one.ps1`), which automatically recompiles the Android APK, builds production assets, packages the clean single-file installers, and mirrors them to `C:\Desktop\Peyala_v8`.
 
 ---
 
@@ -532,9 +535,52 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
   - Create versioned point-in-time snapshots (`v10.0.0`, `v10.1.0`).
   - Safe 8-step rollback engine: pauses sync, creates emergency pre-rollback backup, restores collections, performs strict document integrity verification, and safely resumes operations.
 
+### 28. Real-Time Sales Settlement Balance Guarantee & Cloud-Local LWW Sync Engine
+- **Dedicated Named Account Resolution**:
+  - Cash settlements explicitly target the active **Cash Counter** (`name: /cash counter/i, type: 'cash'`).
+  - UPI, Card, and digital settlements explicitly target the active **Current Account** (`name: /current account/i, type: { $in: ['bank', 'digital'] }`).
+  - Prevents accidental routing to secondary personal cash or partner accounts.
+- **Post-Increment Mongoose Hook Integrity**:
+  - All account increment updates pass `{ new: true }` in `Account.findByIdAndUpdate(...)` across POS order settlements (`POST /:id/pay`), bill reversions (`DELETE /:id/settled`), and bill adjustments (`PUT /:id/settled`).
+  - Guarantees `schema.post('findOneAndUpdate')` in `syncPlugin.js` captures the true post-increment balance rather than the stale pre-update balance, keeping `SyncOutbox` perfectly aligned.
+- **Real-Time WebSocket Emission (`realtimeHub`)**:
+  - Instantaneous `realtimeHub.broadcast('ACCOUNT_UPDATED', ...)` dispatches fresh balance payloads to all connected laptops, tablets, and mobile clients immediately upon bill settlement.
+  - Accounts page (`/accounts`) listens to `ORDER_UPDATED`, `ORDERS_UPDATED`, `SALES_UPDATED`, and `ACCOUNT_UPDATED` events alongside window focus and 20-second background polling.
+- **Bi-Directional Last-Write-Wins (LWW) Sync Engine**:
+  - Inbound order synchronization detects `open`/`billed` to `paid` status transitions (`doc.status === 'paid' && !wasPaidLocally`) and credits local accounts accordingly when orders are paid via mobile or cloud.
+  - Account balance consistency reconciliation (`reconcileAccountsBalanceConsistency`) strictly honors Last-Write-Wins timestamps (`updatedAt`), completely preventing stale offline local balances from wiping out cloud-updated balances.
+
 ---
 
-## 🚀 Quick Start (Local Setup)
+## 🚀 Quick Start & Installation
+
+### Option 1: Single-File All-In-One Pendrive Installer (Windows — Recommended)
+***Zero setup, zero manual copying of loose files!***
+1. Copy **ONE** single file to a USB pendrive:
+   - `INSTALL-PEYALA-ALL-IN-ONE.bat` (Self-extracting single-file batch installer), **OR**
+   - `Peyala-POS-AllInOne-Installer.exe` (Single-file compiled executable installer)
+2. Plug the pendrive into ANY Windows laptop.
+3. Double-click the file directly from the pendrive.
+4. The installer automatically:
+   - Unpacks the complete POS system into `C:\Peyala` (or chosen custom directory).
+   - Bundles the portable Node.js runtime, offline auth vault, and embedded MongoDB engine.
+   - Compiles native `PeyalaPOS.exe` with the official Peyala brand icon.
+   - Creates a "Peyala POS" shortcut directly on the Windows Desktop and launches the POS ready for sales!
+
+### Option 2: Automated Installation (macOS / Linux)
+```bash
+# 1. Clone or navigate to the repository
+cd peyala_v8
+
+# 2. Make helper scripts executable and run installer
+chmod +x install.sh start.sh
+./install.sh
+
+# 3. Start development servers
+./start.sh
+```
+
+### Option 3: Manual Start (Two Terminals)
 
 ### Prerequisites
 - **Node.js**: v18.0.0 or higher ([Download](https://nodejs.org))
@@ -912,5 +958,18 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
 - **Single-Instance Windows Launcher (`PeyalaLauncher.cs` / `PeyalaPOS.exe`)**:
   - Implements a system-wide named Mutex (`Global\PeyalaPOS_SingleInstance_Mutex_v8`).
   - Guarantees only one instance of the POS launcher runs at a time, completely preventing duplicate system tray icons, port collisions, and background RAM/CPU overhead on counter laptops.
+
+---
+
+### 5. Single-File All-In-One Laptop Installer & Rebuilder
+- **Single-File Standalone Installers (`INSTALL-PEYALA-ALL-IN-ONE.bat` & `Peyala-POS-AllInOne-Installer.exe`)**:
+  - Contains every single application component compiled into **ONE file** (~375 MB).
+  - Eliminates the need to copy 50,000+ loose files or multiple folders to a USB pendrive.
+  - Includes portable Node.js runtime, embedded local MongoDB engine, production Next.js build, Electron desktop runtime, and native C# tray launcher.
+  - Simply copy this ONE file to a USB pendrive, plug it into any Windows laptop, and double-click it.
+  - Automatically unpacks in ~20 seconds to `C:\Peyala`, sanitizes database locks, creates desktop/Start Menu shortcuts with the official logo, and launches the POS.
+- **1-Click Packaging Tool (`build-all-in-one.bat` / `scripts/build-all-in-one.ps1`)**:
+  - Double-click `build-all-in-one.bat` to re-compile both single-file installers anytime the codebase is updated.
+
 
 ---

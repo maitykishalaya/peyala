@@ -271,16 +271,58 @@ class SyncEngine {
                   if (docToSync.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(docToSync.total) || 0;
 
                   if (cashAmt > 0) {
-                    await centralConn.db.collection('accounts').updateOne(
-                      { type: 'cash', isActive: true },
-                      { $inc: { currentBalance: cashAmt } }
-                    );
+                    const targetCash = await centralConn.db.collection('accounts').findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+                      || await centralConn.db.collection('accounts').findOne({ type: 'cash', isActive: true });
+                    if (targetCash) {
+                      await centralConn.db.collection('accounts').updateOne(
+                        { _id: targetCash._id },
+                        { $inc: { currentBalance: cashAmt } }
+                      );
+                    }
                   }
                   if (digitalAmt > 0) {
-                    await centralConn.db.collection('accounts').updateOne(
-                      { type: { $in: ['bank', 'digital'] }, isActive: true },
-                      { $inc: { currentBalance: digitalAmt } }
-                    );
+                    const targetBank = await centralConn.db.collection('accounts').findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+                      || await centralConn.db.collection('accounts').findOne({ type: { $in: ['bank', 'digital'] }, isActive: true });
+                    if (targetBank) {
+                      await centralConn.db.collection('accounts').updateOne(
+                        { _id: targetBank._id },
+                        { $inc: { currentBalance: digitalAmt } }
+                      );
+                    }
+                  }
+
+                  // ── Monetary Delta Reconciliation for Central DB GST Liability ──
+                  const orderTax = Number(docToSync.taxAmount) > 0
+                    ? Number(docToSync.taxAmount)
+                    : Math.round((Number(docToSync.settledAmount) || Number(docToSync.total) || 0) * 0.0477 * 100) / 100;
+                  if (orderTax > 0) {
+                    try {
+                      const centralBs = await centralConn.db.collection('balancesheets').findOne({});
+                      if (centralBs) {
+                        const hasLog = (centralBs.gstLog || []).some((l) =>
+                          String(l.salesEntryId) === String(docToSync._id) ||
+                          (l.note && l.note.includes(`Bill #${docToSync.billNumber || docToSync.orderNumber}`))
+                        );
+                        if (!hasLog) {
+                          await centralConn.db.collection('balancesheets').updateOne(
+                            { _id: centralBs._id },
+                            {
+                              $inc: { gstLiability: orderTax },
+                              $push: {
+                                gstLog: {
+                                  date: docToSync.paidAt || docToSync.createdAt || new Date(),
+                                  salesEntryId: docToSync._id,
+                                  outletSales: Number(docToSync.settledAmount) || Number(docToSync.total) || 0,
+                                  gstAdded: orderTax,
+                                  note: `Auto: GST on ₹${docToSync.settledAmount || docToSync.total} POS Dine-in Order (Bill #${docToSync.billNumber || docToSync.orderNumber})`,
+                                },
+                              },
+                              $set: { lastUpdated: new Date() },
+                            }
+                          );
+                        }
+                      }
+                    } catch (_) {}
                   }
                 }
               } else if (colName === 'receipts') {
@@ -321,12 +363,36 @@ class SyncEngine {
                 if (!centralDoc) {
                   await centralCol.replaceOne({ _id: queryId }, docToSync, { upsert: true });
                 } else {
+                  if (docToSync.openingBalance !== undefined && centralDoc.openingBalance !== undefined) {
+                    const diff = Number(docToSync.openingBalance) - Number(centralDoc.openingBalance || 0);
+                    if (!Number.isNaN(diff) && diff !== 0) {
+                      await centralCol.updateOne({ _id: queryId }, { $inc: { currentBalance: diff } });
+                    }
+                  }
                   const updateFields = { ...docToSync };
                   delete updateFields.currentBalance;
                   delete updateFields._id;
                   if (Object.keys(updateFields).length > 0) {
                     await centralCol.updateOne({ _id: queryId }, { $set: updateFields });
                   }
+                }
+              } else if (colName === 'balancesheets') {
+                const centralDoc = await centralCol.findOne({ _id: queryId });
+                if (!centralDoc) {
+                  await centralCol.replaceOne({ _id: queryId }, docToSync, { upsert: true });
+                } else {
+                  const existingKeys = new Set((centralDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const logsToAdd = (docToSync.gstLog || []).filter((l) => !existingKeys.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const updateFields = { ...docToSync };
+                  delete updateFields._id;
+                  delete updateFields.gstLog;
+                  await centralCol.updateOne(
+                    { _id: queryId },
+                    {
+                      $set: updateFields,
+                      ...(logsToAdd.length > 0 ? { $push: { gstLog: { $each: logsToAdd } } } : {}),
+                    }
+                  );
                 }
               } else {
                 await centralCol.replaceOne(
@@ -396,6 +462,7 @@ class SyncEngine {
       paymentcategory: 'paymentcategories',
       addon: 'addons',
       staff: 'staffs',
+      balancesheet: 'balancesheets',
     };
     const lower = modelName.toLowerCase();
     if (map[lower]) return map[lower];
@@ -433,6 +500,7 @@ class SyncEngine {
         'possettings',
         'paymentcategories',
         'addons',
+        'balancesheets',
       ];
 
       let pulledCount = 0;
@@ -458,7 +526,7 @@ class SyncEngine {
 
           let query = syncFilter;
           // Small master collections: always pull all to guarantee 100% real-time fidelity
-          if (['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories'].includes(colName) || !this.lastInboundSync) {
+          if (['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories', 'balancesheets'].includes(colName) || !this.lastInboundSync) {
             query = {};
           } else if (colName === 'orders') {
             // Always pull any open/preparing/served order, plus recent orders
@@ -484,6 +552,74 @@ class SyncEngine {
 
           const docs = await centralCol.find(query).toArray();
           if (docs.length > 0) {
+            // Special inbound handling for singleton BalanceSheet
+            if (colName === 'balancesheets') {
+              const centralDoc = docs[0];
+              if (centralDoc) {
+                const localDoc = await localCol.findOne({});
+                if (!localDoc) {
+                  await localCol.insertOne(centralDoc);
+                  realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+                    gstLiability: centralDoc.gstLiability,
+                    updatedAt: new Date(),
+                  });
+                } else {
+                  const existingLogIds = new Set((localDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const newLogsFromCentral = (centralDoc.gstLog || []).filter((l) => !existingLogIds.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+
+                  const centralLogIds = new Set((centralDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const extraLocalLogs = (localDoc.gstLog || []).filter((l) => !centralLogIds.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+
+                  if (newLogsFromCentral.length > 0 || centralDoc.gstLiability !== localDoc.gstLiability) {
+                    const mergedMap = new Map();
+                    const mergedList = [];
+                    const addMerged = (log) => {
+                      const key = String(log._id || `${log.date}_${log.gstAdded}_${log.note}`);
+                      if (!mergedMap.has(key)) {
+                        mergedMap.set(key, true);
+                        mergedList.push(log);
+                      }
+                    };
+                    (centralDoc.gstLog || []).forEach(addMerged);
+                    (localDoc.gstLog || []).forEach(addMerged);
+                    mergedList.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                    const extraLocalTax = extraLocalLogs.reduce((s, l) => s + (l.gstAdded || 0), 0);
+                    const finalGstLiability = Math.round(((centralDoc.gstLiability || 0) + extraLocalTax) * 100) / 100;
+
+                    await localCol.updateOne(
+                      { _id: localDoc._id },
+                      {
+                        $set: {
+                          gstLiability: finalGstLiability,
+                          gstLog: mergedList,
+                          lastUpdated: centralDoc.lastUpdated || new Date(),
+                          lastUpdatedBy: centralDoc.lastUpdatedBy || 'Cloud Sync',
+                        },
+                      }
+                    );
+                    realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+                      gstLiability: finalGstLiability,
+                      updatedAt: new Date(),
+                    });
+                  }
+
+                  if (extraLocalLogs.length > 0) {
+                    const extraLocalTax = extraLocalLogs.reduce((s, l) => s + (l.gstAdded || 0), 0);
+                    await centralCol.updateOne(
+                      { _id: centralDoc._id },
+                      {
+                        $inc: { gstLiability: extraLocalTax },
+                        $push: { gstLog: { $each: extraLocalLogs } },
+                        $set: { lastUpdated: new Date() },
+                      }
+                    );
+                  }
+                }
+              }
+              continue;
+            }
+
             const docIds = docs.map(d => d._id);
             const existingLocals = await localCol.find(
               { _id: { $in: docIds } },
@@ -507,7 +643,78 @@ class SyncEngine {
 
               // ── Monetary Delta Reconciliation for Local DB Accounts ──
               // When cloud website created new financial transactions, apply the delta to Local Accounts
-              if (!localDoc) {
+              const wasPaidLocally = localDoc && localDoc.status === 'paid';
+              if (colName === 'orders' && doc.status === 'paid' && !wasPaidLocally) {
+                const pb = doc.paymentBreakdown || {};
+                let cashAmt = Number(pb.cash) || 0;
+                let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
+                if (doc.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(doc.total) || 0;
+                if (doc.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(doc.total) || 0;
+
+                if (cashAmt > 0) {
+                  const targetCash = await mongoose.connection.db.collection('accounts').findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+                    || await mongoose.connection.db.collection('accounts').findOne({ type: 'cash', isActive: true });
+                  if (targetCash) {
+                    await mongoose.connection.db.collection('accounts').updateOne(
+                      { _id: targetCash._id },
+                      { $inc: { currentBalance: cashAmt } }
+                    );
+                  }
+                }
+                if (digitalAmt > 0) {
+                  const targetBank = await mongoose.connection.db.collection('accounts').findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+                    || await mongoose.connection.db.collection('accounts').findOne({ type: { $in: ['bank', 'digital'] }, isActive: true });
+                  if (targetBank) {
+                    await mongoose.connection.db.collection('accounts').updateOne(
+                      { _id: targetBank._id },
+                      { $inc: { currentBalance: digitalAmt } }
+                    );
+                  }
+                }
+                if (doc.paidAt || doc.createdAt) {
+                  datesToReconcileDailySales.add(new Date(doc.paidAt || doc.createdAt).toISOString().slice(0, 10));
+                }
+
+                // Inbound GST Liability Reconciliation for Local DB BalanceSheet
+                const orderTax = Number(doc.taxAmount) > 0
+                  ? Number(doc.taxAmount)
+                  : Math.round((Number(doc.settledAmount) || Number(doc.total) || 0) * 0.0477 * 100) / 100;
+                if (orderTax > 0) {
+                  try {
+                    const localBs = await mongoose.connection.db.collection('balancesheets').findOne({});
+                    if (localBs) {
+                      const hasLog = (localBs.gstLog || []).some((l) =>
+                        String(l.salesEntryId) === String(doc._id) ||
+                        (l.note && l.note.includes(`Bill #${doc.billNumber || doc.orderNumber}`))
+                      );
+                      if (!hasLog) {
+                        const newGst = Math.round(((localBs.gstLiability || 0) + orderTax) * 100) / 100;
+                        await mongoose.connection.db.collection('balancesheets').updateOne(
+                          { _id: localBs._id },
+                          {
+                            $inc: { gstLiability: orderTax },
+                            $push: {
+                              gstLog: {
+                                date: doc.paidAt || doc.createdAt || new Date(),
+                                salesEntryId: doc._id,
+                                outletSales: Number(doc.settledAmount) || Number(doc.total) || 0,
+                                gstAdded: orderTax,
+                                note: `Auto: GST on ₹${doc.settledAmount || doc.total} POS Dine-in Order (Bill #${doc.billNumber || doc.orderNumber})`,
+                              },
+                            },
+                            $set: { lastUpdated: new Date(), lastUpdatedBy: 'Order Sync' },
+                          }
+                        );
+                        realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+                          gstLiability: newGst,
+                          gstAdded: orderTax,
+                          updatedAt: new Date(),
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                }
+              } else if (!localDoc) {
                 if (colName === 'payments' && doc.paidFrom && doc.amount && !doc.isPending) {
                   let paidFromId = doc.paidFrom;
                   if (typeof paidFromId === 'string' && /^[0-9a-fA-F]{24}$/.test(paidFromId)) paidFromId = new mongoose.Types.ObjectId(paidFromId);
@@ -515,28 +722,6 @@ class SyncEngine {
                     { _id: paidFromId },
                     { $inc: { currentBalance: -Number(doc.amount) } }
                   );
-                } else if (colName === 'orders' && doc.status === 'paid') {
-                  const pb = doc.paymentBreakdown || {};
-                  let cashAmt = Number(pb.cash) || 0;
-                  let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
-                  if (doc.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(doc.total) || 0;
-                  if (doc.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(doc.total) || 0;
-
-                  if (cashAmt > 0) {
-                    await mongoose.connection.db.collection('accounts').updateOne(
-                      { type: 'cash', isActive: true },
-                      { $inc: { currentBalance: cashAmt } }
-                    );
-                  }
-                  if (digitalAmt > 0) {
-                    await mongoose.connection.db.collection('accounts').updateOne(
-                      { type: { $in: ['bank', 'digital'] }, isActive: true },
-                      { $inc: { currentBalance: digitalAmt } }
-                    );
-                  }
-                  if (doc.paidAt || doc.createdAt) {
-                    datesToReconcileDailySales.add(new Date(doc.paidAt || doc.createdAt).toISOString().slice(0, 10));
-                  }
                 } else if (colName === 'receipts' && doc.receivedIn && doc.amount) {
                   let recId = doc.receivedIn;
                   if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
@@ -572,6 +757,12 @@ class SyncEngine {
                     },
                   });
                 } else {
+                  if (doc.openingBalance !== undefined && localDoc.openingBalance !== undefined) {
+                    const diff = Number(doc.openingBalance) - Number(localDoc.openingBalance || 0);
+                    if (!Number.isNaN(diff) && diff !== 0) {
+                      await localCol.updateOne({ _id: doc._id }, { $inc: { currentBalance: diff } });
+                    }
+                  }
                   const updateFields = { ...doc };
                   delete updateFields.currentBalance;
                   delete updateFields._id;
@@ -655,8 +846,14 @@ class SyncEngine {
           const cBal = Math.round((Number(cAcc.currentBalance) || 0) * 100) / 100;
 
           if (lBal !== cBal) {
-            // Reconcile and align Central with Local counter master
-            await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: lBal } });
+            // Align with whichever account document has the more recent updatedAt timestamp
+            const lTime = new Date(lAcc.updatedAt || 0).getTime();
+            const cTime = new Date(cAcc.updatedAt || 0).getTime();
+            if (cTime > lTime) {
+              await localAccCol.updateOne({ _id: lAcc._id }, { $set: { currentBalance: cBal, updatedAt: new Date(cTime) } });
+            } else {
+              await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: lBal, updatedAt: new Date(lTime) } });
+            }
           } else {
             // Ensure clean 2-decimal rounding on both
             await localAccCol.updateOne({ _id: lAcc._id }, { $set: { currentBalance: lBal } });

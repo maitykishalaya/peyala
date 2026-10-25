@@ -14,6 +14,7 @@ const { ensureOrderBillNumber } = require('../utils/billingSequence');
 const { getNextOrderNumber } = require('../utils/orderSequence');
 const { getNextDailyKotNumber } = require('../utils/kotSequence');
 const { reconcileDailySales } = require('../utils/salesReconciler');
+const realtimeHub = require('../services/realtimeHub');
 
 router.use(auth);
 
@@ -1666,20 +1667,38 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
 
     // 3. Credit the matching real Account documents
     if (orderPaymentBreakdown.cash > 0) {
-      const cashAccount = await Account.findOne({ type: 'cash', isActive: true }).sort('name');
+      const cashAccount = await Account.findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+        || await Account.findOne({ type: 'cash', isActive: true }).sort('name');
       if (cashAccount) {
-        await Account.findByIdAndUpdate(cashAccount._id, {
+        const updatedCash = await Account.findByIdAndUpdate(cashAccount._id, {
           $inc: { currentBalance: orderPaymentBreakdown.cash },
-        });
+        }, { new: true });
+        if (updatedCash) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedCash._id,
+            model: 'Account',
+            currentBalance: updatedCash.currentBalance,
+            updatedAt: updatedCash.updatedAt || new Date(),
+          });
+        }
       }
     }
     const digitalAmount = orderPaymentBreakdown.upi + orderPaymentBreakdown.card + orderPaymentBreakdown.other;
     if (digitalAmount > 0) {
-      const bankAccount = await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
+      const bankAccount = await Account.findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+        || await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
       if (bankAccount) {
-        await Account.findByIdAndUpdate(bankAccount._id, {
+        const updatedBank = await Account.findByIdAndUpdate(bankAccount._id, {
           $inc: { currentBalance: digitalAmount },
-        });
+        }, { new: true });
+        if (updatedBank) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedBank._id,
+            model: 'Account',
+            currentBalance: updatedBank.currentBalance,
+            updatedAt: updatedBank.updatedAt || new Date(),
+          });
+        }
       }
     }
 
@@ -1692,7 +1711,7 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     const tableNum = tableDoc ? tableDoc.tableNumber : '';
 
     if (gstToAdd > 0) {
-      await BalanceSheet.findOneAndUpdate(
+      const updatedBs = await BalanceSheet.findOneAndUpdate(
         {},
         {
           $inc: { gstLiability: gstToAdd },
@@ -1710,8 +1729,16 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
             lastUpdatedBy: req.user.name,
           },
         },
-        { upsert: true }
+        { upsert: true, new: true }
       );
+
+      realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+        id: updatedBs?._id,
+        model: 'BalanceSheet',
+        gstLiability: updatedBs?.gstLiability,
+        gstAdded: gstToAdd,
+        updatedAt: updatedBs?.lastUpdated || new Date(),
+      });
     }
 
     if (order.table) {
@@ -2496,20 +2523,38 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
 
     // 1. Reverse Account Balance (Deduct from Cash or Bank Account)
     if (oldCash > 0) {
-      const cashAccount = await Account.findOne({ type: 'cash', isActive: true }).sort('name');
+      const cashAccount = await Account.findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+        || await Account.findOne({ type: 'cash', isActive: true }).sort('name');
       if (cashAccount) {
-        await Account.findByIdAndUpdate(cashAccount._id, {
+        const updatedCash = await Account.findByIdAndUpdate(cashAccount._id, {
           $inc: { currentBalance: -oldCash },
-        });
+        }, { new: true });
+        if (updatedCash) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedCash._id,
+            model: 'Account',
+            currentBalance: updatedCash.currentBalance,
+            updatedAt: updatedCash.updatedAt || new Date(),
+          });
+        }
       }
     }
     const oldDigital = oldUpi + oldCard + oldOther;
     if (oldDigital > 0) {
-      const bankAccount = await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
+      const bankAccount = await Account.findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+        || await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
       if (bankAccount) {
-        await Account.findByIdAndUpdate(bankAccount._id, {
+        const updatedBank = await Account.findByIdAndUpdate(bankAccount._id, {
           $inc: { currentBalance: -oldDigital },
-        });
+        }, { new: true });
+        if (updatedBank) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedBank._id,
+            model: 'Account',
+            currentBalance: updatedBank.currentBalance,
+            updatedAt: updatedBank.updatedAt || new Date(),
+          });
+        }
       }
     }
 
@@ -2546,6 +2591,13 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
       bs.lastUpdated = new Date();
       bs.lastUpdatedBy = req.user.name;
       await bs.save();
+      realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+        id: bs._id,
+        model: 'BalanceSheet',
+        gstLiability: bs.gstLiability,
+        gstRemoved: gstToRemove,
+        updatedAt: bs.lastUpdated || new Date(),
+      });
     }
 
     // 6. Audit Logging
@@ -2696,9 +2748,18 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
     // 5. Account Balances Reversal & Application (Net Adjustments)
     const netCashDiff = Math.round((newCash - oldCash) * 100) / 100;
     if (netCashDiff !== 0) {
-      const cashAcc = await Account.findOne({ type: 'cash', isActive: true }).sort('name');
+      const cashAcc = await Account.findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+        || await Account.findOne({ type: 'cash', isActive: true }).sort('name');
       if (cashAcc) {
-        await Account.findByIdAndUpdate(cashAcc._id, { $inc: { currentBalance: netCashDiff } });
+        const updatedCash = await Account.findByIdAndUpdate(cashAcc._id, { $inc: { currentBalance: netCashDiff } }, { new: true });
+        if (updatedCash) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedCash._id,
+            model: 'Account',
+            currentBalance: updatedCash.currentBalance,
+            updatedAt: updatedCash.updatedAt || new Date(),
+          });
+        }
       }
     }
 
@@ -2706,9 +2767,18 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
     const newDigital = newUpi + newCard + newOther;
     const netDigitalDiff = Math.round((newDigital - oldDigital) * 100) / 100;
     if (netDigitalDiff !== 0) {
-      const bankAcc = await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
+      const bankAcc = await Account.findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+        || await Account.findOne({ type: { $in: ['bank', 'digital'] }, isActive: true }).sort('name');
       if (bankAcc) {
-        await Account.findByIdAndUpdate(bankAcc._id, { $inc: { currentBalance: netDigitalDiff } });
+        const updatedBank = await Account.findByIdAndUpdate(bankAcc._id, { $inc: { currentBalance: netDigitalDiff } }, { new: true });
+        if (updatedBank) {
+          realtimeHub.broadcast('ACCOUNT_UPDATED', {
+            id: updatedBank._id,
+            model: 'Account',
+            currentBalance: updatedBank.currentBalance,
+            updatedAt: updatedBank.updatedAt || new Date(),
+          });
+        }
       }
     }
 
@@ -2748,6 +2818,13 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       bs.lastUpdated = new Date();
       bs.lastUpdatedBy = req.user.name;
       await bs.save();
+      realtimeHub.broadcast('BALANCESHEET_UPDATED', {
+        id: bs._id,
+        model: 'BalanceSheet',
+        gstLiability: bs.gstLiability,
+        gstDiff,
+        updatedAt: bs.lastUpdated || new Date(),
+      });
     }
 
     // 9. Audit Logging

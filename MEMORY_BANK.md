@@ -1,9 +1,11 @@
 # Peyala v8 — Comprehensive Memory Bank (Version 12.0.0)
 
 > [!IMPORTANT]
-> **MANDATORY MAINTENANCE RULE**:
-> **Whenever you make any significant change to this codebase, you MUST update both `README.md` and `MEMORY_BANK.md`.**
-> This ensures project documentation and developer/AI context never drift from the live implementation.
+> **MANDATORY MAINTENANCE & BUILD RULES**:
+> 1. **Documentation Parity**: Whenever you make any change to this codebase, you MUST update both `README.md` and `MEMORY_BANK.md`. This ensures documentation and developer/AI context never drift from live implementation.
+> 2. **Continuous Single Installer & Android APK Updates**: **After EVERY change, the final single installer (`INSTALL-PEYALA-ALL-IN-ONE.bat` and `Peyala-POS-AllInOne-Installer.exe`) MUST be updated accordingly and consistently, and the Android build (`Peyala-POS.apk`) MUST be updated alongside it.**
+> 3. **Automated Pipeline**: Run `build-all-in-one.bat` (or `scripts/build-all-in-one.ps1`). It automatically recompiles `Peyala-POS.apk` via `node scripts/build-apk.js`, syncs the APK to `frontend/public/Peyala-POS.apk` and project root, bundles everything into clean single-file installers, and mirrors all output artifacts to `C:\Desktop\Peyala_v8`.
+>
 
 ---
 
@@ -34,6 +36,8 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Real-Time Hub (`backend/src/services/realtimeHub.js`)**: WebSocket server on `/ws/realtime` (port 4000) providing sub-10ms real-time event distribution between floor laptops and waiter phones with a 200-event circular catch-up buffer.
 - **Sync Outbox Engine (`backend/src/services/syncEngine.js`)**: Universal Mongoose plugin (`syncPlugin.js`) queues local mutations into `SyncOutbox`. Automatically pushes pending deltas every 15 minutes or via manual "Sync Now" button. Features bidirectional **Monetary Delta Reconciliation** for accounts (`payments`, `orders`, `receipts`, `transfers`, `customerduepayments`) so offline stations and cloud website remain 100% mathematically consistent without snapshot clobbering, auto-runs `reconcileDailySales` for inbound order dates, and enforces final 2-decimal balance alignment.
 - **Native Windows Desktop Launcher & Process Isolation (`PeyalaLauncher.cs` / `PeyalaPOS.exe`, `start-local-kiosk.bat`, `start-peyala-app.bat`)**: C# WinForms system tray runner with named Mutex (`Global\PeyalaPOS_SingleInstance_Mutex_v8`) and active port checks (`3000` & `4000`) strictly preventing duplicate launcher instances, eliminating phantom taskbar tray icons, port-killing thrashing loops, and unwanted RAM overhead on business laptops.
+- **Single-File All-In-One Laptop Installer & Packager (`INSTALL-PEYALA-ALL-IN-ONE.bat`, `Peyala-POS-AllInOne-Installer.exe`, `build-all-in-one.bat`, `scripts/build-all-in-one.ps1`)**: Complete self-contained single-file installer system eliminating the need to copy thousands of loose repository files to USB thumb drives. A single 374MB `.bat` or `.exe` embeds portable Node.js v20, embedded MongoDB binary & database, production Next.js build, Electron runtime, and native C# launcher. Crucially, the build pipeline automatically compiles and signs the latest Android release (`Peyala-POS.apk`), embedding it at project root and in `frontend/public/Peyala-POS.apk` so waiter tablets can download it directly from `http://<server-ip>:3000/Peyala-POS.apk`. Output artifacts are automatically mirrored to `C:\Desktop\Peyala_v8`. On target laptops, running that single file unpacks in ~20 seconds to `C:\Peyala`, clears stale database lockfiles, creates Windows Desktop and Start Menu shortcuts with the official logo, and launches the POS.
+
 - **Versioned Restore & Rollback System (`backend/src/services/restoreSystem.js`)**: Complete snapshot and safe 8-step rollback engine (`/api/maintenance/restore-points`, `/api/maintenance/rollback`) with pre-rollback safety backup, data integrity validation, and instant recovery.
 - **Authentication & RBAC**: JWT Bearer token via `auth` middleware, with role enforcement via `adminOnly` (for structural table layout changes, user administration), `managerOrAdmin` (for table metadata and menu add-on configurations), `staffOrAdmin` (granting staff, manager, and admin users operational access for taking orders, KOT rounds, billing, printing, discounts, and payment settlements), and `viewer` (read-only demo role strictly blocking all mutations system-wide with `403 Forbidden`) in `backend/src/middleware/auth.js`.
 - **Timezone Standardization**: All daily consolidation and reporting logic operates strictly under Indian Standard Time (`Asia/Kolkata`, UTC+05:30) via `backend/src/utils/date.js` (`getIstDayRange()`).
@@ -932,6 +936,25 @@ Whenever changes are made, run this validation suite before concluding:
   - **Enterprise Load & Concurrency Resilience**: Passed all 8 load scenarios (2800+ req/s raw throughput, 15+ concurrent bill allocations with 0 race condition duplicates, 100% table double-booking prevention, libuv thread starvation protection).
   - **Analytics Cache Stampede Protection**: Implemented in-flight request coalescing on `/api/analytics/overview`, reducing p95 latency from 22.6s to 1.6s under heavy concurrent burst traffic.
 
+- **Sales Settlement Realtime Account Crediting & Monetary Balance Alignment**:
+  - **Identified Root Causes**:
+    1. *Stale Mongoose Hook Payload*: `Account.findByIdAndUpdate(account._id, { $inc: { currentBalance: amount } })` in `backend/src/routes/orders.js` was invoked without `{ new: true }`. Consequently, Mongoose's `post('findOneAndUpdate')` hook received the pre-update document with stale `currentBalance`, pushing obsolete mutations into the SyncOutbox.
+    2. *Bidirectional Sync Overwrite*: In `backend/src/services/syncEngine.js`, `reconcileAccountsBalanceConsistency` previously aligned account balances by unilaterally overwriting Central MongoDB with Local's balance (`updateOne({ currentBalance: lBal })`). When local offline stations lagged behind or missed real-time updates, local stale balances inadvertently wiped out sales credits recorded on Central.
+    3. *Order Status Inbound Delta Guard*: `syncEngine.js` checked `if (!localDoc)` for inbound orders. If an order had been created locally while `open` or `billed`, subsequent status transitions to `paid` from cloud/mobile clients skipped monetary account crediting on the local station.
+    4. *Sales Register Outlet Sales Bypass*: `backend/src/routes/sales.js` helper `applyNonOutletCredits()` only applied credits to non-outlet platforms (Zomato/Fatafat/Other Sales), neglecting outlet sales breakdown when manual entries were created or adjusted.
+    5. *Account Targeting Ambiguity*: Account queries used generic `{ type: 'cash', isActive: true }`, risking targeting personal cash accounts (e.g. Kishalaya Maity) instead of the primary "Cash Counter" account.
+    6. *Frontend Caching Stagnation*: `frontend/src/app/accounts/page.tsx` was caching account lists in `localStorage` for 5 minutes (`CACHE_TTL_MS`), causing the accounts view to appear stale across floor devices.
+  - **Resolution & Architecture Safeguards**:
+    - **Atomic `{ new: true }` Updates & Realtime Event Dispatch**: Updated `orders.js` (`POST /:id/pay`, `DELETE /:id/settled`, `PUT /:id/settled`) and `sales.js` to execute `Account.findByIdAndUpdate` with `{ new: true }`, ensuring Mongoose hooks capture fresh post-increment balances, and explicitly broadcasting `realtimeHub.broadcast('ACCOUNT_UPDATED', ...)` with sub-10ms distribution.
+    - **Account Name Resolution Guard**: All settlement account lookups now explicitly prioritize primary business accounts: `{ name: /cash counter/i, type: 'cash', isActive: true }` for cash, and `{ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true }` for digital/UPI/bank settlements.
+    - **Safe Inbound Sync Status Transitions**: Refactored `syncEngine.js` inbound processing to track `wasPaidLocally = localDoc && localDoc.status === 'paid'`. When an order transitions to `paid` from cloud/mobile, monetary deltas apply smoothly to local accounts.
+    - **Last-Write-Wins (LWW) Consistency**: Replaced unilateral local overwrites in `syncEngine.js` with LWW timestamp comparison (`updatedAt`), ensuring newer cloud updates preserve their balance additions.
+    - **Frontend Stale-While-Revalidate & Auto-Polling**: Enhanced `frontend/src/app/accounts/page.tsx` with listeners for `ACCOUNT_UPDATED`, `ORDER_UPDATED`, `SALES_UPDATED`, `peyala_sales_updated`, window focus revalidation, and a 20-second active background poll.
+    - **Live Ledger Reconciliation**: Restored live account balances on Atlas and Local database to exact target formulas:
+      - **Cash Counter**: `₹1,985.25` (base after expenses) + `₹1,628.00` (today's cash sales) = **`₹3,613.25`**.
+      - **Current Account**: `₹251,581.11` (base) + `₹5,044.00` (today's total UPI sales) = **`₹256,625.11`**.
+
 ---
 *Last Updated: October 2026 · Peyala v12.0 Engineering*
+
 

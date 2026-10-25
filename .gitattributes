@@ -1,0 +1,1 @@
+INSTALL-PEYALA-ALL-IN-ONE.bat filter=lfs diff=lfs merge=lfs -text

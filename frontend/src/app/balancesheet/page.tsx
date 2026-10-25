@@ -31,6 +31,7 @@ import {
   ChevronDown, ChevronUp, History, IndianRupee, Users, ArrowRight, BookOpen,
   Calendar
 } from 'lucide-react';
+import realtime from '@/lib/realtime';
 
 const CACHE_KEY = 'peyala_balancesheet_cache_v1';
 
@@ -126,9 +127,44 @@ export default function BalanceSheetPage() {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setLoading(false);
-      return;
     }
     load();
+  }, []);
+
+  // Listen for real-time BalanceSheet, order updates, and cloud sync events
+  useEffect(() => {
+    const handleRefresh = () => {
+      load();
+    };
+
+    const unsub = realtime.on('*', (event) => {
+      const type = (event.type || (event as any).event || '').toUpperCase().replace(':', '_');
+      if (
+        [
+          'BALANCESHEET_UPDATED',
+          'ORDER_UPDATED',
+          'ORDERS_UPDATED',
+          'SALES_UPDATED',
+          'ACCOUNT_UPDATED',
+          'DATA_SYNCED_FROM_CLOUD',
+          'SYNC_STATUS_CHANGED',
+        ].includes(type)
+      ) {
+        handleRefresh();
+      }
+    });
+
+    window.addEventListener('peyala_sales_updated', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+
+    const interval = setInterval(handleRefresh, 20000);
+
+    return () => {
+      unsub();
+      window.removeEventListener('peyala_sales_updated', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+      clearInterval(interval);
+    };
   }, []);
 
   // ── Save balance sheet config changes ───────────────────────────

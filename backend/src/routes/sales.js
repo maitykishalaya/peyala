@@ -26,6 +26,7 @@ const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { getIstDayRange } = require('../utils/date');
 const { reconcileDailySales } = require('../utils/salesReconciler');
+const realtimeHub = require('../services/realtimeHub');
 
 router.use(auth);
 
@@ -42,16 +43,32 @@ async function applyNonOutletCredits(sale, multiplier) {
 
   for (const credit of platformCredits) {
     if (credit.amount !== 0 && credit.accountId) {
-      await Account.findByIdAndUpdate(credit.accountId, {
+      const updated = await Account.findByIdAndUpdate(credit.accountId, {
         $inc: { currentBalance: credit.amount * multiplier },
-      });
+      }, { new: true });
+      if (updated) {
+        realtimeHub.broadcast('ACCOUNT_UPDATED', {
+          id: updated._id,
+          model: 'Account',
+          currentBalance: updated.currentBalance,
+          updatedAt: updated.updatedAt || new Date(),
+        });
+      }
     }
   }
 
   if ((sale.otherSales || 0) !== 0 && sale.otherSalesReceivedIn) {
-    await Account.findByIdAndUpdate(sale.otherSalesReceivedIn, {
+    const updated = await Account.findByIdAndUpdate(sale.otherSalesReceivedIn, {
       $inc: { currentBalance: (sale.otherSales || 0) * multiplier },
-    });
+    }, { new: true });
+    if (updated) {
+      realtimeHub.broadcast('ACCOUNT_UPDATED', {
+        id: updated._id,
+        model: 'Account',
+        currentBalance: updated.currentBalance,
+        updatedAt: updated.updatedAt || new Date(),
+      });
+    }
   }
 }
 

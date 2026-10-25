@@ -65,7 +65,8 @@ const TYPE_DEFAULTS: Record<string, { allowed: string[]; default: string }> = {
 };
 
 export default function AccountsPage() {
-  const { canWrite } = useAuth();
+  const { canWrite, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [accounts, setAccounts] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,6 +137,10 @@ export default function AccountsPage() {
 
   // Listen for real-time account/transfer updates and background sync events
   useEffect(() => {
+    const handleRefresh = () => {
+      load();
+    };
+
     const unsub = realtime.on('*', (event) => {
       const type = (event.type || (event as any).event || '').toUpperCase().replace(':', '_');
       if (
@@ -143,15 +148,29 @@ export default function AccountsPage() {
           'ACCOUNT_UPDATED',
           'TRANSFER_UPDATED',
           'PAYMENT_UPDATED',
+          'ORDER_UPDATED',
+          'ORDERS_UPDATED',
+          'SALES_UPDATED',
           'DATA_SYNCED_FROM_CLOUD',
           'SYNC_STATUS_CHANGED',
         ].includes(type)
       ) {
-        load();
+        handleRefresh();
       }
     });
 
-    return () => unsub();
+    window.addEventListener('peyala_sales_updated', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+
+    // Refresh every 20 seconds so counter balances stay up-to-date across all devices
+    const interval = setInterval(handleRefresh, 20000);
+
+    return () => {
+      unsub();
+      window.removeEventListener('peyala_sales_updated', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+      clearInterval(interval);
+    };
   }, []);
 
   // ── When account type changes, auto-suggest payment modes ───────
@@ -236,14 +255,23 @@ export default function AccountsPage() {
     setSaving(true);
     try {
       if (modal === 'create') {
-        await accountsApi.create(form);
+        const { currentBalance, ...payload } = form;
+        if (!isAdmin) {
+          payload.openingBalance = 0;
+        }
+        await accountsApi.create(payload);
         toast.success(`Account "${form.name}" created successfully`);
       } else {
-        await accountsApi.update(selected._id, form);
+        const { currentBalance, ...payload } = form;
+        if (!isAdmin && selected) {
+          payload.openingBalance = selected.openingBalance || 0;
+        }
+        await accountsApi.update(selected._id, payload);
         toast.success(`Account "${form.name}" updated successfully`);
       }
+      localStorage.removeItem(ACCOUNTS_CACHE_KEY);
       setModal(null);
-      load(); // refresh list
+      load(true); // refresh fresh balances from server
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to save account');
     } finally {
@@ -377,6 +405,9 @@ export default function AccountsPage() {
                   <p className={`text-2xl font-bold ${acc.currentBalance >= 0 ? 'text-gray-900 dark:text-white' : 'text-red-500'}`}>
                     {formatCurrency(acc.currentBalance)}
                   </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Starting: <span className="font-medium text-gray-600 dark:text-gray-300">{formatCurrency(acc.openingBalance || 0)}</span>
+                  </p>
                   {acc.bankName && (
                     <p className="text-xs text-gray-400 mt-1">
                       {acc.bankName}{acc.accountNumber ? ` · ${acc.accountNumber}` : ''}
@@ -502,8 +533,46 @@ export default function AccountsPage() {
             </div>
 
             <div>
-              <label className="label">Opening Balance (₹)</label>
-              <input type="number" className="input" value={form.openingBalance} onChange={e => setForm({...form, openingBalance: +e.target.value})} />
+              <div className="flex items-center justify-between mb-1">
+                <label className="label mb-0">Starting Balance (₹)</label>
+                {!isAdmin && (
+                  <span className="text-xs font-normal text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                    Admin only
+                  </span>
+                )}
+              </div>
+              <input
+                type="number"
+                className="input disabled:bg-gray-100 dark:disabled:bg-gray-800/60 disabled:cursor-not-allowed disabled:text-gray-500"
+                value={form.openingBalance}
+                disabled={!isAdmin}
+                onChange={e => setForm({...form, openingBalance: +e.target.value})}
+                placeholder="0"
+              />
+              {!isAdmin ? (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  Only administrators have permission to modify the starting balance.
+                </p>
+              ) : modal === 'edit' && selected ? (
+                <div className="text-xs text-gray-500 mt-1 space-y-0.5">
+                  <p>
+                    Current balance: <span className="font-semibold text-gray-700 dark:text-gray-200">{formatCurrency(selected.currentBalance || 0)}</span>
+                    {Number(form.openingBalance) !== Number(selected.openingBalance || 0) && (
+                      <span className="ml-1.5 font-semibold text-brand-600 dark:text-brand-400">
+                        → will become {formatCurrency((Number(selected.currentBalance) || 0) + (Number(form.openingBalance) - Number(selected.openingBalance || 0)))}
+                        {' '}({Number(form.openingBalance) - Number(selected.openingBalance || 0) > 0 ? '+' : ''}{formatCurrency(Number(form.openingBalance) - Number(selected.openingBalance || 0))})
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-[11px] text-gray-400">
+                    Any increase or decrease in starting balance adjusts current balance by the same amount.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 mt-1">
+                  Initial starting balance when the account is opened.
+                </p>
+              )}
             </div>
 
             {/* Bank-specific fields — only shown for bank type */}

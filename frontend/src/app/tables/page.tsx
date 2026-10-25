@@ -395,28 +395,28 @@ export default function TablesPage() {
   const renderCartCustomerBox = (isMobile: boolean = false) => {
     const hasCustomerData = Boolean(cartCustomerPhone || cartCustomerName || cartCustomerAddress);
     return (
-      <div className="bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 rounded-xl p-2 my-1.5 shrink-0 transition-all">
+      <div className="bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200/80 dark:border-blue-900/60 rounded-lg p-1.5 px-2 my-0.5 shrink-0 transition-all">
         <div
           onClick={() => setIsCustomerDetailsExpanded((prev) => !prev)}
           className="flex items-center justify-between cursor-pointer select-none"
         >
-          <div className="flex items-center gap-1.5 text-xs font-black uppercase text-blue-900 dark:text-blue-200 tracking-wide">
-            <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-blue-900 dark:text-blue-200 tracking-wide">
+            <User className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
             <span>Customer Details</span>
             {hasCustomerData ? (
-              <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700 max-w-[140px] truncate">
+              <span className="normal-case text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700 max-w-[120px] truncate">
                 {cartCustomerName || cartCustomerPhone}
               </span>
             ) : (
-              <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+              <span className="text-[9px] text-gray-400 font-normal normal-case">(Optional)</span>
             )}
           </div>
-          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             {hasCustomerData && (
               <button
                 type="button"
                 onClick={handleClearCartCustomer}
-                className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+                className="text-[9px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.2 rounded hover:bg-red-50 dark:hover:bg-red-950"
               >
                 Clear
               </button>
@@ -428,9 +428,9 @@ export default function TablesPage() {
               title={isCustomerDetailsExpanded ? 'Collapse' : 'Expand'}
             >
               {isCustomerDetailsExpanded ? (
-                <ChevronUp className="w-3.5 h-3.5" />
+                <ChevronUp className="w-3 h-3" />
               ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
+                <ChevronDown className="w-3 h-3" />
               )}
             </button>
           </div>
@@ -438,50 +438,50 @@ export default function TablesPage() {
 
         {/* Collapsible Content */}
         {isCustomerDetailsExpanded && (
-          <div className="space-y-2 mt-2 pt-2 border-t border-blue-200/50 dark:border-blue-900/40 animate-in fade-in-50 duration-150">
+          <div className="space-y-1 mt-1 pt-1 border-t border-blue-200/50 dark:border-blue-900/40 animate-in fade-in-50 duration-150">
             {/* Outstanding Due Alert if regular customer */}
             {cartCustomerDue !== null && cartCustomerDue > 0 && (
-              <div className="flex items-center justify-between px-2 py-1 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-lg text-xs font-bold text-amber-900 dark:text-amber-200">
+              <div className="flex items-center justify-between px-2 py-0.5 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded text-[10px] font-bold text-amber-900 dark:text-amber-200">
                 <span>⚠️ Amount Owed:</span>
                 <span className="font-extrabold text-amber-700 dark:text-amber-300">{formatCurrency(cartCustomerDue)}</span>
               </div>
             )}
 
             {/* Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 relative">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 relative">
               {/* Phone with Auto-lookup */}
               <div className="relative">
                 <div className="relative">
-                  <Phone className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <Phone className="w-2.5 h-2.5 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
                     type="tel"
                     value={cartCustomerPhone}
                     onChange={(e) => handleCartCustomerQueryChange('phone', e.target.value)}
                     placeholder="Phone number..."
-                    className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full text-[11px] font-medium pl-6 pr-2 py-1 h-7 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
 
                 {/* Autocomplete Dropdown */}
                 {showCartCustomerSuggestions && cartCustomerSuggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
                     {cartCustomerSuggestions.map((cust) => (
                       <button
                         key={cust._id}
                         type="button"
                         onClick={() => handleSelectCartCustomer(cust)}
-                        className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-between text-xs cursor-pointer"
+                        className="w-full text-left px-2 py-1 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-between text-xs cursor-pointer"
                       >
                         <div>
                           <div className="font-bold text-gray-900 dark:text-white">{cust.name}</div>
-                          <div className="text-[11px] text-gray-500 dark:text-gray-400">{cust.phone}</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400">{cust.phone}</div>
                         </div>
                         {cust.totalDue > 0 ? (
-                          <span className="text-[10px] font-extrabold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                          <span className="text-[9px] font-extrabold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1 py-0.2 rounded border border-amber-200 dark:border-amber-800">
                             Due: {formatCurrency(cust.totalDue)}
                           </span>
                         ) : (
-                          <span className="text-[10px] text-emerald-600 font-bold">Clear</span>
+                          <span className="text-[9px] text-emerald-600 font-bold">Clear</span>
                         )}
                       </button>
                     ))}
@@ -491,26 +491,26 @@ export default function TablesPage() {
 
               {/* Customer Name */}
               <div className="relative">
-                <User className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <User className="w-2.5 h-2.5 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 <input
                   type="text"
                   value={cartCustomerName}
                   onChange={(e) => handleCartCustomerQueryChange('name', e.target.value)}
                   placeholder="Customer Name..."
-                  className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full text-[11px] font-medium pl-6 pr-2 py-1 h-7 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
 
             {/* Address */}
             <div className="relative">
-              <MapPin className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <MapPin className="w-2.5 h-2.5 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
                 type="text"
                 value={cartCustomerAddress}
                 onChange={(e) => handleCartCustomerQueryChange('address', e.target.value)}
                 placeholder="Address (Optional)..."
-                className="w-full text-xs font-semibold pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full text-[11px] font-medium pl-6 pr-2 py-1 h-7 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -2839,10 +2839,10 @@ export default function TablesPage() {
         {/* VIEW B: 3-COLUMN POS ORDER TAKING SCREEN (Matches Images 1 & 3) */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         {activeView === 'pos_order' && (
-          <div className="space-y-3">
+          <div className="space-y-2 sm:space-y-2.5">
             {/* Top Navigation Bar */}
-            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
-              <div className="flex items-center gap-3">
+            <div className="bg-white dark:bg-gray-900 p-2 sm:p-2.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   onClick={() => {
                     setMenuSearch('');
@@ -2963,7 +2963,7 @@ export default function TablesPage() {
             </div>
 
             {/* 3-Column Layout: Left Category Rail (Col 1) | Middle Menu Grid (Col 2) | Right Order Cart (Col 3) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[calc(100vh-210px)] lg:h-[calc(100vh-210px)] lg:max-h-[calc(100vh-210px)]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 min-h-[calc(100vh-170px)] lg:h-[calc(100vh-170px)] lg:max-h-[calc(100vh-170px)]">
               {/* ── COLUMN 1: Category Rail (2 cols on lg) ── */}
               <div className={cn(
                 "lg:col-span-2 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs flex flex-row lg:flex-col overflow-x-auto lg:overflow-y-auto max-h-[52px] lg:max-h-full lg:h-full divide-y divide-gray-100 dark:divide-gray-800 divide-x lg:divide-x-0 shrink-0 touch-pan-x scrollbar-thin",
@@ -3119,11 +3119,11 @@ export default function TablesPage() {
 
               {/* ── COLUMN 3: Live Order / Cart Panel (4 cols on lg) (Matches Image 1 & 3) ── */}
               <div className={cn(
-                "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-3.5 flex flex-col justify-start gap-3 lg:h-full min-h-0",
+                "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs p-2 sm:p-2.5 flex flex-col justify-start gap-1.5 lg:h-full min-h-0",
                 mobileActiveTab === 'cart' ? 'flex col-span-1 h-[calc(100vh-190px)]' : 'hidden lg:flex lg:col-span-4'
               )}>
                 {/* Service Type Tabs: Dine In | Delivery | Pick Up */}
-                <div className="grid grid-cols-3 gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg shrink-0">
+                <div className="grid grid-cols-3 gap-1 bg-gray-100 dark:bg-gray-800 p-0.5 rounded-lg shrink-0">
                   {(
                     [
                       { id: 'dine_in', label: 'Dine In', icon: Utensils },
@@ -3136,24 +3136,24 @@ export default function TablesPage() {
                       type="button"
                       onClick={() => setServiceType(id)}
                       className={cn(
-                        'py-1.5 text-xs sm:text-sm font-bold rounded-md flex items-center justify-center gap-1.5 transition-colors',
+                        'py-1 text-xs font-bold rounded-md flex items-center justify-center gap-1 transition-colors',
                         serviceType === id
                           ? 'bg-red-600 text-white shadow-xs'
                           : 'text-gray-600 dark:text-gray-300 hover:text-gray-900'
                       )}
                     >
-                      <Icon className="w-3.5 h-3.5" />
+                      <Icon className="w-3 h-3" />
                       <span>{label}</span>
                     </button>
                   ))}
                 </div>
 
                 {/* Table Info & Guest Controls */}
-                <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 text-sm shrink-0">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between p-1.5 px-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 text-xs shrink-0">
+                  <div className="flex items-center gap-1.5">
                     <span className="font-bold text-gray-700 dark:text-gray-300">Table:</span>
                     {selectedTable ? (
-                      <span className="font-black text-sm px-2.5 py-1 rounded bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200 border border-orange-300 dark:border-orange-800">
+                      <span className="font-black text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200 border border-orange-300 dark:border-orange-800">
                         {selectedTable.tableNumber}
                       </span>
                     ) : (
@@ -3163,7 +3163,7 @@ export default function TablesPage() {
                           const t = tables.find((tb) => tb._id === e.target.value);
                           if (t) setSelectedTable(t);
                         }}
-                        className="text-sm font-bold bg-white dark:bg-gray-900 border rounded px-2 py-1"
+                        className="text-xs font-bold bg-white dark:bg-gray-900 border rounded px-1.5 py-0.5"
                       >
                         <option value="">Select Table...</option>
                         {tables.map((t) => (
@@ -3175,36 +3175,36 @@ export default function TablesPage() {
                     )}
 
                     {isRound2Mode && (
-                      <span className="text-xs font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2 py-0.5 rounded border border-amber-300">
+                      <span className="text-[10px] font-black bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-1.5 py-0.2 rounded border border-amber-300">
                         Round {activeOrder?.kotRounds?.length ? activeOrder.kotRounds.length + 1 : 2}
                       </span>
                     )}
                   </div>
 
                   {/* Guest count */}
-                  <div className="flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-gray-500" />
+                  <div className="flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-gray-500" />
                     <button
                       type="button"
                       onClick={() => setGuestCount((g) => Math.max(1, g - 1))}
-                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5"
+                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5 cursor-pointer"
                     >
-                      <MinusCircle className="w-4 h-4" />
+                      <MinusCircle className="w-3.5 h-3.5" />
                     </button>
-                    <span className="font-black text-sm min-w-[1.25rem] text-center">{guestCount}</span>
+                    <span className="font-black text-xs min-w-[1rem] text-center">{guestCount}</span>
                     <button
                       type="button"
                       onClick={() => setGuestCount((g) => g + 1)}
-                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5"
+                      className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 p-0.5 cursor-pointer"
                     >
-                      <PlusCircle className="w-4 h-4" />
+                      <PlusCircle className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
                 {/* Items Table Header: ITEMS | CHECK ITEMS | QTY. | PRICE */}
                 <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden flex-1 min-h-0 flex flex-col justify-start">
-                  <div className="bg-gray-50 dark:bg-gray-800/80 px-3 py-2 border-b border-gray-200 dark:border-gray-800 grid grid-cols-12 text-xs font-extrabold text-gray-700 dark:text-gray-200 uppercase tracking-wider shrink-0">
+                  <div className="bg-gray-50 dark:bg-gray-800/80 px-2.5 py-1.5 border-b border-gray-200 dark:border-gray-800 grid grid-cols-12 text-[10px] font-extrabold text-gray-700 dark:text-gray-200 uppercase tracking-wider shrink-0">
                     <span className="col-span-6">ITEMS</span>
                     <span className="col-span-2 text-center">CHECK</span>
                     <span className="col-span-2 text-center">QTY.</span>
@@ -3212,22 +3212,22 @@ export default function TablesPage() {
                   </div>
 
                   {/* Cart Items List with indented addons (Matches Image 1 & 3) */}
-                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-[220px] max-h-[55vh] pr-0.5 flex flex-col justify-start items-stretch touch-pan-y">
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800 overflow-y-auto flex-1 min-h-[90px] max-h-[55vh] pr-0.5 flex flex-col justify-start items-stretch touch-pan-y scrollbar-thin">
                     {/* If occupied in Round 2, show previous rounds collapsible */}
                     {isRound2Mode && activeOrder && (
-                      <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 dark:border-amber-900/40 shrink-0">
+                      <div className="p-2 bg-amber-50/50 dark:bg-amber-950/20 text-xs border-b border-amber-200/60 dark:border-amber-900/40 shrink-0">
                         <div className="flex items-center justify-between font-bold text-amber-900 dark:text-amber-200">
                           <span>Previous Rounds: {activeOrder.items?.filter((i) => i.status !== 'cancelled').length} item(s)</span>
                           <span>{formatCurrency(activeOrder.total)}</span>
                         </div>
-                        <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                        <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
                           Add new items below for Round {activeOrder.kotRounds?.length ? activeOrder.kotRounds.length + 1 : 2}
                         </p>
                       </div>
                     )}
 
                     {Object.keys(cart).length === 0 ? (
-                      <div className="py-10 text-center text-gray-400 text-sm font-medium">
+                      <div className="py-6 text-center text-gray-400 text-xs font-medium">
                         No items selected yet. Tap menu items on the left to add.
                       </div>
                     ) : (
@@ -3237,69 +3237,69 @@ export default function TablesPage() {
                         const lineTotal = d.unitPrice * d.quantity;
 
                         return (
-                          <div key={cartKey} className="p-2.5 text-sm space-y-1.5 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
-                            <div className="grid grid-cols-12 items-start gap-1.5">
+                          <div key={cartKey} className="p-1.5 sm:p-2 text-xs space-y-1 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors shrink-0">
+                            <div className="grid grid-cols-12 items-center gap-1">
                               {/* Col: Delete + Name + Indented Addons */}
-                              <div className="col-span-6 flex items-start gap-1.5">
+                              <div className="col-span-6 flex items-start gap-1">
                                 <button
                                   type="button"
                                   onClick={() => removeCartEntry(cartKey)}
-                                  className="text-red-500 hover:text-red-700 mt-0.5 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                                  className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer shrink-0 mt-0.5"
                                   title="Delete Item"
                                 >
-                                  <X className="w-4 h-4 stroke-[2.5]" />
+                                  <X className="w-3.5 h-3.5 stroke-[2.5]" />
                                 </button>
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white leading-tight">
+                                  <p className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white leading-tight truncate" title={item.name}>
                                     {item.name}
                                   </p>
                                   {d.variant?.name && (
-                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
+                                    <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold leading-tight">
                                       Portion: {d.variant.name}
                                     </p>
                                   )}
                                   {d.selectedAddons && d.selectedAddons.length > 0 && (
-                                    <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-2 mt-0.5">
-                                      {d.selectedAddons.map((a) => `${a.name}`).join(', ')}
+                                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium pl-1 leading-tight truncate">
+                                      +{d.selectedAddons.map((a) => `${a.name}`).join(', ')}
                                     </p>
                                   )}
                                 </div>
                               </div>
 
                               {/* Col: Check Items */}
-                              <div className="col-span-2 flex justify-center items-center pt-1">
-                                <CheckSquare className="w-4 h-4 text-emerald-600" />
+                              <div className="col-span-2 flex justify-center items-center">
+                                <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
                               </div>
 
                               {/* Col: Qty Stepper [-] 1 [+] */}
-                              <div className="col-span-2 flex items-center justify-center gap-1 pt-0.5">
+                              <div className="col-span-2 flex items-center justify-center gap-0.5">
                                 <button
                                   type="button"
                                   onClick={() => updateCartEntryQty(cartKey, -1)}
-                                  className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-600 transition-colors cursor-pointer"
+                                  className="w-5.5 h-5.5 sm:w-6 sm:h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-600 transition-colors cursor-pointer"
                                 >
-                                  <MinusCircle className="w-4 h-4" />
+                                  <MinusCircle className="w-3.5 h-3.5" />
                                 </button>
-                                <span className="font-extrabold text-base sm:text-lg min-w-[1.5rem] text-center">{d.quantity}</span>
+                                <span className="font-extrabold text-xs sm:text-sm min-w-[1.2rem] text-center">{d.quantity}</span>
                                 <button
                                   type="button"
                                   onClick={() => updateCartEntryQty(cartKey, 1)}
-                                  className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-600 transition-colors cursor-pointer"
+                                  className="w-5.5 h-5.5 sm:w-6 sm:h-6 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-600 transition-colors cursor-pointer"
                                 >
-                                  <PlusCircle className="w-4 h-4" />
+                                  <PlusCircle className="w-3.5 h-3.5" />
                                 </button>
                               </div>
 
                               {/* Col: Price */}
-                              <div className="col-span-2 text-right font-extrabold text-base sm:text-lg text-gray-900 dark:text-white pt-1">
+                              <div className="col-span-2 text-right font-extrabold text-xs sm:text-sm text-gray-900 dark:text-white">
                                 {formatCurrency(lineTotal)}
                               </div>
                             </div>
 
-                            {/* Item-Wise Instruction Row (Requirement 3) */}
-                            <div className="pl-6 pt-0.5">
+                            {/* Item-Wise Instruction Row */}
+                            <div className="pl-5 pt-0">
                               {editingNoteCartKey === cartKey ? (
-                                <div className="flex items-center gap-1.5 mt-1 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                                <div className="flex items-center gap-1 mt-0.5 bg-amber-50 dark:bg-amber-950/40 p-1 rounded border border-amber-200 dark:border-amber-800">
                                   <input
                                     type="text"
                                     autoFocus
@@ -3314,7 +3314,7 @@ export default function TablesPage() {
                                       }
                                     }}
                                     placeholder="Special instruction for this item (optional)..."
-                                    className="flex-1 text-xs px-2 py-1 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded text-gray-900 dark:text-white focus:outline-none"
+                                    className="flex-1 text-[11px] px-1.5 py-0.5 bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 rounded text-gray-900 dark:text-white focus:outline-none"
                                   />
                                   <button
                                     type="button"
@@ -3322,39 +3322,39 @@ export default function TablesPage() {
                                       updateCartEntryNotes(cartKey, inlineNoteText.trim());
                                       setEditingNoteCartKey(null);
                                     }}
-                                    className="px-2 py-1 text-xs font-bold bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
                                   >
                                     Save
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => setEditingNoteCartKey(null)}
-                                    className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer"
+                                    className="px-1 py-0.5 text-[10px] text-gray-500 hover:text-gray-700 cursor-pointer"
                                   >
                                     Cancel
                                   </button>
                                 </div>
                               ) : d.notes ? (
-                                <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/80 dark:border-amber-900/60 w-fit">
-                                  <ChefHat className="w-3 h-3 text-amber-600 shrink-0" />
-                                  <span className="font-medium">Note: {d.notes}</span>
+                                <div className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 px-1.5 py-0.2 rounded border border-amber-200/80 dark:border-amber-900/60 w-fit">
+                                  <ChefHat className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                  <span className="font-medium truncate max-w-[200px]">Note: {d.notes}</span>
                                   <button
                                     type="button"
                                     onClick={() => {
                                       setInlineNoteText(d.notes);
                                       setEditingNoteCartKey(cartKey);
                                     }}
-                                    className="text-[10px] underline ml-1 text-amber-800 dark:text-amber-200 hover:text-amber-950 font-bold cursor-pointer"
+                                    className="text-[9px] underline ml-1 text-amber-800 dark:text-amber-200 hover:text-amber-950 font-bold cursor-pointer"
                                   >
                                     Edit
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => updateCartEntryNotes(cartKey, '')}
-                                    className="text-[10px] text-red-500 hover:text-red-700 ml-0.5 cursor-pointer"
+                                    className="text-[9px] text-red-500 hover:text-red-700 ml-0.5 cursor-pointer"
                                     title="Remove note"
                                   >
-                                    <X className="w-3 h-3" />
+                                    <X className="w-2.5 h-2.5" />
                                   </button>
                                 </div>
                               ) : (
@@ -3364,9 +3364,9 @@ export default function TablesPage() {
                                     setInlineNoteText('');
                                     setEditingNoteCartKey(cartKey);
                                   }}
-                                  className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 flex items-center gap-1 hover:underline cursor-pointer"
+                                  className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 flex items-center gap-1 hover:underline cursor-pointer"
                                 >
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-2.5 h-2.5" />
                                   Add note (optional)
                                 </button>
                               )}
@@ -3379,28 +3379,28 @@ export default function TablesPage() {
                 </div>
 
                 {/* Customer Instruction / Cooking Note (Collapsible to save vertical space) */}
-                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2 my-1.5 shrink-0 transition-all">
+                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-lg p-1.5 px-2 my-0.5 shrink-0 transition-all">
                   <div
                     onClick={() => setIsInstructionExpanded((prev) => !prev)}
                     className="flex items-center justify-between cursor-pointer select-none"
                   >
-                    <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
-                      <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-900 dark:text-amber-200 tracking-wide">
+                      <ChefHat className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span>Customer Instruction</span>
                       {orderNotes ? (
-                        <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[140px] truncate">
+                        <span className="normal-case text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[120px] truncate">
                           "{orderNotes}"
                         </span>
                       ) : (
-                        <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+                        <span className="text-[9px] text-gray-400 font-normal normal-case">(Optional)</span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {orderNotes && (
                         <button
                           type="button"
                           onClick={() => setOrderNotes('')}
-                          className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+                          className="text-[9px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.2 rounded hover:bg-red-50 dark:hover:bg-red-950"
                         >
                           Clear
                         </button>
@@ -3412,16 +3412,16 @@ export default function TablesPage() {
                         title={isInstructionExpanded ? 'Collapse' : 'Expand'}
                       >
                         {isInstructionExpanded ? (
-                          <ChevronUp className="w-3.5 h-3.5" />
+                          <ChevronUp className="w-3 h-3" />
                         ) : (
-                          <ChevronDown className="w-3.5 h-3.5" />
+                          <ChevronDown className="w-3 h-3" />
                         )}
                       </button>
                     </div>
                   </div>
 
                   {isInstructionExpanded && (
-                    <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
+                    <div className="space-y-1 mt-1 pt-1 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
                       {/* Quick Touch Chips for Waiters */}
                       <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
                         {[
@@ -3449,7 +3449,7 @@ export default function TablesPage() {
                                 }
                               }}
                               className={cn(
-                                'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
                                 isSelected
                                   ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
                                   : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
@@ -3467,7 +3467,7 @@ export default function TablesPage() {
                           value={orderNotes}
                           onChange={(e) => setOrderNotes(e.target.value)}
                           placeholder="Type cooking note (e.g. less salt, serve water first)..."
-                          className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          className="w-full text-[11px] font-medium px-2 py-1 h-7 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
                         />
                       </div>
                     </div>
@@ -3478,7 +3478,7 @@ export default function TablesPage() {
                 {renderCartCustomerBox(false)}
 
                 {/* Financial Summary */}
-                <div className="space-y-1.5 pt-2.5 border-t border-gray-200 dark:border-gray-800 text-sm">
+                <div className="space-y-0.5 pt-1.5 border-t border-gray-200 dark:border-gray-800 text-xs shrink-0">
                   <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
                     <span>Subtotal:</span>
                     <span className="font-bold text-gray-800 dark:text-gray-200">
@@ -3495,9 +3495,9 @@ export default function TablesPage() {
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-base font-bold text-gray-900 dark:text-white pt-1.5 border-t border-gray-200 dark:border-gray-800">
-                    <span>Grand Total:</span>
-                    <span className="text-red-600 dark:text-red-400 text-lg sm:text-xl font-black">
+                  <div className="flex justify-between items-center font-bold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-800">
+                    <span className="text-xs sm:text-sm">Grand Total:</span>
+                    <span className="text-red-600 dark:text-red-400 text-base sm:text-lg font-black">
                       {formatCurrency(
                         (isRound2Mode && activeOrder ? activeOrder.total : 0) + cartSummary.total
                       )}
@@ -3505,60 +3505,20 @@ export default function TablesPage() {
                   </div>
                 </div>
 
-                {/* Payment Chips & It's Paid Checkbox (Matching Image 1 & 3) */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      {[
-                        { id: 'cash', label: 'Cash' },
-                        { id: 'card', label: 'Card' },
-                        { id: 'upi', label: 'UPI' },
-                        { id: 'due', label: 'Due' },
-                        { id: 'part', label: 'Part' },
-                      ].map(({ id, label }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setPaymentMethod(id as any)}
-                          className={cn(
-                            'px-2.5 py-1.5 text-xs font-bold rounded-md border transition-colors',
-                            paymentMethod === id
-                              ? 'bg-red-600 text-white border-red-700 shadow-2xs'
-                              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-300'
-                          )}
-                        >
-                          {label} {paymentMethod === id ? '✓' : ''}
-                        </button>
-                      ))}
-                    </div>
-
-                    <label className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isPaidChecked}
-                        onChange={(e) => setIsPaidChecked(e.target.checked)}
-                        className="rounded text-red-600 focus:ring-red-500 w-4 h-4"
-                      />
-                      <span>It&apos;s Paid</span>
-                    </label>
-                  </div>
-
-                  {/* Petpooja Action Buttons row:
-                      [ Save ] (Red)
-                      [ Save & Print ] (Red)
-                      [ KOT ] (Charcoal dark gray)
-                      [ KOT & Print ] (Charcoal dark gray)
-                      Notice: Save & EBill removed per user instructions!
-                      Rule: "once the kot is sent it should return to table view" */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                {/* Action Buttons row:
+                    [ Save ] (Red)
+                    [ Save & Print ] (Red)
+                    [ KOT ] (Charcoal dark gray)
+                    [ KOT & Print ] (Charcoal dark gray) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 pt-1 shrink-0">
                     {/* [ Save ] */}
                     <button
                       type="button"
                       onClick={() => handleSaveOrder(false)}
                       disabled={actionLoading}
-                      className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 px-1 rounded-md shadow-2xs transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      {submittingAction === 'save' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {submittingAction === 'save' && <RefreshCw className="w-3 h-3 animate-spin" />}
                       {submittingAction === 'save' ? 'Saving...' : 'Save'}
                     </button>
 
@@ -3567,10 +3527,10 @@ export default function TablesPage() {
                       type="button"
                       onClick={() => handleSaveOrder(true)}
                       disabled={actionLoading}
-                      className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 px-1 rounded-md shadow-2xs transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      {submittingAction === 'save_print' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {submittingAction === 'save_print' ? 'Saving & Printing...' : 'Save & Print'}
+                      {submittingAction === 'save_print' && <RefreshCw className="w-3 h-3 animate-spin" />}
+                      {submittingAction === 'save_print' ? 'Printing...' : 'Save & Print'}
                     </button>
 
                     {/* [ KOT ] (Dark Gray) - Automatically returns to Table View */}
@@ -3578,10 +3538,10 @@ export default function TablesPage() {
                       type="button"
                       onClick={() => handleSendKOT(false)}
                       disabled={actionLoading || cartSummary.itemCount === 0}
-                      className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                      className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold py-1.5 px-1 rounded-md shadow-2xs transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      {submittingAction === 'kot' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {submittingAction === 'kot' ? 'Sending KOT...' : 'KOT'}
+                      {submittingAction === 'kot' && <RefreshCw className="w-3 h-3 animate-spin" />}
+                      {submittingAction === 'kot' ? 'Sending...' : 'KOT'}
                     </button>
 
                     {/* [ KOT & Print ] (Dark Gray) - Automatically returns to Table View */}
@@ -3589,13 +3549,12 @@ export default function TablesPage() {
                       type="button"
                       onClick={() => handleSendKOT(true)}
                       disabled={actionLoading || cartSummary.itemCount === 0}
-                      className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-2.5 rounded-lg shadow-sm transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1.5"
+                      className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold py-1.5 px-1 rounded-md shadow-2xs transition-colors disabled:opacity-50 text-center flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      {submittingAction === 'kot_print' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {submittingAction === 'kot_print' ? 'Sending & Printing...' : 'KOT & Print'}
+                      {submittingAction === 'kot_print' && <RefreshCw className="w-3 h-3 animate-spin" />}
+                      {submittingAction === 'kot_print' ? 'Sending...' : 'KOT & Print'}
                     </button>
                   </div>
-                </div>
               </div>
             </div>
 
@@ -3850,28 +3809,28 @@ export default function TablesPage() {
                     </div>
 
                     {/* Customer Instruction / Cooking Note (Collapsible on Mobile) */}
-                    <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2 shrink-0 transition-all">
+                    <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-lg p-1.5 px-2 my-0.5 shrink-0 transition-all">
                       <div
                         onClick={() => setIsInstructionExpanded((prev) => !prev)}
                         className="flex items-center justify-between cursor-pointer select-none"
                       >
-                        <div className="flex items-center gap-1.5 text-xs font-black uppercase text-amber-900 dark:text-amber-200 tracking-wide">
-                          <ChefHat className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-amber-900 dark:text-amber-200 tracking-wide">
+                          <ChefHat className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
                           <span>Customer Instruction</span>
                           {orderNotes ? (
-                            <span className="normal-case text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[130px] truncate">
+                            <span className="normal-case text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 max-w-[120px] truncate">
                               "{orderNotes}"
                             </span>
                           ) : (
-                            <span className="text-[10px] text-gray-400 font-normal normal-case">(Optional)</span>
+                            <span className="text-[9px] text-gray-400 font-normal normal-case">(Optional)</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {orderNotes && (
                             <button
                               type="button"
                               onClick={() => setOrderNotes('')}
-                              className="text-[10px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950"
+                              className="text-[9px] font-bold text-gray-500 hover:text-red-600 cursor-pointer px-1 py-0.2 rounded hover:bg-red-50 dark:hover:bg-red-950"
                             >
                               Clear
                             </button>
@@ -3883,16 +3842,16 @@ export default function TablesPage() {
                             title={isInstructionExpanded ? 'Collapse' : 'Expand'}
                           >
                             {isInstructionExpanded ? (
-                              <ChevronUp className="w-3.5 h-3.5" />
+                              <ChevronUp className="w-3 h-3" />
                             ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
+                              <ChevronDown className="w-3 h-3" />
                             )}
                           </button>
                         </div>
                       </div>
 
                       {isInstructionExpanded && (
-                        <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
+                        <div className="space-y-1 mt-1 pt-1 border-t border-amber-200/50 dark:border-amber-900/40 animate-in fade-in-50 duration-150">
                           {/* Quick Touch Chips for Mobile Waiters */}
                           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
                             {[
@@ -3920,7 +3879,7 @@ export default function TablesPage() {
                                     }
                                   }}
                                   className={cn(
-                                    'px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
+                                    'px-1.5 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap border transition-colors shrink-0 cursor-pointer',
                                     isSelected
                                       ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
                                       : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-amber-400'
@@ -3938,7 +3897,7 @@ export default function TablesPage() {
                               value={orderNotes}
                               onChange={(e) => setOrderNotes(e.target.value)}
                               placeholder="Type cooking note (e.g. less salt, serve water first)..."
-                              className="w-full text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                              className="w-full text-[11px] font-medium px-2 py-1 h-7 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
                             />
                           </div>
                         </div>
@@ -3949,7 +3908,7 @@ export default function TablesPage() {
                     {renderCartCustomerBox(true)}
 
                     {/* Financial Summary */}
-                    <div className="space-y-1.5 pt-2 border-t border-gray-200 dark:border-gray-800 text-sm">
+                    <div className="space-y-0.5 pt-1.5 border-t border-gray-200 dark:border-gray-800 text-xs shrink-0">
                       <div className="flex justify-between text-gray-600 dark:text-gray-300 font-medium">
                         <span>Subtotal:</span>
                         <span className="font-bold text-gray-800 dark:text-gray-200">
@@ -3966,9 +3925,9 @@ export default function TablesPage() {
                           )}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center text-base font-bold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-800">
-                        <span>Grand Total:</span>
-                        <span className="text-red-600 dark:text-red-400 text-lg font-black">
+                      <div className="flex justify-between items-center font-bold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-800">
+                        <span className="text-xs sm:text-sm">Grand Total:</span>
+                        <span className="text-red-600 dark:text-red-400 text-base font-black">
                           {formatCurrency(
                             (isRound2Mode && activeOrder ? activeOrder.total : 0) + cartSummary.total
                           )}
@@ -3977,14 +3936,14 @@ export default function TablesPage() {
                     </div>
 
                     {/* Drawer Actions */}
-                    <div className="grid grid-cols-2 gap-2 pt-1 pb-2">
+                    <div className="grid grid-cols-2 gap-1.5 pt-1 pb-1">
                       <button
                         type="button"
                         onClick={() => handleSendKOT(false)}
                         disabled={actionLoading || cartSummary.itemCount === 0}
-                        className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold py-2 rounded-lg shadow-sm flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
                       >
-                        {submittingAction === 'kot' && <RefreshCw className="w-4 h-4 animate-spin" />}
+                        {submittingAction === 'kot' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                         <span>KOT</span>
                       </button>
 
@@ -3992,9 +3951,9 @@ export default function TablesPage() {
                         type="button"
                         onClick={() => handleSendKOT(true)}
                         disabled={actionLoading || cartSummary.itemCount === 0}
-                        className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
                       >
-                        {submittingAction === 'kot_print' && <RefreshCw className="w-4 h-4 animate-spin" />}
+                        {submittingAction === 'kot_print' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                         <span>KOT & Print</span>
                       </button>
                     </div>

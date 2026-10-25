@@ -219,7 +219,7 @@ namespace PeyalaPOS
                 backendProcess = Process.Start(bInfo);
 
                 // Start Frontend
-                ProcessStartInfo fInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\" start -p 3000", nextCli))
+                ProcessStartInfo fInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\" start -p 3000 -H 0.0.0.0", nextCli))
                 {
                     WorkingDirectory = frontendDir,
                     CreateNoWindow = true,
