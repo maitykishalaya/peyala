@@ -74,6 +74,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { customersApi, Customer } from '@/lib/api';
+import { getOfflineQueue } from '@/lib/offline-sync';
 import {
   printKOT,
   printCustomerBill,
@@ -595,6 +596,15 @@ export default function TablesPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // Reload tables seamlessly when offline mutations finish syncing to server
+  useEffect(() => {
+    const handleDataSynced = () => {
+      loadData(true).catch(() => {});
+    };
+    window.addEventListener('peyala_data_synced', handleDataSynced);
+    return () => window.removeEventListener('peyala_data_synced', handleDataSynced);
+  }, []);
+
   // Fast customer search debounce for Khata / Due settlement
   useEffect(() => {
     if (!customerSearchQuery || customerSearchQuery.trim().length < 2) {
@@ -683,6 +693,30 @@ export default function TablesPage() {
         } catch {}
       }
       tableData = tableData || [];
+
+      // Preserve optimistic occupied tables if there are pending offline mutations waiting to sync
+      try {
+        const queue = getOfflineQueue();
+        const pendingOrders = queue.filter(
+          (q) => q.url?.includes('/orders') && q.method?.toLowerCase() === 'post' && !q.url.includes('/pay') && !q.url.includes('/cancel')
+        );
+        if (pendingOrders.length > 0) {
+          tableData = tableData.map((t) => {
+            const hasPendingOrder = pendingOrders.some((q) => {
+              let pData = q.data;
+              if (typeof pData === 'string') { try { pData = JSON.parse(pData); } catch {} }
+              return pData?.tableId === t._id;
+            });
+            if (hasPendingOrder && t.status !== 'occupied') {
+              const currentTable = tables.find((curr) => curr._id === t._id);
+              if (currentTable && currentTable.status === 'occupied') {
+                return currentTable;
+              }
+            }
+            return t;
+          });
+        }
+      } catch {}
 
       // Performance check for low-end laptops: only trigger React DOM re-render if table states changed
       const tableHash = tableData
@@ -1724,15 +1758,28 @@ export default function TablesPage() {
       const effectiveTableId = targetTable?._id || tables[0]?._id;
       if (effectiveTableId && dispatchedOrder) {
         setTables((prev) =>
-          prev.map((t) =>
-            t._id === effectiveTableId
-              ? {
-                  ...t,
-                  status: 'occupied',
-                  activeOrder: dispatchedOrder,
-                }
-              : t
-          )
+          prev.map((t) => {
+            if (t._id !== effectiveTableId) return t;
+            const existingOrder = t.activeOrder as any;
+            const combinedItems =
+              dispatchedOrder.items && dispatchedOrder.items.length > 0
+                ? dispatchedOrder.items
+                : existingOrder?.items || [];
+            const effectiveTotal =
+              Number(dispatchedOrder.total) > 0
+                ? Number(dispatchedOrder.total)
+                : Number(existingOrder?.total) || 0;
+            return {
+              ...t,
+              status: 'occupied',
+              activeOrder: {
+                ...existingOrder,
+                ...dispatchedOrder,
+                items: combinedItems,
+                total: effectiveTotal,
+              },
+            };
+          })
         );
       }
 

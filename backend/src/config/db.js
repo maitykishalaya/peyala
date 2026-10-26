@@ -108,13 +108,42 @@ const connectDB = async () => {
     }
   }
 
+  // Detect cloud hosting environment (Render, Vercel, Railway, Heroku)
+  const isCloudHost = Boolean(
+    process.env.RENDER ||
+    process.env.VERCEL ||
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.DYNO ||
+    process.env.CLOUD_HOSTED ||
+    (process.env.NODE_ENV === 'production' && process.platform !== 'win32')
+  );
+
+  if (isCloudHost && process.env.MONGODB_URI) {
+    try {
+      console.log('[Peyala Backend] Connecting to Cloud Atlas MongoDB (Cloud-Hosted Deployment)...');
+      const conn = await mongoose.connect(process.env.MONGODB_URI, {
+        maxPoolSize: 50,
+        serverSelectionTimeoutMS: 5000,
+        family: 4,
+      });
+      console.log(`[Peyala Backend] Cloud Atlas Connected: ${conn.connection.host} / DB: ${conn.connection.name}`);
+      return conn;
+    } catch (atlasErr) {
+      console.error(`[Peyala Backend] Cloud Atlas connection failed: ${atlasErr.message}`);
+      throw atlasErr;
+    }
+  }
+
+  // LOCAL-FIRST COUNTER ENVIRONMENT (Windows / Desktop / Local POS Counter)
+  // The local counter backend MUST connect to local MongoDB (127.0.0.1:27017/peyala_local)
+  // so POS billing, KOTs, and table occupancy operate 100% offline with zero internet dependency!
   let localUri = null;
 
   try {
     // 1. Ensure local operational database is up and running
     localUri = await localDbRunner.start();
   } catch (runnerErr) {
-    console.warn(`[Peyala Backend] Local MongoDB engine notice: ${runnerErr.message}. Will attempt Cloud Atlas or recovery loop.`);
+    console.warn(`[Peyala Backend] Local MongoDB engine notice: ${runnerErr.message}. Starting auto-recovery loop.`);
   }
 
   // 2. Attempt connection to local database
@@ -132,7 +161,7 @@ const connectDB = async () => {
 
       await seedBaselineIfNeeded(conn);
 
-      // Initialize background sync engine
+      // Initialize background sync engine (Central DB delta sync)
       syncEngine.init().catch((err) => {
         console.warn('[Peyala Backend] Initial sync check notice:', err.message);
       });
@@ -143,23 +172,7 @@ const connectDB = async () => {
     }
   }
 
-  // 3. Cloud Atlas Fallback (If online)
-  if (process.env.MONGODB_URI) {
-    try {
-      console.log('[Peyala Backend] Attempting Cloud Atlas MongoDB fallback...');
-      const conn = await mongoose.connect(process.env.MONGODB_URI, {
-        maxPoolSize: 50,
-        serverSelectionTimeoutMS: 4000,
-        family: 4,
-      });
-      console.log(`[Peyala Backend] Cloud Atlas Connected: ${conn.connection.host} / DB: ${conn.connection.name}`);
-      return conn;
-    } catch (atlasErr) {
-      console.warn(`[Peyala Backend] Cloud Atlas unavailable (${atlasErr.message}). Operating in full offline mode.`);
-    }
-  }
-
-  // 4. Zero-Crash Guarantee: If neither local nor cloud connected yet, KEEP SERVER ALIVE and start auto-recovery
+  // 3. Zero-Crash Guarantee: Keep server ALIVE in standalone mode and start continuous background recovery for local MongoDB
   console.log('[Peyala Backend] ⚡ Backend is ALIVE in Offline Standalone Mode. Starting auto-recovery for local MongoDB...');
   startLocalDbRecovery();
   return null;

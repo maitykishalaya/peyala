@@ -979,6 +979,11 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - **Native Menu Trapping Detachment**: Removed `autoHideMenuBar: true`, invoked `mainWindow.removeMenu()`, and intercepted lone `Alt` keystrokes in `before-input-event` with `event.preventDefault()` so Windows Win32 message loop never captures keyboard input into a hidden menu loop.
   - **Windows Occlusion & Throttling Immunity**: Disabled background timer throttling, renderer backgrounding, and native window occlusion checks (`CalculateNativeWinOcclusion`).
   - **Native Dialog & Active Input Focus Recovery**: Wrapped `window.confirm` and `window.alert` to automatically resynchronize OS window focus via `electronAPI.resyncFocus()` upon closure, ensuring inputs never lose keystroke focus.
+- **Offline Zero-Internet KOT, Atlas Disconnect & Table State Continuity (v12.0.3)**:
+  - **Local Primary Database Isolation (`backend/src/config/db.js`)**: Counter backends on Windows connect exclusively to `mongodb://127.0.0.1:27017/peyala_local`, ensuring Mongoose never binds to Cloud Atlas as its primary connection when offline.
+  - **Realistic Offline Order Totals (`frontend/src/lib/offline-sync.ts`)**: `buildOptimisticResponse` properly parses payload data, mapping all items, variants, and addons, calculating real 5% tax and grand totals so table cards display accurate order summaries rather than `₹0 / 0 itm`.
+  - **Database Offline Interception (`frontend/src/lib/api.ts`)**: Intercepts database disconnection and DNS failures (`ENOTFOUND`, `ECONNREFUSED`, `getaddrinfo`) as connection errors, seamlessly enqueuing mutations locally without throwing error toasts.
+  - **Table Occupancy Continuity (`frontend/src/app/tables/page.tsx`)**: `loadData()` merges pending offline orders before refreshing tables and listens for `peyala_data_synced` to avoid wiping table occupancy upon internet reconnection.
 
 ---
 

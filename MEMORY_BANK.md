@@ -1013,6 +1013,18 @@ Whenever changes are made, run this validation suite before concluding:
     4. *Native Dialog Focus Recovery & IPC Resync*: Wrapped `window.confirm` and `window.alert` in `AppLayout.tsx` to automatically schedule `resyncFocus()` (which cycles window blur/focus at the Win32 OS level) after any dialog closes.
     5. *Active Element Interaction Recovery*: Updated `AppLayout.tsx` input event listeners (`mousedown`, `focusin`) to proactively ensure `electronAPI.ensureFocus()` whenever any input field is clicked or focused.
 
+- **Offline Zero-Internet KOT, Atlas Disconnect & Table State Continuity (v12.0.3)**:
+  - **Identified Root Causes**:
+    1. *Local Backend Binding to Cloud Atlas Fallback*: In `backend/src/config/db.js`, if local MongoDB had any startup latency, `connectDB()` fell back to `process.env.MONGODB_URI` (Atlas). On a local counter machine, this bound Mongoose directly to the cloud. When Wi-Fi was disabled, subsequent Mongoose queries threw `getaddrinfo ENOTFOUND ac-zvnymon-shard-00-02.c3pp9i2.mongodb.net`.
+    2. *Missing Data Payload & String Parsing in Optimistic Response*: In `frontend/src/lib/offline-sync.ts`, `buildOptimisticResponse` did not parse stringified JSON in `config.data`, resulting in `items: []` and hardcoded `total: 0`. The UI rendered `₹0 / 0 itm` on the occupied table card.
+    3. *Backend 500 DNS Error Rejected by API Interceptor*: In `frontend/src/lib/api.ts`, `isConnectionError` required `(err.response.status === 500 && !err.response.data?.message)`. Because the backend returned 500 with the Atlas DNS message, `isConnectionError` evaluated to `false`, rejecting the second KOT request and displaying the red error toast instead of queuing it offline.
+    4. *Server Table Fetch Wiping Pending Offline Orders*: In `frontend/src/app/tables/page.tsx`, `loadData()` immediately replaced local table states upon reconnection before the browser's offline mutation queue (`peyala_offline_sync_queue_v1`) had replayed against the server, causing tables to appear blank.
+  - **Comprehensive Multi-Layer Resolution**:
+    1. *Strict Local Primary Database Enforcement*: In `backend/src/config/db.js`, local counter instances exclusively connect to `127.0.0.1:27017/peyala_local`. Cloud Atlas fallback is restricted strictly to cloud hosting environments (`RENDER`, `VERCEL`, `RAILWAY`, etc.).
+    2. *Realistic Offline Order Calculation*: In `frontend/src/lib/offline-sync.ts`, `buildOptimisticResponse` parses `config.data`, maps all items, quantities, variants, and addons, and computes the real subtotal, tax (5%), and grand total so table cards display accurate order summaries even while disconnected.
+    3. *Database Offline Error Interception*: In `frontend/src/lib/api.ts`, `isConnectionError` identifies database connection and DNS failures (`ENOTFOUND`, `ECONNREFUSED`, `getaddrinfo`, `MongoNetworkError`, `MongooseError`) and automatically routes mutations into the offline queue.
+    4. *Optimistic Table Occupancy Preservation*: In `frontend/src/app/tables/page.tsx`, `loadData()` cross-references pending order creations in `getOfflineQueue()` before overwriting tables, and listens for `peyala_data_synced` to update table states seamlessly after queue replay.
+
 ---
 *Last Updated: October 2026 · Peyala v12.0 Engineering*
 

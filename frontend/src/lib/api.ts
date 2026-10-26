@@ -56,14 +56,25 @@ api.interceptors.response.use(
 
     const method = (config?.method || 'get').toLowerCase();
     const isMutation = ['post', 'put', 'patch', 'delete'].includes(method);
-    // Real network/connection error: No HTTP response, timeout, or proxy gateway drop
-    // Do NOT rely solely on navigator.onLine since local-first intranet POS operates without public internet
+    // Check if error message indicates database disconnection, DNS drop, or network failure
+    const errorMsg = String(err.response?.data?.message || err.message || '');
+    const isDbOfflineError =
+      errorMsg.includes('ENOTFOUND') ||
+      errorMsg.includes('ECONNREFUSED') ||
+      errorMsg.includes('MongoServerSelectionError') ||
+      errorMsg.includes('MongoNetworkError') ||
+      errorMsg.includes('MongooseError') ||
+      errorMsg.includes('getaddrinfo') ||
+      errorMsg.includes('buffering timed out') ||
+      errorMsg.includes('topology was destroyed') ||
+      errorMsg.includes('connection closed');
+
     const isConnectionError =
       !err.response ||
       err.code === 'ERR_NETWORK' ||
       err.code === 'ECONNABORTED' ||
       (err.response.status >= 502 && err.response.status <= 504) ||
-      (err.response.status === 500 && !err.response.data?.message);
+      (err.response.status === 500 && (!err.response.data?.message || isDbOfflineError));
 
     // Queue mutation locally on connection or DB error so user can continue uninterrupted
     // EXCLUDE table transfer/move operations and auth operations from background offline replay

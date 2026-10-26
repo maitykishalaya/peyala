@@ -34,9 +34,9 @@ syncClient.interceptors.request.use((config) => {
     const customApiUrl = localStorage.getItem('peyala_api_url');
     if (customApiUrl) {
       config.baseURL = customApiUrl;
-    } else if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+    } else if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost') && !process.env.NEXT_PUBLIC_API_URL.includes('127.0.0.1')) {
       config.baseURL = process.env.NEXT_PUBLIC_API_URL;
-    } else if (!config.baseURL || config.baseURL.includes('localhost:4000')) {
+    } else if (!config.baseURL || config.baseURL.includes('localhost:4000') || config.baseURL.includes('127.0.0.1:4000')) {
       config.baseURL = '/api';
     }
 
@@ -259,33 +259,64 @@ export function buildOptimisticResponse(config: AxiosRequestConfig, tempId: stri
   const method = (config.method || 'post').toLowerCase();
   const url = config.url || '';
 
+  let parsedData = config.data;
+  if (typeof parsedData === 'string') {
+    try { parsedData = JSON.parse(parsedData); } catch {}
+  } else if (parsedData && typeof parsedData === 'object') {
+    parsedData = { ...parsedData };
+  }
+
   let mockData: any = { success: true, isOffline: true, tempId };
 
   if (url.includes('/orders')) {
     if (method === 'post' && !url.includes('/pay') && !url.includes('/items') && !url.includes('/cancel')) {
-      // Order Creation
-      const items = Array.isArray(config.data?.items) ? config.data.items : [];
+      // Order Creation (Round 1)
+      const rawItems = Array.isArray(parsedData?.items) ? parsedData.items : [];
+      let subtotal = 0;
+      const mappedItems = rawItems.map((it: any) => {
+        const qty = Math.max(1, Number(it.quantity) || 1);
+        const price = Math.max(0, Number(it.price) || 0);
+        subtotal += price * qty;
+        return {
+          _id: it._id || `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          menuItem: it.menuItemId || it.menuItem || it._id,
+          name: it.name || 'Item',
+          price,
+          taxPercent: it.taxPercent !== undefined ? it.taxPercent : 5,
+          quantity: qty,
+          notes: it.notes || '',
+          variant: it.variant,
+          selectedAddons: it.selectedAddons || [],
+          status: 'pending',
+          roundNumber: 1,
+        };
+      });
+      const taxAmount = Math.round(subtotal * 0.05 * 100) / 100;
+      const total = subtotal + taxAmount;
+
       mockData = {
         _id: tempId,
         orderNumber: Math.floor(1000 + Math.random() * 9000),
         status: 'open',
-        table: config.data?.tableId,
-        items,
+        table: parsedData?.tableId,
+        items: mappedItems,
         kotRounds: [{
           _id: `round_${Date.now()}`,
           roundNumber: 1,
           kotNumber: 1,
           roundTag: '[INITIAL ORDER]',
           printed: false,
-          items: items.map((it: any) => ({
-            name: it.name || 'Offline Item',
-            quantity: it.quantity || 1,
-            notes: it.notes || '',
+          items: mappedItems.map((i: any) => ({
+            name: i.name,
+            quantity: i.quantity,
+            notes: i.notes || '',
+            variantName: i.variant?.name,
+            addons: i.selectedAddons?.map((a: any) => a.name),
           })),
         }],
-        subtotal: 0,
-        taxAmount: 0,
-        total: 0,
+        subtotal,
+        taxAmount,
+        total,
         isOfflineCreated: true,
       };
     } else if (url.includes('/pay')) {
@@ -295,17 +326,51 @@ export function buildOptimisticResponse(config: AxiosRequestConfig, tempId: stri
         message: 'Order payment queued offline. Will sync to database once connection is restored.',
       };
     } else if (url.includes('/items')) {
-      // Add items round
+      // Add items round (Round 2+)
+      const rawItems = Array.isArray(parsedData?.items) ? parsedData.items : [];
+      let addSubtotal = 0;
+      const mappedItems = rawItems.map((it: any) => {
+        const qty = Math.max(1, Number(it.quantity) || 1);
+        const price = Math.max(0, Number(it.price) || 0);
+        addSubtotal += price * qty;
+        return {
+          _id: it._id || `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          menuItem: it.menuItemId || it.menuItem || it._id,
+          name: it.name || 'Item',
+          price,
+          taxPercent: it.taxPercent !== undefined ? it.taxPercent : 5,
+          quantity: qty,
+          notes: it.notes || '',
+          variant: it.variant,
+          selectedAddons: it.selectedAddons || [],
+          status: 'pending',
+          roundNumber: 2,
+        };
+      });
+      const addTax = Math.round(addSubtotal * 0.05 * 100) / 100;
+      const addTotal = addSubtotal + addTax;
+
       mockData = {
         _id: tempId,
         status: 'open',
+        items: mappedItems,
         kotRounds: [{
           _id: `round_${Date.now()}`,
           roundNumber: 2,
           kotNumber: 2,
           roundTag: '[ROUND 2 - ADD-ON]',
           printed: false,
+          items: mappedItems.map((i: any) => ({
+            name: i.name,
+            quantity: i.quantity,
+            notes: i.notes || '',
+            variantName: i.variant?.name,
+            addons: i.selectedAddons?.map((a: any) => a.name),
+          })),
         }],
+        subtotal: addSubtotal,
+        taxAmount: addTax,
+        total: addTotal,
       };
     }
   }
