@@ -78,7 +78,21 @@ class SyncEngine {
    */
   async getCentralConnection() {
     if (this.centralConn && this.centralConn.readyState === 1) {
-      return this.centralConn;
+      // Fast ping check (1.8s timeout) to verify the socket is actually responsive before returning it
+      try {
+        await Promise.race([
+          this.centralConn.db.admin().ping(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Central DB ping timeout (offline)')), 1800)),
+        ]);
+        return this.centralConn;
+      } catch (pingErr) {
+        // Socket broke (e.g. Wi-Fi disconnected), close stale connection
+        try { await this.centralConn.close(); } catch (_) {}
+        this.centralConn = null;
+        this.isOnline = false;
+        this.lastSyncError = pingErr.message;
+        throw pingErr;
+      }
     }
 
     if (!this.centralUri) {
@@ -301,7 +315,9 @@ class SyncEngine {
                       if (centralBs) {
                         const hasLog = (centralBs.gstLog || []).some((l) =>
                           String(l.salesEntryId) === String(docToSync._id) ||
-                          (l.note && l.note.includes(`Bill #${docToSync.billNumber || docToSync.orderNumber}`))
+                          (docToSync.billNumber && l.note && l.note.includes(`Bill #${docToSync.billNumber}`)) ||
+                          (docToSync.orderNumber && l.note && l.note.includes(`Bill #${docToSync.orderNumber}`)) ||
+                          (l.outletSales === (Number(docToSync.settledAmount) || Number(docToSync.total)) && Math.abs(new Date(l.date) - new Date(docToSync.paidAt || docToSync.createdAt)) < 60000)
                         );
                         if (!hasLog) {
                           await centralConn.db.collection('balancesheets').updateOne(
@@ -685,7 +701,9 @@ class SyncEngine {
                     if (localBs) {
                       const hasLog = (localBs.gstLog || []).some((l) =>
                         String(l.salesEntryId) === String(doc._id) ||
-                        (l.note && l.note.includes(`Bill #${doc.billNumber || doc.orderNumber}`))
+                        (doc.billNumber && l.note && l.note.includes(`Bill #${doc.billNumber}`)) ||
+                        (doc.orderNumber && l.note && l.note.includes(`Bill #${doc.orderNumber}`)) ||
+                        (l.outletSales === (Number(doc.settledAmount) || Number(doc.total)) && Math.abs(new Date(l.date) - new Date(doc.paidAt || doc.createdAt)) < 60000)
                       );
                       if (!hasLog) {
                         const newGst = Math.round(((localBs.gstLiability || 0) + orderTax) * 100) / 100;

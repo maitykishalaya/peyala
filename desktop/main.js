@@ -5,6 +5,16 @@ const net = require('net');
 const fs = require('fs');
 const os = require('os');
 
+// ── Critical Windows OS & Chromium Engine Stability Tuning ──────────
+// 1. Disable hardware acceleration: Eliminates Chromium D3D11/DirectComposition swapchain stalls on Windows
+//    which cause keyboard keystrokes to queue up and freeze textboxes until an OS DWM paint event (Alt+Tab).
+app.disableHardwareAcceleration();
+
+// 2. Prevent Chromium from throttling rendering, timers, or input event loops on Windows
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;
@@ -335,22 +345,27 @@ function createMainWindow() {
     icon: ICON_PATH,
     title: 'Peyala POS - Version 12.0.0 — Restaurant Operations & Counter Terminal',
     backgroundColor: '#111827', // Slate 900
-    autoHideMenuBar: true,
+    autoHideMenuBar: false, // CRITICAL: NEVER auto-hide menu bar as Windows intercepts Alt key into a hidden menu loop
     show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      backgroundThrottling: false, // CRITICAL: Never throttle background rendering or input routing
     },
   });
 
+  // Completely remove and detach native menus from the Windows OS HWND
   Menu.setApplicationMenu(null);
-  mainWindow.setMenu(null);
+  mainWindow.removeMenu();
 
   mainWindow.maximize();
   mainWindow.show();
   mainWindow.focus();
+
+  // Ensure menu shortcuts (like Alt) are ignored so WebContents receives all keystrokes
+  mainWindow.webContents.setIgnoreMenuShortcuts(true);
 
   // Ensure internal webContents receives focus whenever the OS focuses the window
   mainWindow.on('focus', () => {
@@ -380,8 +395,13 @@ function createMainWindow() {
     logEngine(`[webContents did-fail-load] code: ${errorCode}, error: ${errorDescription}, url: ${validatedURL}`);
   });
 
-  // Register local keyboard shortcuts for POS operations
+  // Register local keyboard shortcuts for POS operations and prevent Alt key menu lock
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Intercept lone Alt press/release so Windows Win32 menu loop is NEVER activated
+    if (input.key === 'Alt') {
+      event.preventDefault();
+      return;
+    }
     if (input.key === 'F11' && input.type === 'keyDown') {
       mainWindow.setKiosk(!mainWindow.isKiosk());
       event.preventDefault();
@@ -503,6 +523,21 @@ ipcMain.handle('ensure-window-focus', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+      mainWindow.webContents.focus();
+    }
+  } catch (_) {}
+  return true;
+});
+
+ipcMain.handle('resync-focus', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      // Emulate Alt+Tab focus cycle at the OS level to release any stuck message queues
+      if (process.platform === 'win32') {
+        mainWindow.blur();
+        mainWindow.focus();
+      }
       mainWindow.webContents.focus();
     }
   } catch (_) {}

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeWindow: () => ipcRenderer.invoke('window-close'),
   selectProjectFolder: () => ipcRenderer.invoke('select-project-folder'),
   ensureFocus: () => ipcRenderer.invoke('ensure-window-focus'),
+  resyncFocus: () => ipcRenderer.invoke('resync-focus'),
   restartServers: () => ipcRenderer.invoke('restart-local-servers'),
   onServerStatus: (callback) => {
     const subscription = (event, status) => callback(status);

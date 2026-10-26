@@ -11,7 +11,7 @@ const getInitialBaseUrl = () => {
     }
     return '/api';
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+  return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000/api';
 };
 
 const api = axios.create({
@@ -25,9 +25,9 @@ api.interceptors.request.use((config) => {
     const customApiUrl = localStorage.getItem('peyala_api_url');
     if (customApiUrl) {
       config.baseURL = customApiUrl;
-    } else if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+    } else if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost') && !process.env.NEXT_PUBLIC_API_URL.includes('127.0.0.1')) {
       config.baseURL = process.env.NEXT_PUBLIC_API_URL;
-    } else if (!config.baseURL || config.baseURL.includes('localhost:4000')) {
+    } else if (!config.baseURL || config.baseURL.includes('localhost:4000') || config.baseURL.includes('127.0.0.1:4000')) {
       config.baseURL = '/api';
     }
 
@@ -56,12 +56,14 @@ api.interceptors.response.use(
 
     const method = (config?.method || 'get').toLowerCase();
     const isMutation = ['post', 'put', 'patch', 'delete'].includes(method);
+    // Real network/connection error: No HTTP response, timeout, or proxy gateway drop
+    // Do NOT rely solely on navigator.onLine since local-first intranet POS operates without public internet
     const isConnectionError =
       !err.response ||
-      err.response.status >= 500 ||
       err.code === 'ERR_NETWORK' ||
       err.code === 'ECONNABORTED' ||
-      (typeof navigator !== 'undefined' && !navigator.onLine);
+      (err.response.status >= 502 && err.response.status <= 504) ||
+      (err.response.status === 500 && !err.response.data?.message);
 
     // Queue mutation locally on connection or DB error so user can continue uninterrupted
     // EXCLUDE table transfer/move operations and auth operations from background offline replay

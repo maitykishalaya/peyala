@@ -1,10 +1,13 @@
+**CRITICAL RULE: WHEN REQUESTED TO UPDATE OR CHANGE ANYTHING, NEVER CHANGE, BREAK, OR COMPROMISE ANY EXISTING LOGIC EVER.**
+
 # Peyala v8 — Comprehensive Memory Bank (Version 12.0.0)
 
 > [!IMPORTANT]
 > **MANDATORY MAINTENANCE & BUILD RULES**:
-> 1. **Documentation Parity**: Whenever you make any change to this codebase, you MUST update both `README.md` and `MEMORY_BANK.md`. This ensures documentation and developer/AI context never drift from live implementation.
-> 2. **Continuous Single Installer & Android APK Updates**: **After EVERY change, the final single installer (`INSTALL-PEYALA-ALL-IN-ONE.bat` and `Peyala-POS-AllInOne-Installer.exe`) MUST be updated accordingly and consistently, and the Android build (`Peyala-POS.apk`) MUST be updated alongside it.**
-> 3. **Automated Pipeline**: Run `build-all-in-one.bat` (or `scripts/build-all-in-one.ps1`). It automatically recompiles `Peyala-POS.apk` via `node scripts/build-apk.js`, syncs the APK to `frontend/public/Peyala-POS.apk` and project root, bundles everything into clean single-file installers, and mirrors all output artifacts to `C:\Desktop\Peyala_v8`.
+> 1. **Zero Existing Logic Changes**: **Whenever you are told to update or add anything, you MUST NEVER change, break, or alter existing business logic, calculations, or operational workflows.**
+> 2. **Documentation Parity**: Whenever you make any change to this codebase, you MUST update both `README.md` and `MEMORY_BANK.md`. This ensures documentation and developer/AI context never drift from live implementation.
+> 3. **Proactive Single Installer Prompt After Every Change**: **After EVERY change to the codebase, the AI assistant MUST proactively ask the user to update the all-in-one installer (`INSTALL-PEYALA-ALL-IN-ONE.bat` and `Peyala-POS-AllInOne-Installer.exe`) without waiting for the user to ask.**
+> 4. **Automated Pipeline**: Run `build-all-in-one.bat` (or `scripts/build-all-in-one.ps1`). It automatically recompiles `Peyala-POS.apk` via `node scripts/build-apk.js`, syncs the APK to `frontend/public/Peyala-POS.apk` and project root, bundles everything into clean single-file installers, and mirrors all output artifacts to `C:\Desktop\Peyala_v8`.
 >
 
 ---
@@ -383,6 +386,14 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - **Active Selection**: Clicking any destination table highlights it with a red dashed border (`border-2 border-dashed border-red-600 text-red-600 font-bold bg-red-50/60`) and synchronizes with the `Table No.` input at the bottom.
   - Fast execution: `Cancel` and solid red `Move` button (`#d32f2f`).
 
+### 3.14 Live Running Orders (Unbilled Revenue) Counter & Summary Header (frontend/src/app/tables/page.tsx)
+- **Operational Need**: Floor managers and cashiers need instant visibility into unbilled active dining orders across the restaurant without manually adding up table bills or navigating to reports.
+- **Top Header Placement Beside Floor Sections**: Rendered directly beside the floor section filter buttons (All Sections, Indoor, Outdoor, Pick Up) in the top filter bar of /tables.
+- **Live Aggregation**: Features an animated pulsating amber badge (bg-amber-50 text-amber-950 border-amber-300) displaying:
+  1. **Running Orders Count**: Live count of active dining and KOT tables whose customer bill has NOT been printed yet (isOccupied && !isPaid && !isBilled && !Boolean(billPrinted)).
+  2. **Total Running Sum (Rs)**: Live sum of order totals (formatCurrency(runningOrdersSummary.sum)).
+  3. **Zone Subtotaling**: When a specific section filter is active (e.g. Outdoor), cleanly renders both the zone-specific subtotal alongside the global count and sum.
+
 ### 3.15 Universal Interactive Button Feedback & Toast Notification System
 - **Global Reactive Toast Engine**:
   - `frontend/src/lib/toast.ts`: Zero-dependency custom-event notification dispatcher exposing `toast.success(message, duration?)`, `toast.error(...)`, `toast.warning(...)`, and `toast.info(...)`.
@@ -602,6 +613,19 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Full audit trail merging historical credit orders and payment receipts with live running balance tracking.
 - **Role Permissions & Viewer Masking**:
   - Viewer role nullifies customer monetary figures (`••••••`) and disables collection mutations.
+
+### 3.28 Mobile Bottom Tray Active Tab Preservation (frontend/src/components/layout/AppLayout.tsx)
+- **Operational Need**: On mobile devices, when staff navigate between different sections, the horizontal scrolling bottom navigation tray previously reset its scroll offset to 0.
+- **Active Tab Centering & Scroll Memory**:
+  - Implemented `mobileNavRef` with `data-active` attributes on all bottom navigation buttons.
+  - Automatically calculates `container.scrollLeft = Math.max(0, activeBtn.offsetLeft - (container.clientWidth - activeBtn.clientWidth) / 2)` whenever the route changes, instantly keeping the selected module in view.
+  - Persists manual scroll offsets into `sessionStorage` (`peyala_mobile_nav_scroll`) so the tray never abruptly jumps back to the first tab.
+
+### 3.29 GST Liability Inbound Sync Deduplication Guard (backend/src/routes/orders.js & backend/src/services/syncEngine.js)
+- **Operational Need**: Prevent duplicate GST increments on `BalanceSheet.gstLiability` when Central DB sync runs after local order settlements.
+- **Root Cause & Hardening**:
+  - `orders.js` was modified to explicitly record `salesEntryId: order._id` and `(Bill #${order.billNumber || order.orderNumber} - Table ${tableNum})` in `BalanceSheet.gstLog`.
+  - `syncEngine.js` inbound order reconciliation enhanced with a multi-layered deduplication check: verifies order `_id`, `doc.billNumber`, `doc.orderNumber`, and matching outlet sales within a 60-second window before applying any GST liability increment.
 
 ---
 
@@ -953,6 +977,41 @@ Whenever changes are made, run this validation suite before concluding:
     - **Live Ledger Reconciliation**: Restored live account balances on Atlas and Local database to exact target formulas:
       - **Cash Counter**: `₹1,985.25` (base after expenses) + `₹1,628.00` (today's cash sales) = **`₹3,613.25`**.
       - **Current Account**: `₹251,581.11` (base) + `₹5,044.00` (today's total UPI sales) = **`₹256,625.11`**.
+
+- **Offline Operations Hardening & Zero-Internet Resilience (v12.0.1)**:
+  - **Identified Root Causes**:
+    1. *IPv6 Connection Refusal on Wi-Fi Disconnect*: `backend/src/server.js` was explicitly listening only on IPv4 `0.0.0.0:4000`. In Next.js rewrites (`frontend/next.config.js`), the fallback proxy URL was `http://localhost:4000`. When Wi-Fi was disabled on Windows, Node.js DNS resolution resolved `localhost` to IPv6 `::1`. Express rejected IPv6 connections (`ECONNREFUSED ::1:4000`), causing Next.js to return 500 errors to the browser.
+    2. *False Offline Block via `navigator.onLine`*: In `frontend/src/lib/api.ts` and `frontend/src/lib/offline-sync.ts`, `isBackendReachable()` and `isConnectionError` checked `!navigator.onLine`. In a local-first cafe without internet, `navigator.onLine` returned `false`, erroneously assuming the local server was down and blocking local operations.
+    3. *Missing Table Cache on Network Drop*: In `frontend/src/app/tables/page.tsx`, if `tablesApi.list()` failed during network disconnect, `setTables` was not called, leaving `tables = []` and displaying an empty floor.
+    4. *KOT Double Printing on Reconnect*: When an order was placed offline, the client printed the physical KOT locally. However, the queued offline mutation sent to the backend when internet returned did not indicate that the initial round was already printed. The backend marked `printed: false`, causing the Print Station polling loop (`/api/orders/pending-kots`) to print the KOT a second time.
+  - **Resolution & Architecture Safeguards**:
+    - **Dual-Stack Server Binding & 127.0.0.1 Proxy Target**:
+      - `backend/src/server.js`: Changed `server.listen(PORT, '0.0.0.0')` to dual-stack `server.listen(PORT)`, accepting both IPv4 (`127.0.0.1`) and IPv6 (`::1`).
+      - `frontend/next.config.js` and `frontend/.env.local`: Configured proxy targets and fallback URLs directly to `http://127.0.0.1:4000`, completely bypassing OS DNS lookup and immune to adapter state changes.
+    - **Local Endpoint Ping Over `navigator.onLine`**:
+      - `offline-sync.ts` now pings `/health` directly with a 2-second timeout instead of relying on `navigator.onLine`.
+      - `api.ts` defines connection errors strictly by network dropped sockets (`!err.response`, `ERR_NETWORK`, `ECONNABORTED`, or 502–504 gateway drops).
+    - **Floor Layout LocalStorage Caching & Instant Optimistic Occupancy**:
+      - `tables/page.tsx` caches floor layouts in `localStorage` (`peyala_cached_tables_v1`). If an API call fails or times out offline, it restores the cached floor layout so tables never disappear.
+      - Upon order creation in `handleConfirmCart`, the target table is immediately updated to `status: 'occupied'` in React state, providing instant visual feedback even when offline.
+    - **KOT Deduplication & `kotAlreadyPrinted` Protocol**:
+      - Added `peyala_printed_kots_v1` in `localStorage` to deduplicate printed KOT jobs across page reloads and network reconnections.
+      - Enqueued offline orders automatically flag `kotAlreadyPrinted: true` and `shouldPrint: false`, ensuring the backend sets `printed: true` on initial rounds and suppressing duplicate print jobs from the Print Station.
+      - Added `ordersApi.markKotPrinted` immediately after printing regardless of print station mode.
+    - **Automated Verification**: Created `scripts/test-payment-gst-accounts-consistency.js` validating that all payment methods (Cash, UPI, Card, Part/Split, Due), order calculation flows, GST liabilities, and account balances remain 100% consistent (23/23 tests passed cleanly).
+
+- **Electron Desktop Anti-Input Freeze & Windows OS HWND Stabilization (v12.0.2)**:
+  - **Identified Root Causes**:
+    1. *Chromium D3D11/DirectComposition Swapchain Backpressure*: On Windows laptops with Intel HD Graphics or hybrid GPUs, Chromium's hardware-accelerated GPU compositor occasionally stalls frame presentations when rapidly typing into textboxes that trigger DOM filtering (e.g. inventory or sales searches). The input pipeline pauses waiting for compositor acknowledgments until an OS DWM paint cycle (like `Alt + Tab`) resets the DirectX swapchain.
+    2. *`autoHideMenuBar: true` Native Focus Hijack*: In Electron on Windows, `autoHideMenuBar: true` registers native Win32 window menu hooks (`WS_EX_CONTROLPARENT`). When the `Alt` key is pressed (or during keyboard navigation), Windows transfers keyboard focus to the hidden menu bar. Because `mainWindow.removeMenu()` was not called, Windows captured all keystrokes in a hidden menu loop and never forwarded `WM_CHAR` or `WM_KEYDOWN` messages to Chromium until `Alt + Tab` broke the menu loop.
+    3. *Chromium Occlusion & Background Throttling*: Windows DWM occlusion calculation (`CalculateNativeWinOcclusion`) can falsely flag parts of the window or layered views as occluded and throttle the JavaScript event loop.
+    4. *Native Dialog Focus Drop*: Windows synchronous modal dialogs (`window.confirm()`, `window.alert()`) drop OS focus upon closure rather than properly returning keyboard routing to Chromium's `Chrome_RenderWidgetHostHWND`.
+  - **Comprehensive Multi-Layer Resolution**:
+    1. *Software Rasterization (`app.disableHardwareAcceleration()` & `--disable-gpu`)*: Added `app.disableHardwareAcceleration()` at the top of `desktop/main.js` and `--disable-gpu` in `PeyalaLauncher.cs`. Running Chromium's compositor in software mode eliminates all D3D11 swapchain backpressure and ensures keyboard typing is processed synchronously without frame lag.
+    2. *Native Menu Detachment & Alt Interception*: Set `autoHideMenuBar: false`, invoked `Menu.setApplicationMenu(null)` and `mainWindow.removeMenu()`, enabled `mainWindow.webContents.setIgnoreMenuShortcuts(true)`, and intercepted lone `Alt` keydown/keyup events in `mainWindow.webContents.on('before-input-event')` with `event.preventDefault()`. Completely prevents Windows OS from trapping focus in a native menu loop.
+    3. *Occlusion & Backgrounding Immunity*: Appended `disable-background-timer-throttling`, `disable-renderer-backgrounding`, and `disable-features=CalculateNativeWinOcclusion` to Chromium command line, with `backgroundThrottling: false` in `webPreferences`.
+    4. *Native Dialog Focus Recovery & IPC Resync*: Wrapped `window.confirm` and `window.alert` in `AppLayout.tsx` to automatically schedule `resyncFocus()` (which cycles window blur/focus at the Win32 OS level) after any dialog closes.
+    5. *Active Element Interaction Recovery*: Updated `AppLayout.tsx` input event listeners (`mousedown`, `focusin`) to proactively ensure `electronAPI.ensureFocus()` whenever any input field is clicked or focused.
 
 ---
 *Last Updated: October 2026 · Peyala v12.0 Engineering*

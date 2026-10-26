@@ -1,3 +1,5 @@
+**CRITICAL RULE: WHEN REQUESTED TO UPDATE OR CHANGE ANYTHING, NEVER CHANGE, BREAK, OR COMPROMISE ANY EXISTING LOGIC EVER.**
+
 # 🍵 Peyala Business Admin & Dine-In POS (Version 12.0.0)
 
 A comprehensive, self-hosted restaurant management and Point-of-Sale (POS) system built specifically for **Peyala Café & Restaurant** (Midnapore, West Bengal).
@@ -7,10 +9,11 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 ---
 
 > [!IMPORTANT]
-> **Mandatory Maintenance & Build Rule**:
-> 1. Whenever any change or new feature is introduced to this codebase, **both `README.md` and `MEMORY_BANK.md` must be updated immediately**.
-> 2. **After EVERY change, the final single-file installers (`INSTALL-PEYALA-ALL-IN-ONE.bat` & `Peyala-POS-AllInOne-Installer.exe`) and the Android build (`Peyala-POS.apk`) MUST be updated and compiled consistently.**
-> 3. Execute `build-all-in-one.bat` (or `powershell -ExecutionPolicy Bypass -File scripts\build-all-in-one.ps1`), which automatically recompiles the Android APK, builds production assets, packages the clean single-file installers, and mirrors them to `C:\Desktop\Peyala_v8`.
+> **Mandatory Maintenance & Build Rules**:
+> 1. **Zero Existing Logic Changes**: Whenever told to update or add anything, **NEVER change, break, or alter existing business logic, calculations, or operational workflows**.
+> 2. Whenever any change or new feature is introduced to this codebase, **both `README.md` and `MEMORY_BANK.md` must be updated immediately**.
+> 3. **Proactive Installer Update Prompt**: After EVERY change to the codebase, the AI assistant must **proactively ask the user to update the all-in-one installer** (`INSTALL-PEYALA-ALL-IN-ONE.bat` & `Peyala-POS-AllInOne-Installer.exe`) without waiting for the user to ask.
+> 4. Execute `build-all-in-one.bat` (or `powershell -ExecutionPolicy Bypass -File scripts\build-all-in-one.ps1`), which automatically recompiles the Android APK, builds production assets, packages the clean single-file installers, and mirrors them to `C:\Desktop\Peyala_v8`.
 
 ---
 
@@ -62,6 +65,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
     - Table transitions to **Emerald Green** (`border-2 border-emerald-500 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-400/40`) with a pulsating **`Bill Given`** status pill.
     - Floor staff instantly know the bill has been delivered to the customer and payment is pending.
     - Clicking the table card body (or the dedicated `[ 💵 Settle ]` quick button) directly launches the Payment Collection dialog.
+  - **Live Running Orders Header Badge (Unbilled Revenue Counter)**: Positioned prominently beside the floor section filter tabs on top of the Tables page, a real-time amber badge displays the total count of running orders (active dining/KOT tables whose customer bill has not been printed yet) along with their live grand total in Rupees (`₹`). Automatically computes real-time restaurant-wide unbilled revenue and adapts with section-specific subtotals whenever a floor section filter is active.
   - **Stage 5: Collecting Payment (Settle & Free Table)**:
     - Operator selects payment mode (Cash, UPI, Card, Other, Part Payment) and enters received amount.
     - Live calculations provide instant change due or waived shortage feedback.
@@ -115,6 +119,18 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 ### 2. Dual Discount Engine
 - Apply either **Flat monetary discount (₹)** or **Percentage discount (%)**.
 - Dynamic real-time preview against order subtotal before taxes.
+
+### 2.1 Mobile Bottom Navigation Tray Active Tab Memory
+- On mobile smartphones, the horizontal scrolling bottom navigation tray automatically calculates and centers the active module into view on route changes, preventing the tray from scrolling back to the first tab (Dashboard). Manual scroll positions are persisted in `sessionStorage` (`peyala_mobile_nav_scroll`).
+
+### 2.2 GST Liability Inbound Sync Deduplication Guard
+- `orders.js` and `syncEngine.js` are hardened with multi-attribute deduplication (`doc._id`, `doc.billNumber`, `doc.orderNumber`, and timestamp/amount correlation) to guarantee that inbound order sync never duplicates GST liability entries on the Balance Sheet.
+
+### 2.3 Offline Zero-Internet Resilience & KOT Duplicate Print Protection
+- **Dual-Stack & Direct IP Resolution**: Express server binds dual-stack and Next.js rewrites proxy directly to `http://127.0.0.1:4000`, completely eliminating Windows `localhost` $\rightarrow$ IPv6 `::1` DNS resolution failures when Wi-Fi is disabled.
+- **Local Endpoint Health Verification**: `offline-sync.ts` pings local `/health` instead of relying on `navigator.onLine`, enabling full intranet/local POS operations even with zero internet.
+- **Persistent Floor Cache & Optimistic Occupancy**: `tables/page.tsx` caches floor layouts in `localStorage` (`peyala_cached_tables_v1`) to prevent empty table views on disconnects, and immediately reflects table occupancy upon order dispatch.
+- **KOT Deduplication Protocol**: Prevents double printing when offline orders sync back to the database via `peyala_printed_kots_v1` local storage tracking and `kotAlreadyPrinted: true` backend suppression flags.
 
 ### 3. Settlement Amount & Waived Off Monitoring
 - During payment collection, the **Settlement Amount** defaults to the exact **Grand Total**.
@@ -958,6 +974,11 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
 - **Single-Instance Windows Launcher (`PeyalaLauncher.cs` / `PeyalaPOS.exe`)**:
   - Implements a system-wide named Mutex (`Global\PeyalaPOS_SingleInstance_Mutex_v8`).
   - Guarantees only one instance of the POS launcher runs at a time, completely preventing duplicate system tray icons, port collisions, and background RAM/CPU overhead on counter laptops.
+- **Dedicated Electron Desktop Anti-Input Freeze Protection (`desktop/main.js`, `desktop/preload.js`, `AppLayout.tsx`)**:
+  - **Hardware Acceleration Disabling (`app.disableHardwareAcceleration()` & `--disable-gpu`)**: Eliminates Chromium D3D11 swapchain backpressure on Windows laptops with Intel/hybrid GPUs, ensuring typing in rapidly re-rendering search lists never hangs the compositor thread.
+  - **Native Menu Trapping Detachment**: Removed `autoHideMenuBar: true`, invoked `mainWindow.removeMenu()`, and intercepted lone `Alt` keystrokes in `before-input-event` with `event.preventDefault()` so Windows Win32 message loop never captures keyboard input into a hidden menu loop.
+  - **Windows Occlusion & Throttling Immunity**: Disabled background timer throttling, renderer backgrounding, and native window occlusion checks (`CalculateNativeWinOcclusion`).
+  - **Native Dialog & Active Input Focus Recovery**: Wrapped `window.confirm` and `window.alert` to automatically resynchronize OS window focus via `electronAPI.resyncFocus()` upon closure, ensuring inputs never lose keystroke focus.
 
 ---
 

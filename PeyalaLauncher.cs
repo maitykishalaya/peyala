@@ -60,7 +60,7 @@ namespace PeyalaPOS
                 {
                     try
                     {
-                        ProcessStartInfo eInfo = new ProcessStartInfo(electronExe, string.Format("\"{0}\"", desktopDir))
+                        ProcessStartInfo eInfo = new ProcessStartInfo(electronExe, string.Format("\"{0}\" --disable-gpu", desktopDir))
                         {
                             WorkingDirectory = desktopDir,
                             UseShellExecute = false

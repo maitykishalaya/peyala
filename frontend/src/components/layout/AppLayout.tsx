@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
@@ -47,6 +47,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const mobileNavRef = useRef<HTMLDivElement>(null);
+
+  // ── PRESERVE MOBILE BOTTOM TRAY POSITION & KEEP SELECTED TAB IN VIEW ──
+  useLayoutEffect(() => {
+    const container = mobileNavRef.current;
+    if (!container) return;
+
+    const positionActiveTab = () => {
+      const activeBtn = container.querySelector('[data-active="true"]') as HTMLElement | null;
+      if (activeBtn) {
+        const targetScroll = Math.max(0, activeBtn.offsetLeft - (container.clientWidth - activeBtn.clientWidth) / 2);
+        container.scrollLeft = targetScroll;
+        try {
+          sessionStorage.setItem('peyala_mobile_nav_scroll', String(targetScroll));
+        } catch (_) {}
+      } else {
+        const saved = sessionStorage.getItem('peyala_mobile_nav_scroll');
+        if (saved) {
+          container.scrollLeft = parseInt(saved, 10);
+        }
+      }
+    };
+
+    positionActiveTab();
+    const timer = setTimeout(positionActiveTab, 50);
+    return () => clearTimeout(timer);
+  }, [pathname, mounted]);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
@@ -142,24 +169,72 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.getAttribute('contenteditable') === 'true')) {
-        // Only if the browser window does not have OS focus, restore top-level focus
-        if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
-          try {
+        try {
+          // In Electron, ensure the native top-level window and WebContents are synchronized
+          if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            (window as any).electronAPI.ensureFocus?.();
+          } else {
             window.focus();
-            (window as any).electronAPI?.ensureFocus?.();
-          } catch (_) {}
-        }
+          }
+
+          // If the element was already activeElement, user clicked it to recover an unresponsive state
+          if (document.activeElement === target) {
+            setTimeout(() => {
+              try { target.focus(); } catch (_) {}
+            }, 10);
+          }
+        } catch (_) {}
       }
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        try {
+          if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            (window as any).electronAPI.ensureFocus?.();
+          }
+        } catch (_) {}
+      }
+    };
+
+    // Auto-recover OS focus after native alert / confirm dialogs on Windows Electron
+    const originalConfirm = window.confirm;
+    const originalAlert = window.alert;
+
+    window.confirm = (...args) => {
+      const result = originalConfirm.apply(window, args);
+      setTimeout(() => {
+        try {
+          window.focus();
+          (window as any).electronAPI?.resyncFocus?.();
+        } catch (_) {}
+      }, 50);
+      return result;
+    };
+
+    window.alert = (...args) => {
+      originalAlert.apply(window, args);
+      setTimeout(() => {
+        try {
+          window.focus();
+          (window as any).electronAPI?.resyncFocus?.();
+        } catch (_) {}
+      }, 50);
     };
 
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('mousedown', handlePointerDown as any, true);
     document.addEventListener('touchstart', handlePointerDown as any, { capture: true, passive: true });
+    document.addEventListener('focusin', handleFocusIn, true);
 
     return () => {
+      window.confirm = originalConfirm;
+      window.alert = originalAlert;
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('mousedown', handlePointerDown as any, true);
       document.removeEventListener('touchstart', handlePointerDown as any, true);
+      document.removeEventListener('focusin', handleFocusIn, true);
     };
   }, []);
 
@@ -421,13 +496,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Bottom mobile nav */}
         <footer className="md:hidden fixed inset-x-0 bottom-0 z-20 bg-white/95 dark:bg-gray-950/95 border-t border-gray-200 dark:border-gray-800 shadow-xl backdrop-blur-sm">
-          <div className="mx-auto flex max-w-5xl items-center gap-1.5 overflow-x-auto px-3 py-2 scrollbar-none">
+          <div
+            ref={mobileNavRef}
+            onScroll={(e) => {
+              try {
+                sessionStorage.setItem('peyala_mobile_nav_scroll', String(e.currentTarget.scrollLeft));
+              } catch (_) {}
+            }}
+            className="mx-auto flex max-w-5xl items-center gap-1.5 overflow-x-auto px-3 py-2 scrollbar-none"
+          >
             {NAV.map(({ href, label, icon: Icon }) => {
               const active = pathname.startsWith(href);
               return (
                 <button
                   key={href}
                   type="button"
+                  data-active={active ? 'true' : 'false'}
                   onClick={() => router.push(href)}
                   className={cn(
                     'min-w-[60px] rounded-2xl px-2.5 py-1.5 text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all flex-shrink-0',

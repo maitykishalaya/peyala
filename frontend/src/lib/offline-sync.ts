@@ -117,6 +117,15 @@ export function enqueueRequest(config: AxiosRequestConfig, tempId?: string): Que
   let parsedData = config.data;
   if (typeof parsedData === 'string') {
     try { parsedData = JSON.parse(parsedData); } catch {}
+  } else if (parsedData && typeof parsedData === 'object') {
+    parsedData = { ...parsedData };
+  }
+
+  // If this is an order creation or add items that was placed and already printed locally:
+  // Mark shouldPrint = false / kotAlreadyPrinted = true so it is not double-printed by print station upon sync
+  if (url.includes('/orders') && method === 'post' && parsedData) {
+    parsedData.shouldPrint = false;
+    parsedData.kotAlreadyPrinted = true;
   }
 
   const queuedItem: QueuedRequest = {
@@ -140,13 +149,13 @@ export function enqueueRequest(config: AxiosRequestConfig, tempId?: string): Que
 
 /**
  * Checks if the backend database connection is actually reachable and responsive.
+ * Uses local HTTP ping rather than navigator.onLine so local-first offline cafes operate seamlessly.
  */
 export async function isBackendReachable(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
-  if (!navigator.onLine) return false;
 
   try {
-    const res = await syncClient.get('/health', { timeout: 3000 });
+    const res = await syncClient.get('/health', { timeout: 2000 });
     return res.status === 200;
   } catch {
     return false;

@@ -13,8 +13,9 @@ const nextConfig = {
       (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.startsWith('http')
         ? process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/?$/, '')
         : '') ||
-      'http://localhost:4000';
-    const backendUrl = rawBackend.replace(/\/$/, '');
+      'http://127.0.0.1:4000';
+    // Use 127.0.0.1 instead of localhost so Node.js bypasses DNS resolution when offline/no Wi-Fi
+    const backendUrl = rawBackend.replace(/\/$/, '').replace('localhost:4000', '127.0.0.1:4000');
     return [
       {
         source: '/api/:path*',

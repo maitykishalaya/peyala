@@ -94,6 +94,29 @@ export interface CartItemConfig {
   unitPrice: number;
 }
 
+const CACHED_TABLES_KEY = 'peyala_cached_tables_v1';
+const PRINTED_KOTS_CACHE_KEY = 'peyala_printed_kots_v1';
+
+function getPrintedKotSet(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(PRINTED_KOTS_CACHE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function recordKotPrintedLocally(key: string) {
+  if (typeof window === 'undefined' || !key) return;
+  try {
+    const set = getPrintedKotSet();
+    set.add(key);
+    const arr = Array.from(set).slice(-500);
+    localStorage.setItem(PRINTED_KOTS_CACHE_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
 export type TableSection = string;
 
 function inferTableSection(tableNumber: string): string {
@@ -616,23 +639,23 @@ export default function TablesPage() {
       let tableRes;
       if (isSilent) {
         // High-speed low-overhead background polling for low-end hardware: only fetch tables
-        tableRes = await tablesApi.list();
+        tableRes = await tablesApi.list().catch(() => null);
       } else {
         // Initial / manual load fetches full menu catalogs & POS role limits
         const [tRes, itemRes, catRes, addonRes, tableCatRes, posLimitsRes] = await Promise.all([
-          tablesApi.list(),
-          menuApi.listItems({ availableOnly: true }),
-          menuApi.listCategories(),
-          addonsApi.list(),
+          tablesApi.list().catch(() => null),
+          menuApi.listItems({ availableOnly: true }).catch(() => null),
+          menuApi.listCategories().catch(() => null),
+          addonsApi.list().catch(() => null),
           tableCategoriesApi.list().catch(() => ({ data: [] })),
           posSettingsApi.get().catch(() => ({ data: null })),
         ]);
         tableRes = tRes;
-        setMenuItems(itemRes.data || []);
-        setCategories(catRes.data || []);
-        setAddons(addonRes.data || []);
-        setTableCategories(tableCatRes.data || []);
-        if (posLimitsRes.data) {
+        if (itemRes?.data) setMenuItems(itemRes.data);
+        if (catRes?.data) setCategories(catRes.data);
+        if (addonRes?.data) setAddons(addonRes.data);
+        if (tableCatRes?.data) setTableCategories(tableCatRes.data);
+        if (posLimitsRes?.data) {
           setPosLimits({
             maxDiscountStaffPercent: posLimitsRes.data.maxDiscountStaffPercent ?? 10,
             maxDiscountManagerPercent: posLimitsRes.data.maxDiscountManagerPercent ?? 20,
@@ -642,7 +665,24 @@ export default function TablesPage() {
         }
       }
 
-      const tableData = tableRes.data || [];
+      let tableData = tableRes?.data;
+      if (Array.isArray(tableData) && tableData.length > 0) {
+        try {
+          localStorage.setItem(CACHED_TABLES_KEY, JSON.stringify(tableData));
+        } catch {}
+      } else {
+        // Resilient offline fallback: restore cached floor layout from localStorage if API failed or offline
+        try {
+          const cached = localStorage.getItem(CACHED_TABLES_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              tableData = parsed;
+            }
+          }
+        } catch {}
+      }
+      tableData = tableData || [];
 
       // Performance check for low-end laptops: only trigger React DOM re-render if table states changed
       const tableHash = tableData
@@ -658,7 +698,7 @@ export default function TablesPage() {
       }
 
       // Check for orders that were marked served by KDS to notify the cashier
-      const newlyServedTables = (tableRes.data || []).filter((t) => {
+      const newlyServedTables = (tableData || []).filter((t) => {
         const ord = t.activeOrder as any;
         if (!ord || !ord._id) return false;
         return ord.status === 'served' && !prevServedOrderIdsRef.current.has(ord._id);
@@ -681,7 +721,7 @@ export default function TablesPage() {
       }
 
       const nextServedSet = new Set<string>();
-      (tableRes.data || []).forEach((t) => {
+      (tableData || []).forEach((t) => {
         const ord = t.activeOrder as any;
         if (ord && ord._id && ord.status === 'served') {
           nextServedSet.add(ord._id);
@@ -825,14 +865,20 @@ export default function TablesPage() {
 
       try {
         // 1. Check and Auto-Print Pending KOTs
-        const kotRes = await ordersApi.getPendingKots();
+        const kotRes = await ordersApi.getPendingKots().catch(() => ({ data: [] }));
         const pendingKots = kotRes.data || [];
+        const localPrintedSet = getPrintedKotSet();
 
         for (const job of pendingKots) {
           const jobKey = `${job.orderId}-${job.roundId}`;
-          if (inFlightKotsRef.current.has(jobKey)) continue;
+          if (inFlightKotsRef.current.has(jobKey) || localPrintedSet.has(jobKey)) {
+            // Already printed locally on this device, mark printed on server to silence queue
+            ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
+            continue;
+          }
 
           inFlightKotsRef.current.add(jobKey);
+          recordKotPrintedLocally(jobKey);
 
           printKOT({
             tableNumber: job.tableNumber,
@@ -844,7 +890,7 @@ export default function TablesPage() {
             items: job.items,
           }, 'production');
 
-          await ordersApi.markKotPrinted(job.orderId, job.roundId);
+          await ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
           setLastPrintedKOT(`Table ${job.tableNumber} (${job.roundTag})`);
           await new Promise((resolve) => setTimeout(resolve, 400));
         }
@@ -992,6 +1038,36 @@ export default function TablesPage() {
     }).length;
     return { total, available, occupied, reserved, billed };
   }, [tables]);
+
+  // Total running orders (where bill has not been printed yet) and their total sum in Rs
+  const runningOrdersSummary = useMemo(() => {
+    let count = 0;
+    let sum = 0;
+    let sectionCount = 0;
+    let sectionSum = 0;
+
+    tables.forEach((t) => {
+      const ord = t.activeOrder as any;
+      const isOccupied = t.status === 'occupied';
+      const isPaid = ord && ord.status === 'paid';
+      const isBilled = isOccupied && ord && !isPaid && (ord.status === 'billed' || Boolean(ord.billPrinted));
+      const isRunning = isOccupied && ord && !isPaid && !isBilled;
+
+      if (isRunning) {
+        const orderAmt = Number(ord.total) || Number(ord.subtotal) || 0;
+        count += 1;
+        sum += orderAmt;
+
+        const tableSec = getTableSection(t);
+        if (sectionFilter !== 'all' && tableSec === sectionFilter) {
+          sectionCount += 1;
+          sectionSum += orderAmt;
+        }
+      }
+    });
+
+    return { count, sum, sectionCount, sectionSum };
+  }, [tables, sectionFilter]);
 
   // Dynamic list of active sections sorted according to TableCategory configuration
   const activeSections = useMemo(() => {
@@ -1521,6 +1597,7 @@ export default function TablesPage() {
       setActionLoading(true);
       setSubmittingAction(shouldPrint ? 'kot_print' : 'kot');
 
+      let dispatchedOrder: any = null;
       const effectiveRound2 = isRound2Mode || (targetTable?.status === 'occupied' && Boolean(targetTable?.activeOrder));
       const effectiveOrder = activeOrder || (targetTable?.activeOrder as any);
 
@@ -1536,6 +1613,7 @@ export default function TablesPage() {
           customerId: cartCustomerId || undefined,
         });
         const updatedOrder = res.data;
+        dispatchedOrder = updatedOrder;
 
         if (shouldPrint) {
           const printableItems = Object.values(cart).map((c) => {
@@ -1567,11 +1645,11 @@ export default function TablesPage() {
             orderNotes: orderNotes.trim() || undefined,
           });
 
+          const roundKey = `${updatedOrder._id}-${newRound?._id || roundNum}`;
+          inFlightKotsRef.current.add(roundKey);
+          recordKotPrintedLocally(roundKey);
           if (newRound?._id) {
-            inFlightKotsRef.current.add(`${updatedOrder._id}-${newRound._id}`);
-            if (isPrintStation) {
-              ordersApi.markKotPrinted(updatedOrder._id, newRound._id).catch(() => {});
-            }
+            ordersApi.markKotPrinted(updatedOrder._id, newRound._id).catch(() => {});
           }
         }
 
@@ -1594,6 +1672,7 @@ export default function TablesPage() {
           customerId: cartCustomerId || undefined,
         });
         const createdOrder = res.data;
+        dispatchedOrder = createdOrder;
 
         if (shouldPrint) {
           const printableItems = Object.values(cart).map((c) => {
@@ -1625,11 +1704,11 @@ export default function TablesPage() {
             orderNotes: orderNotes.trim() || undefined,
           });
 
+          const roundKey = `${createdOrder._id}-${firstRound?._id || 1}`;
+          inFlightKotsRef.current.add(roundKey);
+          recordKotPrintedLocally(roundKey);
           if (firstRound?._id) {
-            inFlightKotsRef.current.add(`${createdOrder._id}-${firstRound._id}`);
-            if (isPrintStation) {
-              ordersApi.markKotPrinted(createdOrder._id, firstRound._id).catch(() => {});
-            }
+            ordersApi.markKotPrinted(createdOrder._id, firstRound._id).catch(() => {});
           }
         }
 
@@ -1639,6 +1718,22 @@ export default function TablesPage() {
         toast.success(msg);
         setNoticeMessage(msg);
         setTimeout(() => setNoticeMessage(null), 4000);
+      }
+
+      // Optimistically update table occupancy in local React state immediately so floor is NEVER empty!
+      const effectiveTableId = targetTable?._id || tables[0]?._id;
+      if (effectiveTableId && dispatchedOrder) {
+        setTables((prev) =>
+          prev.map((t) =>
+            t._id === effectiveTableId
+              ? {
+                  ...t,
+                  status: 'occupied',
+                  activeOrder: dispatchedOrder,
+                }
+              : t
+          )
+        );
       }
 
       // Clear cart & return to Table View per user requirement!
@@ -1653,7 +1748,7 @@ export default function TablesPage() {
       setSelectedTable(null);
       setActiveOrder(null);
       setIsRound2Mode(false);
-      await loadData();
+      loadData(true).catch(() => {});
       setActiveView('table_view');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to dispatch KOT');
@@ -2497,36 +2592,95 @@ export default function TablesPage() {
               </div>
             </div>
 
-            {/* Filter Section Tabs & Search Bar */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
-              <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-                {(['all', ...activeSections]).map((sec) => {
-                  if (sec !== 'all' && (!sectionGroupedTables[sec] || sectionGroupedTables[sec].length === 0)) {
-                    return null;
-                  }
-                  return (
-                    <button
-                      key={sec}
-                      onClick={() => setSectionFilter(sec)}
+            {/* Filter Section Tabs, Running Orders Counter & Search Bar */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 scrollbar-none">
+                {/* Section Filter Tabs */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {(['all', ...activeSections]).map((sec) => {
+                    if (sec !== 'all' && (!sectionGroupedTables[sec] || sectionGroupedTables[sec].length === 0)) {
+                      return null;
+                    }
+                    return (
+                      <button
+                        key={sec}
+                        onClick={() => setSectionFilter(sec)}
+                        className={cn(
+                          'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',
+                          sectionFilter === sec
+                            ? 'bg-red-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100'
+                        )}
+                      >
+                        {sec === 'all' ? 'All Sections' : sec}
+                        {sec !== 'all' && (
+                          <span className="ml-1 opacity-80 text-[10px]">
+                            ({sectionGroupedTables[sec].length})
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Vertical Divider */}
+                <div className="hidden sm:block h-5 w-[1px] bg-gray-200 dark:bg-gray-700 shrink-0 mx-0.5" />
+
+                {/* Total Running Orders (Bill not printed yet) & Sum in Rs */}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-1.5 rounded-lg border shadow-2xs whitespace-nowrap shrink-0 transition-all',
+                    runningOrdersSummary.count > 0
+                      ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700/80 text-amber-950 dark:text-amber-100'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400'
+                  )}
+                  title="Running orders across tables where customer bill has not been printed yet"
+                >
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    {runningOrdersSummary.count > 0 && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                    )}
+                    <span
                       className={cn(
-                        'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',
-                        sectionFilter === sec
-                          ? 'bg-red-600 text-white shadow-xs'
-                          : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100'
+                        'relative inline-flex rounded-full h-2 w-2',
+                        runningOrdersSummary.count > 0 ? 'bg-amber-500' : 'bg-gray-400'
                       )}
-                    >
-                      {sec === 'all' ? 'All Sections' : sec}
-                      {sec !== 'all' && (
-                        <span className="ml-1 opacity-80 text-[10px]">
-                          ({sectionGroupedTables[sec].length})
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                    />
+                  </span>
+                  <span className="text-xs font-semibold">
+                    Running Orders:
+                  </span>
+                  <span
+                    className={cn(
+                      'text-xs font-black px-1.5 py-0.5 rounded shadow-2xs',
+                      runningOrdersSummary.count > 0
+                        ? 'bg-amber-200/90 dark:bg-amber-900/90 text-amber-950 dark:text-amber-100'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    )}
+                  >
+                    {runningOrdersSummary.count}
+                  </span>
+                  <span className="text-gray-300 dark:text-gray-600 font-bold">•</span>
+                  <span
+                    className={cn(
+                      'text-xs font-black tracking-tight',
+                      runningOrdersSummary.count > 0
+                        ? 'text-amber-900 dark:text-amber-200'
+                        : 'text-gray-700 dark:text-gray-300'
+                    )}
+                  >
+                    {formatCurrency(runningOrdersSummary.sum)}
+                  </span>
+
+                  {sectionFilter !== 'all' && (
+                    <span className="text-[11px] font-bold text-amber-800/80 dark:text-amber-300/80 ml-1">
+                      ({runningOrdersSummary.sectionCount} in {sectionFilter} • {formatCurrency(runningOrdersSummary.sectionSum)})
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="relative w-full sm:w-64">
+              <div className="relative w-full sm:w-64 shrink-0">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
@@ -2537,6 +2691,7 @@ export default function TablesPage() {
                 />
               </div>
             </div>
+
 
             {/* Grouped Floor Sections: Indoor, Outdoor, Pick Up, Other (Matching Image 2) */}
             {loading ? (

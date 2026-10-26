@@ -106,8 +106,9 @@ const server = http.createServer(app);
 // Initialize Realtime WebSocket Hub on same port
 realtimeHub.init(server);
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🍵 Peyala Local-First API & Realtime Hub running on port ${PORT} (0.0.0.0)`);
+// Listen on all network interfaces (dual-stack IPv4 and IPv6)
+server.listen(PORT, () => {
+  console.log(`🍵 Peyala Local-First API & Realtime Hub running on port ${PORT}`);
 });
 
 // Clean shutdown handler

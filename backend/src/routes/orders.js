@@ -882,6 +882,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
           const populated = await appendItemsToOrder(activeOrder, {
             items,
             shouldPrint,
+            kotAlreadyPrinted: req.body.kotAlreadyPrinted,
             orderNotes: customerInstruction,
             customerName: resolvedCust?.customerName || customerName,
             customerPhone: resolvedCust?.customerPhone || customerPhone,
@@ -966,7 +967,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
     // Sequential 4-digit order number (atomic and collision-free)
     const orderNumber = await getNextOrderNumber();
 
-    const isAutoPrint = shouldPrint !== false;
+    const isAutoPrint = shouldPrint !== false && req.body.kotAlreadyPrinted !== true;
     const orderNow = new Date();
     const dailyKotNumber = await getNextDailyKotNumber(orderNow);
     const initialKotRound = {
@@ -1033,7 +1034,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
 });
 
 // Helper: append items and create a new KOT round for an order
-async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes, customerName, customerPhone, customerAddress, customerId, customerInfo, user }) {
+async function appendItemsToOrder(order, { items, shouldPrint, kotAlreadyPrinted, orderNotes, notes, customerName, customerPhone, customerAddress, customerId, customerInfo, user }) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items array is required');
   }
@@ -1163,7 +1164,7 @@ async function appendItemsToOrder(order, { items, shouldPrint, orderNotes, notes
     order.kotRounds = [];
   }
 
-  const isAutoPrint = shouldPrint !== false;
+  const isAutoPrint = shouldPrint !== false && kotAlreadyPrinted !== true;
   const dailyKotNumber = await getNextDailyKotNumber(now);
   const sortedRoundItems = [...newRoundItems].sort(
     (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
@@ -1213,6 +1214,7 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     const populated = await appendItemsToOrder(order, {
       items: req.body.items,
       shouldPrint: req.body.shouldPrint,
+      kotAlreadyPrinted: req.body.kotAlreadyPrinted,
       orderNotes: req.body.orderNotes,
       notes: req.body.notes,
       customerName: req.body.customerName,
@@ -1718,10 +1720,10 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
           $push: {
             gstLog: {
               date: new Date(),
-              salesEntryId: salesEntry?._id,
+              salesEntryId: order._id,
               outletSales: finalSettled,
               gstAdded: gstToAdd,
-              note: `Auto: GST on ₹${finalSettled} POS Dine-in Order (Table ${tableNum})${waivedAmount > 0 ? ` [Waived: ₹${waivedAmount}]` : ''}`,
+              note: `Auto: GST on ₹${finalSettled} POS Dine-in Order (Bill #${order.billNumber || order.orderNumber || ''} - Table ${tableNum})${waivedAmount > 0 ? ` [Waived: ₹${waivedAmount}]` : ''}`,
             },
           },
           $set: {
