@@ -14,6 +14,69 @@ class NightlySnapshotService {
     if (!fs.existsSync(this.nightlyDir)) {
       fs.mkdirSync(this.nightlyDir, { recursive: true });
     }
+    this.lockFile = path.join(this.restorePointsDir, '.snapshot.lock');
+  }
+
+  /**
+   * Acquire cross-process file lock to prevent concurrent snapshot collisions
+   */
+  acquireLock() {
+    const now = Date.now();
+    if (fs.existsSync(this.lockFile)) {
+      try {
+        const lockData = JSON.parse(fs.readFileSync(this.lockFile, 'utf8'));
+        // If lock was acquired within the last 5 minutes, another process is actively running
+        if (now - (lockData.timestamp || 0) < 5 * 60 * 1000) {
+          console.log(`[NightlySnapshot] 🔒 Cross-process lock active (PID ${lockData.pid}). Another snapshot process is currently capturing. Skipping collision.`);
+          return false;
+        }
+        console.warn(`[NightlySnapshot] ⚠️ Stale lock file detected (>5m old from PID ${lockData.pid}). Overriding.`);
+      } catch (_) {}
+    }
+
+    try {
+      fs.writeFileSync(this.lockFile, JSON.stringify({ pid: process.pid, timestamp: now }), 'utf8');
+      return true;
+    } catch (e) {
+      console.warn('[NightlySnapshot] Could not write lock file:', e.message);
+      return true;
+    }
+  }
+
+  /**
+   * Release cross-process file lock
+   */
+  releaseLock() {
+    try {
+      if (fs.existsSync(this.lockFile)) {
+        fs.unlinkSync(this.lockFile);
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Safely write JSON to disk atomically using a temp file + atomic rename
+   */
+  atomicWriteJson(filePath, data) {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const tmpPath = `${filePath}.${Date.now()}.${Math.random().toString(36).substring(2, 7)}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf8');
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch (_) {}
+      }
+      fs.renameSync(tmpPath, filePath);
+    } catch (renameErr) {
+      // Fallback direct write if atomic rename is blocked by filesystem or permissions
+      try {
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch (directErr) {
+        console.warn(`[NightlySnapshot] Atomic write warning for ${filePath}:`, directErr.message);
+      }
+    }
   }
 
   /**
@@ -56,17 +119,42 @@ class NightlySnapshotService {
    * Captures a full snapshot of the authoritative database
    */
   async takeSnapshot(options = {}) {
+    const dateStr = options.dateStr || this.getIstDateStr();
+    const tag = options.tag || 'nightly_1159pm';
+    const reason = options.reason || 'Nightly 11:59 PM IST Closing Snapshot';
+
+    // 0a. In-process mutex check (prevents duplicate calls within the same Node process)
     if (this.isTakingSnapshot) {
-      console.log('[NightlySnapshot] Snapshot already in progress, skipping duplicate call.');
+      console.log('[NightlySnapshot] Snapshot already in progress in this process, skipping duplicate call.');
+      return this.lastSnapshotInfo;
+    }
+
+    // 0b. 5-Minute Deduplication Cooldown Guard
+    // Prevents collision between in-process scheduler and Windows Scheduled Task if both trigger around 23:59 IST
+    const targetDir = path.join(this.nightlyDir, `snapshot_${dateStr}`);
+    const manifestFile = path.join(targetDir, 'manifest.json');
+    if (tag === 'nightly_1159pm' && fs.existsSync(manifestFile)) {
+      try {
+        const existingManifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+        const createdAt = new Date(existingManifest.createdAt).getTime();
+        const ageMs = Date.now() - createdAt;
+        if (ageMs < 5 * 60 * 1000) {
+          const ageSec = Math.round(ageMs / 1000);
+          console.log(`[NightlySnapshot] ✅ Nightly closing snapshot for ${dateStr} was already completed ${ageSec}s ago. Skipping redundant collision.`);
+          this.lastSnapshotInfo = existingManifest;
+          return existingManifest;
+        }
+      } catch (_) {}
+    }
+
+    // 0c. OS-level cross-process lock check (prevents dual Node processes from colliding on disk)
+    if (!this.acquireLock()) {
       return this.lastSnapshotInfo;
     }
 
     this.isTakingSnapshot = true;
     const startTime = Date.now();
-    const dateStr = options.dateStr || this.getIstDateStr();
     const timestampStr = this.getIstTimestampStr();
-    const tag = options.tag || 'nightly_1159pm';
-    const reason = options.reason || 'Nightly 11:59 PM IST Closing Snapshot';
 
     console.log(`\n[NightlySnapshot] Starting closing snapshot for ${dateStr} (${reason})...`);
 
@@ -196,25 +284,22 @@ class NightlySnapshotService {
         },
       };
 
-      // 6. Write files to disk
+      // 6. Write files to disk using atomic operations (temp file + rename)
       const dumpFile = path.join(targetDir, 'atlas_data_snapshot.json');
       const manifestFile = path.join(targetDir, 'manifest.json');
-      fs.writeFileSync(dumpFile, JSON.stringify(dump, null, 2), 'utf8');
-      fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2), 'utf8');
+      this.atomicWriteJson(dumpFile, dump);
+      this.atomicWriteJson(manifestFile, manifest);
 
       // Update baseline snapshots for offline installer bundling
       const candidateBaselinePaths = [
         path.join(__dirname, '../../data/baseline_snapshot.json'),
         path.join(__dirname, '../../../data/baseline_snapshot.json'),
         path.join(this.restorePointsDir, 'latest_closing_snapshot.json'),
-        path.join(this.restorePointsDir, 'v10.0.0_baseline/atlas_data_snapshot.json'),
       ];
 
       for (const p of candidateBaselinePaths) {
         try {
-          const dir = path.dirname(p);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(p, JSON.stringify(dump, null, 2), 'utf8');
+          this.atomicWriteJson(p, dump);
         } catch (_) {}
       }
 
@@ -287,6 +372,7 @@ class NightlySnapshotService {
       return manifest;
     } finally {
       this.isTakingSnapshot = false;
+      this.releaseLock();
       if (connToClose) {
         try { await connToClose.close(); } catch (_) {}
       }
