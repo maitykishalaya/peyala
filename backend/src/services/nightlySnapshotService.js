@@ -258,7 +258,7 @@ class NightlySnapshotService {
       }
 
       const manifest = {
-        version: '12.0.0',
+        version: '12.1.0',
         snapshotId,
         dateStr,
         tag,
@@ -306,7 +306,7 @@ class NightlySnapshotService {
       // 7. Insert RestorePoint document into database directly on activeDb
       try {
         await activeDb.collection('restorepoints').insertOne({
-          version: '12.0.0',
+          version: '12.1.0',
           snapshotId,
           tag,
           description: reason,

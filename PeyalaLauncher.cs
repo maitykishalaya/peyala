@@ -163,7 +163,7 @@ namespace PeyalaPOS
         private static void InitializeTray()
         {
             ContextMenu menu = new ContextMenu();
-            MenuItem header = new MenuItem("🍵 Peyala POS - Version 12.0.0 (Port 3000)");
+            MenuItem header = new MenuItem("🍵 Peyala POS - Version 12.1.0 (Port 3000)");
             header.Enabled = false;
             menu.MenuItems.Add(header);
             menu.MenuItems.Add(new MenuItem("-"));
@@ -180,7 +180,7 @@ namespace PeyalaPOS
             menu.MenuItems.Add(exit);
 
             trayIcon = new NotifyIcon();
-            trayIcon.Text = "Peyala POS - Version 12.0.0";
+            trayIcon.Text = "Peyala POS - Version 12.1.0";
             string iconPath = Path.Combine(appDir, "icon.ico");
             if (File.Exists(iconPath))
             {

@@ -1405,5 +1405,15 @@ Whenever changes are made, run this validation suite before concluding:
          - **Current Account**: Updated from ₹280,038.56 to **₹283,633.56** (accurately reflecting the +₹3,595.00 due payment collected via UPI).
          - Both Central Atlas and Local DB match to the exact paisa.
 
+  - **Version 12.1.0 Milestone Release & Triple-Layer Anti-Collision Snapshot Engine (v12.1.0)**:
+    - **Snapshot Anti-Collision Guarantees**:
+      1. *OS-Level Cross-Process Lock (`.snapshot.lock`)*: Prevents simultaneous disk write collisions across independent Node instances.
+      2. *5-Minute Deduplication Cooldown Guard*: When both in-process scheduler and Windows Task Scheduler fire at 11:59 PM IST, redundant runs are cleanly skipped in 0.5s with zero disk writes and zero duplicate database entries.
+      3. *Atomic Safe Writes (`.tmp` -> Atomic Rename)*: Ensures zero file corruption even during abrupt power loss.
+    - **Enterprise All-In-One Installer & APK Bundle (v12.1.0)**:
+      - Synchronized Version 12.1.0 across `package.json` (root, backend, frontend, desktop), Android `build.gradle` (v12.1.0, code 13), UI layout, and launcher tray.
+      - Re-packaged single-file installers: `INSTALL-PEYALA-ALL-IN-ONE.bat` (535.06 MB), `Peyala-POS-AllInOne-Installer.exe` (535.18 MB), and `Peyala-POS.apk` (4.51 MB).
+      - Mirrored directly to `C:\Peyala` and `C:\Desktop\Peyala_v8`.
+
 ---
-*Last Updated: November 2, 2026 (Due Payment Account Ledger Resolution) · Peyala v12.0 Engineering*
+*Last Updated: November 2, 2026 (Version 12.1.0 Release & Anti-Collision Snapshot Engine) · Peyala v12.1 Engineering*

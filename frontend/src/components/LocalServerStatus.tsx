@@ -181,7 +181,7 @@ export default function LocalServerStatus() {
               </div>
               <div>
                 <h4 className="font-bold text-sm">Local-First System</h4>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">Primary Cafe Station · Version 12.0.0</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Primary Cafe Station · Version 12.1.0</p>
               </div>
             </div>
             <div className="flex items-center gap-1.5">

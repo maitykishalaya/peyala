@@ -1,6 +1,6 @@
 **CRITICAL RULE: WHEN REQUESTED TO UPDATE OR CHANGE ANYTHING, NEVER CHANGE, BREAK, OR COMPROMISE ANY EXISTING LOGIC EVER.**
 
-# 🍵 Peyala Business Admin & Dine-In POS (Version 12.0.0)
+# 🍵 Peyala Business Admin & Dine-In POS (Version 12.1.0)
 
 A comprehensive, self-hosted restaurant management and Point-of-Sale (POS) system built specifically for **Peyala Café & Restaurant** (Midnapore, West Bengal).
 
@@ -1090,5 +1090,16 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Aligned queries across `accountLedger.js` and the accounts ledger route to support both ObjectId and string matches for `receivedIn`, properly capturing customer dues paid into Cash Counter or Current Account.
   - Updated `/api/customers/:id/collect-due` to immediately execute `recalculateAccountBalances()` and broadcast `ACCOUNT_UPDATED` via WebSockets upon settlement.
   - **Reconciled Current Account Balance**: Added the collected ₹3,595.00 UPI customer due payment, bringing the live Current Account balance from ₹280,038.56 to **₹283,633.56** across both Central Atlas and Local DB.
+
+---
+
+### 14. Version 12.1.0 Milestone Release & Anti-Collision Closing Snapshot Engine (v12.1.0)
+- **Triple-Layer Anti-Collision Closing Snapshot Engine**:
+  - **OS-Level Cross-Process Lock (`.snapshot.lock`)**: File mutex prevents simultaneous disk write collision between distinct Node processes.
+  - **5-Minute Deduplication Cooldown Guard**: When both in-process scheduler and Windows Task Scheduler trigger at 11:59 PM IST, redundant execution is cleanly bypassed in 0.5s with zero disk writes and zero duplicate database entries.
+  - **Atomic Safe File Replacement (`.tmp` -> Atomic Rename)**: Eliminates partial file writes or corruption on unexpected shutdowns.
+- **Enterprise All-In-One Installer & APK Bundle (v12.1.0)**:
+  - Synchronized version across root `package.json`, `backend`, `frontend`, `desktop`, Android `build.gradle` (v12.1.0, code 13), and system tray launcher.
+  - Re-packaged single-file installers (`INSTALL-PEYALA-ALL-IN-ONE.bat` 535 MB, `Peyala-POS-AllInOne-Installer.exe` 535 MB, `Peyala-POS.apk` 4.51 MB).
 
 ---
