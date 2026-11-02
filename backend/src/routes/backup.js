@@ -210,4 +210,30 @@ router.post('/import', adminOnly, async (req, res) => {
   }
 });
 
+// GET /api/backup/nightly-snapshot/status
+// Returns the status of the automated 11:59 PM IST snapshot scheduler
+router.get('/nightly-snapshot/status', auth, (req, res) => {
+  try {
+    const nightlySnapshotService = require('../services/nightlySnapshotService');
+    res.json(nightlySnapshotService.getStatus());
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/backup/nightly-snapshot
+// Triggers an immediate closing snapshot
+router.post('/nightly-snapshot', auth, adminOnly, async (req, res) => {
+  try {
+    const nightlySnapshotService = require('../services/nightlySnapshotService');
+    const manifest = await nightlySnapshotService.takeSnapshot({
+      tag: 'manual_admin',
+      reason: req.body.reason || `Manual snapshot triggered by ${req.user.name}`,
+    });
+    res.json({ message: 'Snapshot captured successfully', manifest });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

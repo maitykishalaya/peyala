@@ -193,6 +193,21 @@ export default function AnalyticsPage() {
     return () => clearTimeout(timer);
   }, [itemSearch]);
 
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      fetchOverview();
+      if (activeTab === 'items') fetchItems();
+      if (activeTab === 'gst') fetchGst();
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('peyala_sales_updated', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('peyala_sales_updated', handleSync);
+    };
+  }, [activeTab]);
+
   // Handle Suggestion Action
   const handleSuggestionAction = async (id: string, action: 'complete' | 'dismiss' | 'snooze', snoozeDays = 7) => {
     try {
@@ -386,7 +401,12 @@ export default function AnalyticsPage() {
       { label: 'Taxable Turnover', value: formatCurrency(gstData.summary.taxableSales) },
       { label: 'CGST (2.5%)', value: formatCurrency(gstData.summary.cgst) },
       { label: 'SGST (2.5%)', value: formatCurrency(gstData.summary.sgst) },
-      { label: 'Total GST Collected', value: formatCurrency(gstData.summary.totalGst) },
+      {
+        label: 'Total GST Collected',
+        value: formatCurrency(
+          Math.round(Number(gstData.summary.cgst) || 0) + Math.round(Number(gstData.summary.sgst) || 0)
+        ),
+      },
       { label: 'Total Invoiced Value', value: formatCurrency(gstData.summary.totalInvoiceValue) },
     ];
     const periodDesc = gstPeriodMode === 'monthly' ? `Filing Month: ${gstFilingMonth}` : `Period: ${period.replace('_', ' ').toUpperCase()}`;
@@ -422,18 +442,6 @@ export default function AnalyticsPage() {
             >
               <Settings className="w-4 h-4 text-gray-500" />
               <span>Target Settings</span>
-            </button>
-            <button
-              onClick={() => {
-                if (activeTab === 'overview') fetchOverview();
-                else if (activeTab === 'items') fetchItems();
-                else if (activeTab === 'gst') fetchGst();
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white transition shadow-sm"
-              title="Refresh Analytics"
-            >
-              <RefreshCw className={cn('w-4 h-4', (loadingOverview || loadingItems || loadingGst) && 'animate-spin')} />
-              <span>Refresh</span>
             </button>
           </div>
         </div>
@@ -708,9 +716,15 @@ export default function AnalyticsPage() {
                 <div className="card p-3.5 sm:p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
                   <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">GST Collected (5%)</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                    {formatCurrency(overviewData.kpis.gst)}
+                    {formatCurrency(
+                      overviewData.kpis.cgst !== undefined && overviewData.kpis.sgst !== undefined
+                        ? Math.round(Number(overviewData.kpis.cgst) || 0) + Math.round(Number(overviewData.kpis.sgst) || 0)
+                        : overviewData.kpis.gst
+                    )}
                   </p>
-                  <p className="text-[11px] text-gray-400 mt-1">CGST: {formatCurrency(overviewData.kpis.cgst)}</p>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    CGST: {formatCurrency(overviewData.kpis.cgst)} | SGST: {formatCurrency(overviewData.kpis.sgst)}
+                  </p>
                 </div>
 
                 <div className="card p-3.5 sm:p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
@@ -1512,7 +1526,9 @@ export default function AnalyticsPage() {
                 <div className="card p-3.5 sm:p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
                   <p className="text-[11px] font-semibold text-gray-500 uppercase">Total GST (5.0%)</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                    {formatCurrency(gstData.summary.totalGst)}
+                    {formatCurrency(
+                      Math.round(Number(gstData.summary.cgst) || 0) + Math.round(Number(gstData.summary.sgst) || 0)
+                    )}
                   </p>
                 </div>
 
@@ -1684,7 +1700,11 @@ export default function AnalyticsPage() {
                           {formatCurrency(r.sgst)}
                         </td>
                         <td className="py-2 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                          {formatCurrency(r.totalGst)}
+                          {formatCurrency(
+                            r.cgst !== undefined && r.sgst !== undefined
+                              ? Math.round(Number(r.cgst) || 0) + Math.round(Number(r.sgst) || 0)
+                              : r.totalGst
+                          )}
                         </td>
                         <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
                           {formatCurrency(r.invoiceValue)}
@@ -1737,7 +1757,11 @@ export default function AnalyticsPage() {
                           {formatCurrency(day.sgst)}
                         </td>
                         <td className="py-2 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                          {formatCurrency(day.totalGst)}
+                          {formatCurrency(
+                            day.cgst !== undefined && day.sgst !== undefined
+                              ? Math.round(Number(day.cgst) || 0) + Math.round(Number(day.sgst) || 0)
+                              : day.totalGst
+                          )}
                         </td>
                         <td className="py-2 px-3 text-right font-bold text-gray-900 dark:text-white">
                           {formatCurrency(day.totalSales)}

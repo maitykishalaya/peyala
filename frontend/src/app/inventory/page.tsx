@@ -113,7 +113,7 @@ export default function InventoryPage() {
     // Show cached browser storage data on load, only query server upon manual refresh or filter change
     if (!selectedCat && !lowStockOnly) {
       const cached = readCache();
-      if (cached?.items) {
+      if (cached?.items && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setItems(cached.items || []);
         setCategories(cached.categories || []);
         setSuppliers(cached.suppliers || []);
@@ -121,13 +121,26 @@ export default function InventoryPage() {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
         setLoading(false);
-        inventoryApi.monthComparison().then(res => setMonthComparison(res.data)).catch(() => {});
-        return;
       }
     }
     load();
     inventoryApi.monthComparison().then(res => setMonthComparison(res.data)).catch(() => {});
   }, [selectedCat, lowStockOnly]);
+
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      localStorage.removeItem(CACHE_KEY);
+      load(true);
+      if (logsOpen) openLogs();
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [selectedCat, lowStockOnly, logsOpen]);
 
   const openEdit = (item: any) => {
     setSelected(item);
@@ -309,19 +322,7 @@ export default function InventoryPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(CACHE_KEY);
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             <button onClick={openLogs} className="btn-secondary flex items-center gap-2"><History className="w-4 h-4" /> Check Logs</button>
             {canWrite ? (
               <>

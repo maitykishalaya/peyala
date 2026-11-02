@@ -1324,7 +1324,7 @@ router.get('/gst', async (req, res) => {
           taxableSales: Math.round(day.taxableSales * 100) / 100,
           cgst: Math.round(day.cgst * 100) / 100,
           sgst: Math.round(day.sgst * 100) / 100,
-          totalGst: Math.round(day.totalGst * 100) / 100,
+          totalGst: Math.round((day.cgst + day.sgst) * 100) / 100,
           totalSales: Math.round(day.totalSales * 100) / 100,
         };
       });
@@ -1338,7 +1338,7 @@ router.get('/gst', async (req, res) => {
         exemptSales: Math.round(exemptSalesTotal),
         cgst: Math.round(cgstTotal * 100) / 100,
         sgst: Math.round(sgstTotal * 100) / 100,
-        totalGst: Math.round(totalGst * 100) / 100,
+        totalGst: Math.round((cgstTotal + sgstTotal) * 100) / 100,
         totalInvoiceValue: Math.round(totalInvoiceValue),
         invoiceCount: orders.length,
         startInvoice: periodMinInvoice,

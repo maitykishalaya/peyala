@@ -213,7 +213,7 @@ router.post('/zero-wastage', async (req, res) => {
 
     await log({
       user: req.user,
-      action: 'create',
+      action: 'CREATE',
       module: 'wastage',
       description: `Signed Zero Wastage verification for today (${req.user?.name || 'Staff'})`,
       metadata: { wastageId: entry._id, isZeroWastage: true },
@@ -273,7 +273,7 @@ router.post('/', async (req, res) => {
 
     await log({
       user: req.user,
-      action: 'create',
+      action: 'CREATE',
       module: 'wastage',
       description: `Recorded wastage for "${entry.itemName}" (${entry.quantity} ${entry.unit}, approx ₹${entry.approxValue})`,
       metadata: { wastageId: entry._id, itemName: entry.itemName, approxValue: entry.approxValue },
@@ -332,7 +332,7 @@ router.put('/:id', async (req, res) => {
 
     await log({
       user: req.user,
-      action: 'update',
+      action: 'UPDATE',
       module: 'wastage',
       description: `Updated wastage entry for "${entry.itemName}" (₹${entry.approxValue})`,
       metadata: { wastageId: entry._id },
@@ -358,7 +358,7 @@ router.delete('/:id', async (req, res) => {
 
     await log({
       user: req.user,
-      action: 'delete',
+      action: 'DELETE',
       module: 'wastage',
       description: `Deleted wastage entry for "${entry.itemName}" (₹${entry.approxValue})`,
       metadata: { wastageId: entry._id, itemName: entry.itemName },

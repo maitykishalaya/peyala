@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 const SyncOutbox = require('../models/SyncOutbox');
 const realtimeHub = require('./realtimeHub');
 
+function getGstLogIdentity(l) {
+  if (l.salesEntryId) return `sales_${String(l.salesEntryId)}`;
+  if (l._id) return String(l._id);
+  return `${new Date(l.date).toISOString().split('T')[0]}_${l.gstAdded}_${l.outletSales}`;
+}
+
 class SyncEngine {
   constructor() {
     this.centralUri = process.env.MONGODB_CENTRAL_URI || process.env.MONGODB_URI;
@@ -15,12 +21,18 @@ class SyncEngine {
     this.isOnline = false;
     this.consecutiveFailures = 0;
     this.lastInboundSync = null;
+    this.isHydrating = false;
+    this.isPullingFromCentral = false;
   }
 
   /**
    * Initialize sync engine with central database connection and scheduled timer
    */
   async init() {
+    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_SYNC === 'true') {
+      console.log('[SyncEngine] Sync engine is disabled in test mode.');
+      return;
+    }
     console.log('[SyncEngine] Initializing background delta sync engine...');
 
     // Load persisted dynamic sync interval from POSSetting
@@ -78,11 +90,11 @@ class SyncEngine {
    */
   async getCentralConnection() {
     if (this.centralConn && this.centralConn.readyState === 1) {
-      // Fast ping check (1.8s timeout) to verify the socket is actually responsive before returning it
+      // Resilient ping check (5000ms timeout) to verify the socket is responsive
       try {
         await Promise.race([
           this.centralConn.db.admin().ping(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Central DB ping timeout (offline)')), 1800)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Central DB ping timeout (offline)')), 5000)),
         ]);
         return this.centralConn;
       } catch (pingErr) {
@@ -99,10 +111,18 @@ class SyncEngine {
       throw new Error('No MONGODB_CENTRAL_URI configured');
     }
 
+    const dns = require('dns');
+    try {
+      const currentDns = dns.getServers();
+      if (!currentDns || currentDns.length === 0 || (currentDns.length === 1 && currentDns[0] === '127.0.0.1')) {
+        dns.setServers(['8.8.8.8', '1.1.1.1', '1.0.0.1']);
+      }
+    } catch (_) {}
+
     try {
       this.centralConn = await mongoose.createConnection(this.centralUri, {
-        serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 20000,
+        serverSelectionTimeoutMS: 15000,
+        socketTimeoutMS: 30000,
         family: 4,
         maxPoolSize: 10,
         minPoolSize: 1,
@@ -111,10 +131,12 @@ class SyncEngine {
       console.log(`[SyncEngine] Connected to Central DB: ${this.centralConn.host} / ${this.centralConn.name}`);
       this.isOnline = true;
       this.consecutiveFailures = 0;
+      this.lastSyncError = null;
       return this.centralConn;
     } catch (err) {
       this.isOnline = false;
       this.lastSyncError = err.message;
+      console.warn(`[SyncEngine] Central DB connection notice: ${err.message}`);
       throw err;
     }
   }
@@ -128,6 +150,7 @@ class SyncEngine {
       await conn.db.admin().ping();
       this.isOnline = true;
       this.consecutiveFailures = 0;
+      this.lastSyncError = null;
       return true;
     } catch (err) {
       this.isOnline = false;
@@ -140,6 +163,9 @@ class SyncEngine {
    * Record a local mutation in the persistent SyncOutbox queue
    */
   async recordMutation(collectionName, documentId, operation, payload = {}, revision = 1) {
+    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_SYNC === 'true' || this.isPullingFromCentral) {
+      return;
+    }
     try {
       const docIdStr = String(documentId);
 
@@ -217,7 +243,7 @@ class SyncEngine {
 
       // 2. Query batch of pending outbox items
       const pendingItems = await SyncOutbox.find({ status: { $in: ['pending', 'failed'] } })
-        .sort({ createdAt: 1 })
+        .sort({ status: 1, attempts: 1, createdAt: 1 })
         .limit(100);
 
       if (pendingItems.length === 0) {
@@ -397,8 +423,8 @@ class SyncEngine {
                 if (!centralDoc) {
                   await centralCol.replaceOne({ _id: queryId }, docToSync, { upsert: true });
                 } else {
-                  const existingKeys = new Set((centralDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
-                  const logsToAdd = (docToSync.gstLog || []).filter((l) => !existingKeys.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const existingKeys = new Set((centralDoc.gstLog || []).map(getGstLogIdentity));
+                  const logsToAdd = (docToSync.gstLog || []).filter((l) => !existingKeys.has(getGstLogIdentity(l)));
                   const updateFields = { ...docToSync };
                   delete updateFields._id;
                   delete updateFields.gstLog;
@@ -447,6 +473,15 @@ class SyncEngine {
       // 3. Inbound Sync: Pull cloud changes (transfers, accounts, menu) into local DB
       await this.pullFromCentral(centralConn);
 
+      // 4. Safe Outbox Housekeeping: Prune completed synced envelopes older than 24h to keep database bounded
+      try {
+        const pruneCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        await SyncOutbox.deleteMany({ status: 'synced', syncedAt: { $lt: pruneCutoff } });
+        if (centralConn && centralConn.readyState === 1) {
+          await centralConn.db.collection('syncoutboxes').deleteMany({ status: 'synced', syncedAt: { $lt: pruneCutoff } });
+        }
+      } catch (_) {}
+
       // Broadcast update
       this.notifyStatus();
 
@@ -479,6 +514,7 @@ class SyncEngine {
       addon: 'addons',
       staff: 'staffs',
       balancesheet: 'balancesheets',
+      auditlog: 'auditlogs',
     };
     const lower = modelName.toLowerCase();
     if (map[lower]) return map[lower];
@@ -491,6 +527,7 @@ class SyncEngine {
    */
   async pullFromCentral(centralConn) {
     if (!centralConn || centralConn.readyState !== 1) return;
+    this.isPullingFromCentral = true;
     try {
       const inboundCollections = [
         'accounts',
@@ -517,6 +554,10 @@ class SyncEngine {
         'paymentcategories',
         'addons',
         'balancesheets',
+        'billsequences',
+        'ordersequences',
+        'users',
+        'auditlogs',
       ];
 
       let pulledCount = 0;
@@ -541,8 +582,10 @@ class SyncEngine {
           const localCol = mongoose.connection.db.collection(colName);
 
           let query = syncFilter;
-          // Small master collections: always pull all to guarantee 100% real-time fidelity
-          if (['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories', 'balancesheets'].includes(colName) || !this.lastInboundSync) {
+          const localCount = await localCol.countDocuments().catch(() => 0);
+
+          // If local collection is completely empty, ALWAYS pull ALL documents to hydrate/clone properly!
+          if (localCount === 0 || ['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories', 'balancesheets', 'billsequences', 'ordersequences', 'users', 'staffs', 'suppliers'].includes(colName) || !this.lastInboundSync) {
             query = {};
           } else if (colName === 'orders') {
             // Always pull any open/preparing/served order, plus recent orders
@@ -564,10 +607,42 @@ class SyncEngine {
             };
           } else if (colName === 'salesentries') {
             query = { date: { $gte: thirtyDaysAgo } };
+          } else if (colName === 'auditlogs') {
+            query = {
+              $or: [
+                { createdAt: { $gte: thirtyDaysAgo } },
+                { updatedAt: { $gte: thirtyDaysAgo } },
+              ],
+            };
           }
 
           const docs = await centralCol.find(query).toArray();
           if (docs.length > 0) {
+            // Special inbound handling for sequences (BillSequence and OrderSequence) — Maximum Wins
+            if (colName === 'billsequences' || colName === 'ordersequences') {
+              for (const centralSeqDoc of docs) {
+                const localSeqDoc = await localCol.findOne({ _id: centralSeqDoc._id });
+                const centralSeq = Number(centralSeqDoc.seq) || 0;
+                const localSeq = Number(localSeqDoc?.seq) || 0;
+                const maxSeq = Math.max(centralSeq, localSeq);
+
+                if (!localSeqDoc || localSeq < maxSeq) {
+                  await localCol.updateOne(
+                    { _id: centralSeqDoc._id },
+                    { $set: { ...centralSeqDoc, seq: maxSeq, updatedAt: new Date() } },
+                    { upsert: true }
+                  );
+                }
+                if (centralSeq < maxSeq) {
+                  await centralCol.updateOne(
+                    { _id: centralSeqDoc._id },
+                    { $set: { seq: maxSeq, updatedAt: new Date() } }
+                  );
+                }
+              }
+              continue;
+            }
+
             // Special inbound handling for singleton BalanceSheet
             if (colName === 'balancesheets') {
               const centralDoc = docs[0];
@@ -580,17 +655,18 @@ class SyncEngine {
                     updatedAt: new Date(),
                   });
                 } else {
-                  const existingLogIds = new Set((localDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
-                  const newLogsFromCentral = (centralDoc.gstLog || []).filter((l) => !existingLogIds.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+                  // Robust log identity: deduplicate strictly by salesEntryId (the order _id)
+                  const existingLogIds = new Set((localDoc.gstLog || []).map(getGstLogIdentity));
+                  const newLogsFromCentral = (centralDoc.gstLog || []).filter((l) => !existingLogIds.has(getGstLogIdentity(l)));
 
-                  const centralLogIds = new Set((centralDoc.gstLog || []).map((l) => String(l._id || `${l.date}_${l.gstAdded}`)));
-                  const extraLocalLogs = (localDoc.gstLog || []).filter((l) => !centralLogIds.has(String(l._id || `${l.date}_${l.gstAdded}`)));
+                  const centralLogIds = new Set((centralDoc.gstLog || []).map(getGstLogIdentity));
+                  const extraLocalLogs = (localDoc.gstLog || []).filter((l) => !centralLogIds.has(getGstLogIdentity(l)));
 
                   if (newLogsFromCentral.length > 0 || centralDoc.gstLiability !== localDoc.gstLiability) {
                     const mergedMap = new Map();
                     const mergedList = [];
                     const addMerged = (log) => {
-                      const key = String(log._id || `${log.date}_${log.gstAdded}_${log.note}`);
+                      const key = getGstLogIdentity(log);
                       if (!mergedMap.has(key)) {
                         mergedMap.set(key, true);
                         mergedList.push(log);
@@ -657,36 +733,10 @@ class SyncEngine {
                 }
               }
 
-              // ── Monetary Delta Reconciliation for Local DB Accounts ──
-              // When cloud website created new financial transactions, apply the delta to Local Accounts
+              // ── Daily Sales & GST Logging for Inbound Cloud Orders ──
+              // (Account balances are reconciled authoritatively via the accounts collection without double-counting)
               const wasPaidLocally = localDoc && localDoc.status === 'paid';
               if (colName === 'orders' && doc.status === 'paid' && !wasPaidLocally) {
-                const pb = doc.paymentBreakdown || {};
-                let cashAmt = Number(pb.cash) || 0;
-                let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
-                if (doc.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(doc.total) || 0;
-                if (doc.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(doc.total) || 0;
-
-                if (cashAmt > 0) {
-                  const targetCash = await mongoose.connection.db.collection('accounts').findOne({ name: /cash counter/i, type: 'cash', isActive: true })
-                    || await mongoose.connection.db.collection('accounts').findOne({ type: 'cash', isActive: true });
-                  if (targetCash) {
-                    await mongoose.connection.db.collection('accounts').updateOne(
-                      { _id: targetCash._id },
-                      { $inc: { currentBalance: cashAmt } }
-                    );
-                  }
-                }
-                if (digitalAmt > 0) {
-                  const targetBank = await mongoose.connection.db.collection('accounts').findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
-                    || await mongoose.connection.db.collection('accounts').findOne({ type: { $in: ['bank', 'digital'] }, isActive: true });
-                  if (targetBank) {
-                    await mongoose.connection.db.collection('accounts').updateOne(
-                      { _id: targetBank._id },
-                      { $inc: { currentBalance: digitalAmt } }
-                    );
-                  }
-                }
                 if (doc.paidAt || doc.createdAt) {
                   datesToReconcileDailySales.add(new Date(doc.paidAt || doc.createdAt).toISOString().slice(0, 10));
                 }
@@ -732,41 +782,13 @@ class SyncEngine {
                     }
                   } catch (_) {}
                 }
-              } else if (!localDoc) {
-                if (colName === 'payments' && doc.paidFrom && doc.amount && !doc.isPending) {
-                  let paidFromId = doc.paidFrom;
-                  if (typeof paidFromId === 'string' && /^[0-9a-fA-F]{24}$/.test(paidFromId)) paidFromId = new mongoose.Types.ObjectId(paidFromId);
-                  await mongoose.connection.db.collection('accounts').updateOne(
-                    { _id: paidFromId },
-                    { $inc: { currentBalance: -Number(doc.amount) } }
-                  );
-                } else if (colName === 'receipts' && doc.receivedIn && doc.amount) {
-                  let recId = doc.receivedIn;
-                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
-                  await mongoose.connection.db.collection('accounts').updateOne(
-                    { _id: recId },
-                    { $inc: { currentBalance: Number(doc.amount) } }
-                  );
-                } else if (colName === 'transfers' && doc.amount) {
-                  let fromId = doc.fromAccount;
-                  let toId = doc.toAccount;
-                  if (typeof fromId === 'string' && /^[0-9a-fA-F]{24}$/.test(fromId)) fromId = new mongoose.Types.ObjectId(fromId);
-                  if (typeof toId === 'string' && /^[0-9a-fA-F]{24}$/.test(toId)) toId = new mongoose.Types.ObjectId(toId);
-                  if (fromId) await mongoose.connection.db.collection('accounts').updateOne({ _id: fromId }, { $inc: { currentBalance: -Number(doc.amount) } });
-                  if (toId) await mongoose.connection.db.collection('accounts').updateOne({ _id: toId }, { $inc: { currentBalance: Number(doc.amount) } });
-                } else if (colName === 'customerduepayments' && doc.receivedIn && doc.amount) {
-                  let recId = doc.receivedIn;
-                  if (typeof recId === 'string' && /^[0-9a-fA-F]{24}$/.test(recId)) recId = new mongoose.Types.ObjectId(recId);
-                  await mongoose.connection.db.collection('accounts').updateOne(
-                    { _id: recId },
-                    { $inc: { currentBalance: Number(doc.amount) } }
-                  );
-                }
               }
 
-              // Special handling for accounts: protect currentBalance from being clobbered by stale snapshots
+              // Account Synchronization: Authoritative Last-Write-Wins with Central precedence
               if (colName === 'accounts') {
-                if (!localDoc) {
+                const lTime = new Date(localDoc?.updatedAt || 0).getTime();
+                const cTime = new Date(doc.updatedAt || 0).getTime();
+                if (!localDoc || cTime >= lTime) {
                   ops.push({
                     replaceOne: {
                       filter: { _id: doc._id },
@@ -775,18 +797,7 @@ class SyncEngine {
                     },
                   });
                 } else {
-                  if (doc.openingBalance !== undefined && localDoc.openingBalance !== undefined) {
-                    const diff = Number(doc.openingBalance) - Number(localDoc.openingBalance || 0);
-                    if (!Number.isNaN(diff) && diff !== 0) {
-                      await localCol.updateOne({ _id: doc._id }, { $inc: { currentBalance: diff } });
-                    }
-                  }
-                  const updateFields = { ...doc };
-                  delete updateFields.currentBalance;
-                  delete updateFields._id;
-                  if (Object.keys(updateFields).length > 0) {
-                    await localCol.updateOne({ _id: doc._id }, { $set: updateFields });
-                  }
+                  this.recordMutation(colName, localDoc._id, 'update', localDoc).catch(() => {});
                 }
               } else {
                 ops.push({
@@ -802,6 +813,22 @@ class SyncEngine {
             if (ops.length > 0) {
               await localCol.bulkWrite(ops, { ordered: false });
               pulledCount += ops.length;
+            }
+
+            if (colName === 'users') {
+              try {
+                const allUsers = await localCol.find({ isActive: { $ne: false } }).toArray();
+                if (allUsers.length > 0) {
+                  const offlineAuthVault = require('./offlineAuthVault');
+                  offlineAuthVault.syncFromDb(allUsers);
+                }
+              } catch (_) {}
+            }
+
+            if (colName === 'auditlogs') {
+              try {
+                realtimeHub.broadcast('AUDITLOG_UPDATED', { count: ops.length, updatedAt: new Date() });
+              } catch (_) {}
             }
           }
         } catch (colErr) {
@@ -844,6 +871,8 @@ class SyncEngine {
       }
     } catch (err) {
       console.warn('[SyncEngine] Error during inbound pullFromCentral:', err.message);
+    } finally {
+      this.isPullingFromCentral = false;
     }
   }
 
@@ -853,34 +882,225 @@ class SyncEngine {
   async reconcileAccountsBalanceConsistency(centralConn) {
     if (!centralConn || centralConn.readyState !== 1) return;
     try {
-      const localAccCol = mongoose.connection.db.collection('accounts');
-      const centralAccCol = centralConn.db.collection('accounts');
-
-      const localAccs = await localAccCol.find({ isActive: true }).toArray();
-      for (const lAcc of localAccs) {
-        const cAcc = await centralAccCol.findOne({ _id: lAcc._id });
-        if (cAcc) {
-          const lBal = Math.round((Number(lAcc.currentBalance) || 0) * 100) / 100;
-          const cBal = Math.round((Number(cAcc.currentBalance) || 0) * 100) / 100;
-
-          if (lBal !== cBal) {
-            // Align with whichever account document has the more recent updatedAt timestamp
-            const lTime = new Date(lAcc.updatedAt || 0).getTime();
-            const cTime = new Date(cAcc.updatedAt || 0).getTime();
-            if (cTime > lTime) {
-              await localAccCol.updateOne({ _id: lAcc._id }, { $set: { currentBalance: cBal, updatedAt: new Date(cTime) } });
-            } else {
-              await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: lBal, updatedAt: new Date(lTime) } });
-            }
-          } else {
-            // Ensure clean 2-decimal rounding on both
-            await localAccCol.updateOne({ _id: lAcc._id }, { $set: { currentBalance: lBal } });
-            await centralAccCol.updateOne({ _id: cAcc._id }, { $set: { currentBalance: cBal } });
-          }
-        }
-      }
+      const { recalculateAccountBalances } = require('../utils/accountLedger');
+      // Recalculate deterministic ledger balances on both Local DB and Central DB
+      await recalculateAccountBalances();
+      await recalculateAccountBalances(centralConn);
     } catch (err) {
       console.warn('[SyncEngine] Account balance consistency check notice:', err.message);
+    }
+  }
+
+  /**
+   * Complete full clone/hydration from bundled local baseline snapshot
+   */
+  async hydrateFromLocalSnapshot() {
+    const fs = require('fs');
+    const path = require('path');
+    const candidatePaths = [
+      path.join(__dirname, '../../data/baseline_snapshot.json'),
+      path.join(__dirname, '../data/baseline_snapshot.json'),
+      path.join(__dirname, '../../../data/baseline_snapshot.json'),
+      path.join(process.cwd(), 'data/baseline_snapshot.json'),
+      path.join(process.cwd(), 'backend/data/baseline_snapshot.json'),
+      'C:\\Peyala\\backend\\data\\baseline_snapshot.json',
+      'C:\\Peyala\\data\\baseline_snapshot.json',
+      path.join(__dirname, '../../../restore_points/v10.0.0_baseline/atlas_data_snapshot.json'),
+    ];
+    const snapshotPath = candidatePaths.find((p) => fs.existsSync(p));
+    if (!snapshotPath) {
+      throw new Error('No baseline snapshot found to hydrate local database.');
+    }
+
+    console.log(`[SyncEngine] Hydrating local database from bundled snapshot (${snapshotPath})...`);
+    const snapshotData = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+    let totalReplicated = 0;
+    let collectionsReplicated = 0;
+
+    for (const colName of Object.keys(snapshotData)) {
+      const docs = snapshotData[colName];
+      if (Array.isArray(docs) && docs.length > 0) {
+        const localCol = mongoose.connection.db.collection(colName);
+        const normalized = docs.map((d) => {
+          const copy = { ...d };
+          if (copy._id && typeof copy._id === 'string' && /^[0-9a-fA-F]{24}$/.test(copy._id)) {
+            copy._id = new mongoose.Types.ObjectId(copy._id);
+          }
+          return copy;
+        });
+        const bulkOps = normalized.map((doc) => ({
+          replaceOne: {
+            filter: { _id: doc._id },
+            replacement: doc,
+            upsert: true,
+          },
+        }));
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < bulkOps.length; i += CHUNK_SIZE) {
+          const chunk = bulkOps.slice(i, i + CHUNK_SIZE);
+          await localCol.bulkWrite(chunk, { ordered: false });
+        }
+        totalReplicated += docs.length;
+        collectionsReplicated++;
+      }
+    }
+
+    // Sync auth vault with latest users
+    try {
+      const allUsers = await mongoose.connection.db.collection('users').find({ isActive: { $ne: false } }).toArray();
+      if (allUsers.length > 0) {
+        const offlineAuthVault = require('./offlineAuthVault');
+        offlineAuthVault.syncFromDb(allUsers);
+      }
+    } catch (_) {}
+
+    realtimeHub.broadcast('DATA_SYNCED_FROM_CLOUD', { timestamp: new Date().toISOString(), count: totalReplicated, hydrated: true });
+    realtimeHub.broadcast('ACCOUNT_UPDATED', { timestamp: new Date().toISOString() });
+    realtimeHub.broadcast('ORDER_UPDATED', { timestamp: new Date().toISOString() });
+    realtimeHub.broadcast('TABLE_UPDATED', { timestamp: new Date().toISOString() });
+
+    console.log(`[SyncEngine] Snapshot hydration complete: ${totalReplicated} documents across ${collectionsReplicated} collections!`);
+    return {
+      status: 'hydrated_from_snapshot',
+      totalDocuments: totalReplicated,
+      collectionsCount: collectionsReplicated,
+      message: 'Hydrated successfully from offline baseline snapshot.',
+    };
+  }
+
+  /**
+   * Complete full clone/hydration of all collections from Central DB into local MongoDB
+   */
+  async hydrateFromCentral() {
+    if (this.isHydrating) {
+      console.log('[SyncEngine] Hydration is already in progress, skipping duplicate call.');
+      return {
+        status: 'in_progress',
+        message: 'Hydration is already running in background.',
+        totalDocuments: 0,
+        collectionsCount: 0,
+      };
+    }
+
+    if (!mongoose.connection || mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+      throw new Error('Local MongoDB connection is not ready. Please ensure local server is running.');
+    }
+
+    this.isHydrating = true;
+    try {
+      console.log('[SyncEngine] Starting full hydration of local database from Central DB...');
+      let centralConn = null;
+      try {
+        centralConn = await this.getCentralConnection();
+      } catch (connErr) {
+        console.warn('[SyncEngine] Central connection failed during hydration, falling back to bundled snapshot:', connErr.message);
+      }
+
+      if (!centralConn || centralConn.readyState !== 1) {
+        return await this.hydrateFromLocalSnapshot();
+      }
+
+      const collections = await centralConn.db.listCollections().toArray();
+      const PRIORITY_ORDER = [
+        'users', 'possettings', 'menucategories', 'menuitems', 'tables',
+        'accounts', 'orders', 'orderitems', 'shifts', 'inventoryitems',
+        'inventorycategories', 'suppliers', 'expenses', 'customers',
+        'reservations', 'kitchenstations', 'paymentmethods', 'printers',
+        'taxsettings'
+      ];
+
+      // Sort collections: priority operational collections first, then the rest
+      collections.sort((a, b) => {
+        const idxA = PRIORITY_ORDER.indexOf(a.name);
+        const idxB = PRIORITY_ORDER.indexOf(b.name);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      let totalReplicated = 0;
+      let collectionsReplicated = 0;
+
+      for (const col of collections) {
+        const colName = col.name;
+        if (colName.startsWith('system.') || colName === 'syncoutboxes') continue;
+
+        try {
+          const centralCol = centralConn.db.collection(colName);
+          const localCol = mongoose.connection.db.collection(colName);
+
+          const docs = await centralCol.find({}).toArray();
+          if (Array.isArray(docs) && docs.length > 0) {
+            const normalized = docs.map((d) => {
+              const copy = { ...d };
+              if (copy._id && typeof copy._id === 'string' && /^[0-9a-fA-F]{24}$/.test(copy._id)) {
+                copy._id = new mongoose.Types.ObjectId(copy._id);
+              }
+              return copy;
+            });
+
+            const bulkOps = normalized.map((doc) => ({
+              replaceOne: {
+                filter: { _id: doc._id },
+                replacement: doc,
+                upsert: true,
+              },
+            }));
+
+            const CHUNK_SIZE = 500;
+            for (let i = 0; i < bulkOps.length; i += CHUNK_SIZE) {
+              const chunk = bulkOps.slice(i, i + CHUNK_SIZE);
+              await localCol.bulkWrite(chunk, { ordered: false });
+            }
+
+            totalReplicated += docs.length;
+            collectionsReplicated++;
+          }
+        } catch (colErr) {
+          console.warn(`[SyncEngine] Hydration notice for ${colName}:`, colErr.message);
+        }
+      }
+
+      // If Central DB returned 0 documents (e.g. read error or empty central DB), fallback to offline snapshot
+      if (totalReplicated === 0) {
+        console.warn('[SyncEngine] Central DB returned 0 documents. Hydrating from baseline snapshot fallback...');
+        return await this.hydrateFromLocalSnapshot();
+      }
+
+      // Sync auth vault with latest users
+      try {
+        const allUsers = await mongoose.connection.db.collection('users').find({ isActive: { $ne: false } }).toArray();
+        if (allUsers.length > 0) {
+          const offlineAuthVault = require('./offlineAuthVault');
+          offlineAuthVault.syncFromDb(allUsers);
+        }
+      } catch (_) {}
+
+      // Broadcast full refresh to all connected UI clients
+      this.lastSyncTime = new Date();
+      this.lastInboundSync = new Date();
+      this.isOnline = true;
+      this.notifyStatus();
+
+      realtimeHub.broadcast('DATA_SYNCED_FROM_CLOUD', {
+        timestamp: new Date().toISOString(),
+        count: totalReplicated,
+        hydrated: true,
+      });
+      realtimeHub.broadcast('ACCOUNT_UPDATED', { timestamp: new Date().toISOString() });
+      realtimeHub.broadcast('ORDER_UPDATED', { timestamp: new Date().toISOString() });
+      realtimeHub.broadcast('TABLE_UPDATED', { timestamp: new Date().toISOString() });
+
+      console.log(`[SyncEngine] Full hydration complete: ${totalReplicated} documents across ${collectionsReplicated} collections!`);
+      return {
+        status: 'hydrated',
+        totalDocuments: totalReplicated,
+        collectionsCount: collectionsReplicated,
+      };
+    } finally {
+      this.isHydrating = false;
+    this.isPullingFromCentral = false;
     }
   }
 

@@ -39,6 +39,7 @@ namespace PeyalaInstaller
             {
                 targetDir = input.Trim().Trim('\"');
             }
+            targetDir = targetDir.TrimEnd('\\', '/');
 
             try
             {
@@ -58,9 +59,11 @@ namespace PeyalaInstaller
             Console.WriteLine("[*] Target Directory: " + targetDir);
             Console.ResetColor();
 
-            // Stop any conflicting processes on ports 3000 & 4000
-            FreePort(3000);
-            FreePort(4000);
+            // Stop any conflicting Peyala processes and free ports
+            KillExistingPeyalaProcesses();
+
+            // Clean previous caches/bloat if targetDir already exists
+            CleanBloatAndOldCaches(targetDir);
 
             // Extract self
             string exePath = Assembly.GetExecutingAssembly().Location;
@@ -86,6 +89,25 @@ namespace PeyalaInstaller
 
             if (!extractSuccess)
             {
+                try
+                {
+                    ProcessStartInfo psTar = new ProcessStartInfo("powershell.exe", string.Format("-NoProfile -ExecutionPolicy Bypass -Command \"& tar.exe -xf '{0}' -C '{1}'\"", exePath.Replace("'", "''"), targetDir.Replace("'", "''")))
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    Process p = Process.Start(psTar);
+                    p.WaitForExit();
+                    if (p.ExitCode == 0)
+                    {
+                        extractSuccess = true;
+                    }
+                }
+                catch { }
+            }
+
+            if (!extractSuccess)
+            {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("[ERROR] Extraction failed. Please ensure at least 1 GB free disk space.");
                 Console.ResetColor();
@@ -95,12 +117,11 @@ namespace PeyalaInstaller
             }
 
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("[OK] All system files extracted successfully!");
+            Console.WriteLine("[OK] All system files extracted and updated successfully!");
             Console.ResetColor();
 
-            // Clean stale lock
-            string lockFile = Path.Combine(targetDir, "backend", "data", "db", "mongod.lock");
-            try { if (File.Exists(lockFile)) File.Delete(lockFile); } catch { }
+            // Clean stale locks and caches
+            CleanBloatAndOldCaches(targetDir);
 
             // Ensure PeyalaPOS.exe exists / recompile if needed
             string buildExeBat = Path.Combine(targetDir, "build-exe.bat");
@@ -140,7 +161,7 @@ namespace PeyalaInstaller
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("====================================================================");
-            Console.WriteLine("  Peyala POS Installation Completed Successfully!");
+            Console.WriteLine("  Peyala POS Installation / Update Completed Successfully!");
             Console.WriteLine("====================================================================");
             Console.ResetColor();
             Console.WriteLine("  Installed Directory: " + targetDir);
@@ -166,6 +187,62 @@ namespace PeyalaInstaller
 
             Console.WriteLine("Installation complete. Press any key to exit.");
             Console.ReadKey();
+        }
+
+        private static void KillExistingPeyalaProcesses()
+        {
+            string[] procNames = new string[] { "PeyalaPOS", "electron", "mongod" };
+            foreach (string p in procNames)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("taskkill", "/F /IM " + p + ".exe")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    Process.Start(psi).WaitForExit();
+                }
+                catch { }
+            }
+            FreePort(3000);
+            FreePort(4000);
+            FreePort(27017);
+            System.Threading.Thread.Sleep(800);
+        }
+
+        private static void CleanBloatAndOldCaches(string targetDir)
+        {
+            try
+            {
+                if (!Directory.Exists(targetDir)) return;
+
+                // Delete Next.js build cache to prevent 10GB+ disk bloat
+                string nextCache = Path.Combine(targetDir, "frontend", ".next", "cache");
+                if (Directory.Exists(nextCache))
+                {
+                    try { Directory.Delete(nextCache, true); } catch { }
+                }
+
+                // Delete backend cache
+                string bCache = Path.Combine(targetDir, "backend", "node_modules", ".cache");
+                if (Directory.Exists(bCache))
+                {
+                    try { Directory.Delete(bCache, true); } catch { }
+                }
+
+                // Delete loose temp and zip files inside target folder
+                string currentExe = Assembly.GetExecutingAssembly().Location;
+                string[] tempFiles = Directory.GetFiles(targetDir, "*.tmp", SearchOption.TopDirectoryOnly);
+                foreach (string f in tempFiles) { try { File.Delete(f); } catch { } }
+
+                // Clean stale locks
+                string lockFile = Path.Combine(targetDir, "backend", "data", "db", "mongod.lock");
+                try { if (File.Exists(lockFile)) File.Delete(lockFile); } catch { }
+                string wtLockFile = Path.Combine(targetDir, "backend", "data", "db", "WiredTiger.lock");
+                try { if (File.Exists(wtLockFile)) File.Delete(wtLockFile); } catch { }
+            }
+            catch { }
         }
 
         private static void FreePort(int port)

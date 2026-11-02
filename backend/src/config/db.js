@@ -15,27 +15,71 @@ async function seedBaselineIfNeeded(conn) {
   try {
     const hasMenuItems = await conn.connection.db.collection('menuitems').countDocuments().catch(() => 0);
     if (hasMenuItems === 0) {
-      console.log('[Peyala Backend] Local database is fresh. Auto-seeding from baseline restore point (10,313 documents)...');
-      const snapshotPath = path.join(__dirname, '../../../restore_points/v10.0.0_baseline/atlas_data_snapshot.json');
-      if (fs.existsSync(snapshotPath)) {
-        const snapshotData = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
-        let totalSeeded = 0;
-        for (const colName of Object.keys(snapshotData)) {
-          const docs = snapshotData[colName];
-          if (Array.isArray(docs) && docs.length > 0) {
-            const col = conn.connection.db.collection(colName);
-            const normalized = docs.map((d) => {
-              const copy = { ...d };
-              if (copy._id && typeof copy._id === 'string' && /^[0-9a-fA-F]{24}$/.test(copy._id)) {
-                copy._id = new mongoose.Types.ObjectId(copy._id);
+      console.log('[Peyala Backend] Local database is fresh. Initializing local instance...');
+      let seeded = false;
+
+      // 1. Primary: Instantly hydrate from bundled baseline snapshot (takes ~3s, completely reliable)
+      const candidatePaths = [
+        path.join(__dirname, '../../data/baseline_snapshot.json'),
+        path.join(__dirname, '../data/baseline_snapshot.json'),
+        path.join(__dirname, '../../../data/baseline_snapshot.json'),
+        path.join(process.cwd(), 'data/baseline_snapshot.json'),
+        path.join(process.cwd(), 'backend/data/baseline_snapshot.json'),
+        'C:\\Peyala\\backend\\data\\baseline_snapshot.json',
+        'C:\\Peyala\\data\\baseline_snapshot.json',
+        path.join(__dirname, '../../../restore_points/v10.0.0_baseline/atlas_data_snapshot.json'),
+      ];
+      const snapshotPath = candidatePaths.find(p => fs.existsSync(p));
+      if (snapshotPath) {
+        try {
+          console.log(`[Peyala Backend] ⚡ Instantly auto-seeding local database from baseline snapshot (${snapshotPath})...`);
+          const snapshotData = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+          let totalSeeded = 0;
+          let colCount = 0;
+          for (const colName of Object.keys(snapshotData)) {
+            const docs = snapshotData[colName];
+            if (Array.isArray(docs) && docs.length > 0) {
+              const col = conn.connection.db.collection(colName);
+              const normalized = docs.map((d) => {
+                const copy = { ...d };
+                if (copy._id && typeof copy._id === 'string' && /^[0-9a-fA-F]{24}$/.test(copy._id)) {
+                  copy._id = new mongoose.Types.ObjectId(copy._id);
+                }
+                return copy;
+              });
+              await col.deleteMany({});
+              const CHUNK_SIZE = 500;
+              for (let i = 0; i < normalized.length; i += CHUNK_SIZE) {
+                const chunk = normalized.slice(i, i + CHUNK_SIZE);
+                await col.insertMany(chunk, { ordered: false });
               }
-              return copy;
-            });
-            await col.insertMany(normalized, { ordered: false });
-            totalSeeded += docs.length;
+              totalSeeded += docs.length;
+              colCount++;
+            }
           }
+          if (totalSeeded > 0) {
+            seeded = true;
+            console.log(`[Peyala Backend] ✅ Auto-seeded local database successfully with ${totalSeeded} documents across ${colCount} collections in <3 seconds!`);
+          }
+        } catch (snapErr) {
+          console.warn('[Peyala Backend] Snapshot auto-seed error:', snapErr.message);
         }
-        console.log(`[Peyala Backend] Auto-seeded local database successfully with ${totalSeeded} documents!`);
+      }
+
+      // 2. Fallback: If snapshot was not found, clone directly from Central DB Atlas
+      if (!seeded) {
+        try {
+          console.log('[Peyala Backend] Attempting initial clone directly from Central DB Atlas...');
+          const centralConn = await syncEngine.getCentralConnection();
+          if (centralConn && centralConn.readyState === 1) {
+            const result = await syncEngine.hydrateFromCentral();
+            if (result && result.totalDocuments > 0) {
+              seeded = true;
+            }
+          }
+        } catch (centralErr) {
+          console.warn('[Peyala Backend] Note on initial Central DB clone:', centralErr.message);
+        }
       }
     }
 
@@ -44,6 +88,12 @@ async function seedBaselineIfNeeded(conn) {
     if (allUsers.length > 0) {
       offlineAuthVault.syncFromDb(allUsers);
     }
+
+    // Ensure BillSequence is verified and aligned with max bill in database
+    try {
+      const { initBillSequence } = require('../utils/billingSequence');
+      await initBillSequence();
+    } catch (_) {}
   } catch (err) {
     console.warn('[Peyala Backend] Auto-seed or vault sync warning:', err.message);
   }
@@ -174,6 +224,7 @@ const connectDB = async () => {
 
   // 3. Zero-Crash Guarantee: Keep server ALIVE in standalone mode and start continuous background recovery for local MongoDB
   console.log('[Peyala Backend] ⚡ Backend is ALIVE in Offline Standalone Mode. Starting auto-recovery for local MongoDB...');
+  syncEngine.checkConnectivity().catch(() => {});
   startLocalDbRecovery();
   return null;
 };

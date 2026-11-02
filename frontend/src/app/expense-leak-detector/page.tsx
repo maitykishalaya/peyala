@@ -48,6 +48,13 @@ export default function ExpenseLeakDetectorPage() {
     loadAnalysis();
   }, [period, severityFilter, categoryFilter, supplierFilter, statusFilter, sortBy]);
 
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => loadAnalysis();
+    window.addEventListener('peyala_data_synced', handleSync);
+    return () => window.removeEventListener('peyala_data_synced', handleSync);
+  }, [period, severityFilter, categoryFilter, supplierFilter, statusFilter, sortBy]);
+
   const loadAnalysis = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
@@ -155,19 +162,6 @@ export default function ExpenseLeakDetectorPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Identify unusual spending, hidden cost increases and potential expense leaks across your business.
             </p>
-          </div>
-
-          {/* Refresh & Controls */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => loadAnalysis(true)}
-              disabled={refreshing || loading}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Re-run statistical detection engine"
-            >
-              <RefreshCw className={cn('w-3.5 h-3.5', (refreshing || loading) && 'animate-spin')} />
-              <span>{refreshing ? 'Analyzing...' : 'Run Analysis'}</span>
-            </button>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { realtime, SyncStatusState } from '@/lib/realtime';
 import api from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -17,14 +18,21 @@ import {
   WifiOff,
   ShieldCheck,
   ChevronDown,
+  X,
 } from 'lucide-react';
 
 export default function LocalServerStatus() {
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(realtime.getIsConnected());
   const [syncStatus, setSyncStatus] = useState<SyncStatusState>(realtime.getSyncStatus());
   const [isSyncingManual, setIsSyncingManual] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Automatically close popover when switching pages / routes
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     const unsubConn = realtime.onConnectionChange((connected) => {
@@ -50,17 +58,23 @@ export default function LocalServerStatus() {
       })
       .catch(() => {});
 
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: Event) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
+
+    // Support mouse, touch (iOS/Android), and pointer events so taps anywhere outside dismiss reliably
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    document.addEventListener('pointerdown', handleClickOutside);
 
     return () => {
       unsubConn();
       unsubSync();
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
     };
   }, []);
 
@@ -78,6 +92,30 @@ export default function LocalServerStatus() {
       toast.error(err.response?.data?.message || 'Sync attempt failed.');
     } finally {
       setIsSyncingManual(false);
+    }
+  };
+
+  const [isHydrating, setIsHydrating] = useState(false);
+  const handleHydrateFromCentral = async () => {
+    if (isHydrating) return;
+    setIsHydrating(true);
+    try {
+      const res = await api.post('/sync/hydrate-from-central', {}, { timeout: 180000 });
+      if (res.data?.status === 'in_progress') {
+        toast.info(res.data?.message || 'Database replication is currently running in background... ⏳');
+        return;
+      }
+      const count = res.data?.totalDocuments ?? 0;
+      toast.success(res.data?.message || `Replicated ${count} items to Local DB! ☁️`);
+      if (count > 0 || res.data?.status === 'hydrated_from_snapshot' || res.data?.status === 'hydrated') {
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Replication failed. Check internet or local MongoDB.');
+    } finally {
+      setIsHydrating(false);
     }
   };
 
@@ -123,9 +161,19 @@ export default function LocalServerStatus() {
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>
 
+      {/* Mobile backdrop to easily dismiss when tapping anywhere outside */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/10 md:bg-transparent"
+          onClick={() => setIsOpen(false)}
+          onTouchStart={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Popover Card */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-800 p-4 z-50 text-gray-800 dark:text-gray-100 text-xs animate-in fade-in slide-in-from-top-1 duration-150">
+        <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-800 p-4 z-50 text-gray-800 dark:text-gray-100 text-xs animate-in fade-in slide-in-from-top-1 duration-150">
           <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
@@ -136,9 +184,23 @@ export default function LocalServerStatus() {
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">Primary Cafe Station · Version 12.0.0</p>
               </div>
             </div>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/60">
-              <ShieldCheck className="w-3 h-3" /> Sub-5ms
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/60">
+                <ShieldCheck className="w-3 h-3" /> Sub-5ms
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                }}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="Close dialog"
+                aria-label="Close dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <div className="py-3 space-y-2.5">
@@ -207,25 +269,45 @@ export default function LocalServerStatus() {
                 )}
               </span>
             </div>
+
+            {syncStatus.lastError && !syncStatus.isOnline && (
+              <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] leading-snug">
+                <strong>Status Note:</strong> {syncStatus.lastError}
+              </div>
+            )}
           </div>
 
           {/* Action Footer */}
-          <div className="pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center gap-2">
-            <button
-              onClick={handleManualSync}
-              disabled={isSyncingManual || syncStatus.isSyncing}
-              className="flex-1 py-1.5 px-3 rounded-lg bg-gray-900 hover:bg-black text-white dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual || syncStatus.isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncingManual || syncStatus.isSyncing ? 'Syncing...' : 'Sync Now'}
-            </button>
-            <a
-              href="/settings"
-              className="py-1.5 px-2.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-center"
-              title="View Maintenance & Restore Points"
-            >
-              Restore Points
-            </a>
+          <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleManualSync}
+                disabled={isSyncingManual || syncStatus.isSyncing}
+                className="flex-1 py-1.5 px-3 rounded-lg bg-gray-900 hover:bg-black text-white dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual || syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncingManual || syncStatus.isSyncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+              <a
+                href="/settings"
+                className="py-1.5 px-2.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-center"
+                title="View Maintenance & Restore Points"
+              >
+                Restore Points
+              </a>
+            </div>
+
+            {syncStatus.isOnline && (
+              <button
+                onClick={handleHydrateFromCentral}
+                disabled={isHydrating}
+                className="w-full py-1.5 px-2.5 rounded-lg border border-blue-500/80 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 text-[11px]"
+                title="Replicate and hydrate all records from Central MongoDB Atlas"
+              >
+                <Cloud className={`w-3 h-3 ${isHydrating ? 'animate-spin' : ''}`} />
+                {isHydrating ? 'Replicating from Cloud Atlas...' : 'Clone All from Cloud DB'}
+              </button>
+            )}
           </div>
         </div>
       )}

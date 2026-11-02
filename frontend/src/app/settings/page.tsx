@@ -113,6 +113,25 @@ export default function SettingsPage() {
     }
   };
 
+  const [isHydrating, setIsHydrating] = useState(false);
+  const handleHydrateFromCentral = async () => {
+    if (isHydrating) return;
+    setIsHydrating(true);
+    try {
+      const res = await api.post('/sync/hydrate-from-central', {}, { timeout: 180000 });
+      if (res.data?.status === 'in_progress') {
+        toast.info(res.data?.message || 'Database replication is currently running in background... ⏳');
+        return;
+      }
+      toast.success(res.data?.message || `Successfully replicated local instance! Replicated ${res.data?.totalDocuments || 0} documents across ${res.data?.collectionsCount || 0} collections! ☁️`);
+      loadMaintenanceData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Central DB hydration failed. Verify internet reachability or local MongoDB.');
+    } finally {
+      setIsHydrating(false);
+    }
+  };
+
   const handleCreateRestorePoint = async () => {
     if (!newVersion.trim()) {
       toast.error('Version number is required (e.g. 10.0.1)');
@@ -959,14 +978,25 @@ export default function SettingsPage() {
                     Operational data is saved locally first. Background delta updates sync to MongoDB Atlas every {posLimits.dbSyncIntervalMinutes || maintenanceData?.sync?.syncIntervalMinutes || 15} minutes.
                   </p>
                 </div>
-                <button
-                  onClick={handleManualSync}
-                  disabled={isManualSyncing}
-                  className="btn-primary py-2 px-4 flex items-center gap-2 text-xs font-bold"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isManualSyncing ? 'animate-spin' : ''}`} />
-                  {isManualSyncing ? 'Syncing...' : 'Sync Now'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleManualSync}
+                    disabled={isManualSyncing}
+                    className="btn-primary py-2 px-4 flex items-center gap-2 text-xs font-bold"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                    {isManualSyncing ? 'Syncing...' : 'Sync Now'}
+                  </button>
+                  <button
+                    onClick={handleHydrateFromCentral}
+                    disabled={isHydrating}
+                    className="px-3.5 py-2 rounded-xl border border-blue-600 dark:border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center gap-2 text-xs font-bold transition-all disabled:opacity-50"
+                    title="Clone and replicate complete Central DB Atlas dataset to local database"
+                  >
+                    <Cloud className={`w-3.5 h-3.5 ${isHydrating ? 'animate-spin' : ''}`} />
+                    {isHydrating ? 'Replicating...' : 'Clone from Central DB'}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">

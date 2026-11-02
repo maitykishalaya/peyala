@@ -236,27 +236,40 @@ export default function PurchasesPage() {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.supplier;
     if (isDefaultView) {
       const cached = readCache(LIST_CACHE_KEY);
-      if (cached?.purchases) {
+      if (cached?.purchases && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setPurchases(cached.purchases || []);
         setTotal(cached.total || 0);
         if (cached.savedAt) {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
         setLoading(false);
-        return;
       }
     }
     load();
   }, [page, filters]);
 
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      localStorage.removeItem(LIST_CACHE_KEY);
+      localStorage.removeItem(REFDATA_CACHE_KEY);
+      load(true);
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [page, filters]);
+
   useEffect(() => {
     const cached = readCache(REFDATA_CACHE_KEY);
-    if (cached?.suppliers && cached?.items) {
+    if (cached?.suppliers && cached?.items && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
       setSuppliers(cached.suppliers || []);
       setItems(cached.items || []);
       setAccounts(cached.accounts || []);
       setCategories(cached.categories || []);
-      return;
     }
     loadRefData();
   }, []);
@@ -538,20 +551,7 @@ export default function PurchasesPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(LIST_CACHE_KEY);
-                localStorage.removeItem(REFDATA_CACHE_KEY);
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             {canWrite ? (
               <button onClick={openNewPurchase} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
                 <Plus className="w-4 h-4" /> New Purchase

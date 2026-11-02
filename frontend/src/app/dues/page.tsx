@@ -161,6 +161,20 @@ export default function CustomerDuesPage() {
     fetchReport();
   }, [fetchReport]);
 
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      fetchReport(true);
+      loadAccounts();
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('peyala_sales_updated', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('peyala_sales_updated', handleSync);
+    };
+  }, [fetchReport]);
+
   // ── Modal State: Collect Payment ────────────────────────────────
   const [collectModalOpen, setCollectModalOpen] = useState(false);
   const [collectTarget, setCollectTarget] = useState<Customer | null>(null);
@@ -373,17 +387,6 @@ export default function CustomerDuesPage() {
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => fetchReport(true)}
-              disabled={refreshing}
-              className="btn-secondary text-xs sm:text-sm py-2 px-3.5 flex items-center gap-1.5"
-              title="Refresh Dues Data"
-            >
-              <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin text-brand-500')} />
-              <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-            </button>
-
             <button
               type="button"
               onClick={() => setAddCustomerModalOpen(true)}

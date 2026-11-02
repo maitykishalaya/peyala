@@ -436,36 +436,46 @@ export default function ReportsPage() {
   useEffect(() => {
     if (tab === 'sales') {
       const cached = readCache(SALES_CACHE_KEY, userRole);
-      if (cached?.salesData) {
+      if (cached?.salesData && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setSalesData(cached.salesData);
         if (cached.savedAt) {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
-        return;
-      }
+        }
       loadSales();
     } else if (tab === 'daily') {
       const cached = readCache(DAILY_CACHE_KEY, userRole);
-      if (cached?.daily) {
+      if (cached?.daily && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setDaily(cached.daily);
         if (cached.savedAt) {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
-        return;
-      }
+        }
       loadDaily();
     } else if (tab === 'pnl') {
       const cached = readCache(PNL_CACHE_KEY, userRole);
-      if (cached?.pnl) {
+      if (cached?.pnl && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setPnl(cached.pnl);
         setInventoryReport(cached.inventoryReport || null);
         if (cached.savedAt) {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
-        return;
-      }
+        }
       loadPnl();
     }
+  }, [tab, userRole]);
+
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => handleRefresh();
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('peyala_sales_updated', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('focus', handleSync);
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('peyala_sales_updated', handleSync);
+    };
   }, [tab, userRole]);
 
   const handleRefresh = () => {
@@ -610,16 +620,7 @@ export default function ReportsPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={refreshing || loading || salesLoading}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             <div className="h-5 w-[1px] bg-gray-200 dark:bg-gray-700 hidden sm:block mx-1" />
             <button onClick={() => setTab('sales')} className={tab === 'sales' ? 'btn-primary' : 'btn-secondary'}>Detailed Sales Report</button>
             <button onClick={() => setTab('daily')} className={tab === 'daily' ? 'btn-primary' : 'btn-secondary'}>Daily Report</button>

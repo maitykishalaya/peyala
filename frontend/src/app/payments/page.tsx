@@ -134,7 +134,7 @@ export default function PaymentsPage() {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate && !filters.category && !filters.supplier && !filters.search && sortBy === 'date' && sortOrder === 'desc';
     if (isDefaultView) {
       const cached = readCache(getPaymentsCacheKey(userRole));
-      if (cached?.payments) {
+      if (cached?.payments && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setPayments(cached.payments || []);
         setTotal(cached.total || 0);
         setAccounts(cached.accounts || []);
@@ -144,10 +144,23 @@ export default function PaymentsPage() {
           setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
         setLoading(false);
-        return;
       }
     }
     load();
+  }, [page, filters, sortBy, sortOrder, userRole]);
+
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      localStorage.removeItem(getPaymentsCacheKey(userRole));
+      load(true);
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, [page, filters, sortBy, sortOrder, userRole]);
 
   // ── When category changes, update subcategory list ───────────────
@@ -267,19 +280,7 @@ export default function PaymentsPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(getPaymentsCacheKey(userRole));
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             {canWrite ? (
               <button onClick={() => { setForm(blank()); setAllowedModes([]); setSubcategories([]); setModal('create'); }}
                 className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">

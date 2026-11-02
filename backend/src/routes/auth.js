@@ -84,13 +84,14 @@ router.post('/login', async (req, res) => {
 
     // 1. Try DB authentication if connected
     if (mongoose.connection.readyState === 1) {
-      if (email === 'viewer@peyala.com') {
-        await ensureDefaultAccounts().catch(() => {});
-      }
       try {
         user = await User.findOne({ email }).maxTimeMS(2500);
       } catch (dbErr) {
         console.warn('[Auth] Database lookup error or timeout, trying offline vault:', dbErr.message);
+      }
+      if (!user && email === 'viewer@peyala.com') {
+        await ensureDefaultAccounts().catch(() => {});
+        user = await User.findOne({ email }).maxTimeMS(2500).catch(() => null);
       }
     }
 

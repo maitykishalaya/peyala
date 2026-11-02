@@ -31,6 +31,11 @@ backend/uploads/
 # Local MongoDB Data Directory
 backend/data/
 data/
+backend/bin/
+
+# Nightly runtime snapshots (Local closing snapshots taken at 11:59 PM IST)
+restore_points/nightly_snapshots/
+restore_points/latest_closing_snapshot.json
 
 # OS Files
 .DS_Store

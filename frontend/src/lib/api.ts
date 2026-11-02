@@ -77,9 +77,15 @@ api.interceptors.response.use(
       (err.response.status === 500 && (!err.response.data?.message || isDbOfflineError));
 
     // Queue mutation locally on connection or DB error so user can continue uninterrupted
-    // EXCLUDE table transfer/move operations and auth operations from background offline replay
+    // EXCLUDE table transfer/move operations, auth, sync, maintenance, and backup from background offline replay
     if (isMutation && isConnectionError && typeof window !== 'undefined' && config) {
-      if (config.url?.includes('/transfer') || config.url?.includes('/auth/')) {
+      if (
+        config.url?.includes('/transfer') ||
+        config.url?.includes('/auth/') ||
+        config.url?.includes('/sync/') ||
+        config.url?.includes('/maintenance/') ||
+        config.url?.includes('/backup')
+      ) {
         return Promise.reject(err);
       }
       const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;

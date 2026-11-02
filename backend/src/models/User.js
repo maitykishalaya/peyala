@@ -17,8 +17,25 @@ userSchema.pre('save', async function(next) {
   next();
 });
 
+const crypto = require('crypto');
+const passwordVerificationCache = new Map();
+const VERIFICATION_CACHE_TTL_MS = 60000; // 60 seconds
+
 userSchema.methods.matchPassword = async function(entered) {
-  return await bcrypt.compare(entered, this.password);
+  const cacheKey = crypto.createHash('sha256').update(`${this._id}:${entered}:${this.password}`).digest('hex');
+  const cached = passwordVerificationCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.result;
+  }
+  const result = await bcrypt.compare(entered, this.password);
+  if (result) {
+    passwordVerificationCache.set(cacheKey, { result: true, expiresAt: Date.now() + VERIFICATION_CACHE_TTL_MS });
+    if (passwordVerificationCache.size > 200) {
+      const oldestKey = passwordVerificationCache.keys().next().value;
+      passwordVerificationCache.delete(oldestKey);
+    }
+  }
+  return result;
 };
 
 module.exports = mongoose.model('User', userSchema);

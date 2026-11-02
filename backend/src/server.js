@@ -1,6 +1,17 @@
 // Expand libuv thread pool so bcrypt/crypto cannot starve async I/O under concurrent logins
-process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
 require('dotenv').config();
+
+// Windows DNS Fallback for MongoDB Atlas SRV resolution
+const dns = require('dns');
+try {
+  const currentDns = dns.getServers();
+  if (!currentDns || currentDns.length === 0 || (currentDns.length === 1 && currentDns[0] === '127.0.0.1')) {
+    dns.setServers(['8.8.8.8', '1.1.1.1', '1.0.0.1']);
+    console.log('[Peyala DNS] Fallback public DNS servers configured for cloud SRV resolution:', dns.getServers());
+  }
+} catch (_) {}
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -105,6 +116,10 @@ const server = http.createServer(app);
 
 // Initialize Realtime WebSocket Hub on same port
 realtimeHub.init(server);
+
+// Initialize automated Nightly 11:59 PM IST Closing Snapshot service
+const nightlySnapshotService = require('./services/nightlySnapshotService');
+nightlySnapshotService.initSchedule();
 
 // Listen on all network interfaces (dual-stack IPv4 and IPv6)
 server.listen(PORT, () => {

@@ -100,7 +100,7 @@ export default function DashboardPage() {
 
     // 2. Read local dashboard cache for instant render (stale-while-revalidate)
     const cached = readCache(userRole);
-    if (cached?.data) {
+    if (cached?.data && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
       setData(cached.data);
       if (cached.data.ownerNote) {
         setOwnerNote(cached.data.ownerNote);
@@ -131,11 +131,13 @@ export default function DashboardPage() {
 
     const onSalesUpdate = () => fetchFresh();
     window.addEventListener('peyala_sales_updated', onSalesUpdate);
+    window.addEventListener('peyala_data_synced', onSalesUpdate);
     window.addEventListener('focus', onSalesUpdate);
 
     return () => {
       unsubs.forEach(unsub => unsub());
       window.removeEventListener('peyala_sales_updated', onSalesUpdate);
+      window.removeEventListener('peyala_data_synced', onSalesUpdate);
       window.removeEventListener('focus', onSalesUpdate);
     };
   }, [userRole]);
@@ -206,15 +208,6 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => fetchFresh(true)}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch fresh dashboard data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
             <div className="text-right hidden sm:block">
               <p className="text-xs text-gray-400">Open Hours</p>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300">1:00 PM – 11:00 PM</p>

@@ -1942,7 +1942,7 @@ export default function AttendancePage() {
     let currentStaff = staff;
     if (!currentStaff.length) {
       const cachedStaff = readCache(getStaffCacheKey(userRole));
-      if (cachedStaff?.staff) {
+      if (cachedStaff?.staff && cachedStaff?.savedAt && (Date.now() - cachedStaff.savedAt < 15 * 60 * 1000)) {
         currentStaff = cachedStaff.staff;
         setStaff(currentStaff);
       }
@@ -1950,17 +1950,28 @@ export default function AttendancePage() {
 
     const cacheKey = getAttendanceCacheKey(year, month, userRole);
     const cachedAtt = readCache(cacheKey);
-    if (cachedAtt?.attendance && currentStaff.length) {
+    if (cachedAtt?.attendance && currentStaff.length && cachedAtt?.savedAt && (Date.now() - cachedAtt.savedAt < 15 * 60 * 1000)) {
       setAttendance(cachedAtt.attendance);
       setSummaries(cachedAtt.summaries || {});
       if (cachedAtt.savedAt) {
         setLastUpdated(new Date(cachedAtt.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
       setLoading(false);
-      return;
     }
-
     loadData();
+  }, [month, year, userRole]);
+
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => {
+      loadData(true);
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, [month, year, userRole]);
 
   useEffect(() => {
@@ -2105,20 +2116,6 @@ export default function AttendancePage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(getAttendanceCacheKey(year, month, userRole));
-                localStorage.removeItem(getStaffCacheKey(userRole));
-                loadData(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
           </div>
         </div>
 

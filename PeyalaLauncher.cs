@@ -32,7 +32,7 @@ namespace PeyalaPOS
                 // Open/focus POS browser portal so cashier immediately sees the screen, then exit cleanly.
                 try
                 {
-                    Process.Start("http://localhost:3000/login");
+                    Process.Start("http://localhost:3000/login?printStation=true");
                 }
                 catch { }
                 return;
@@ -88,19 +88,26 @@ namespace PeyalaPOS
                 // Wait for local server to be ready in background thread
                 Thread waitThread = new Thread(() =>
                 {
-                    bool isReady = WaitForServer(3000, 60);
-                    if (isReady)
+                    bool isReady = WaitForServer(3000, 120);
+                    if (isReady || IsPortListening(3000))
                     {
                         Thread.Sleep(1000); // settle
                         LaunchBrowser(args.Length > 0 && args[0].ToLower() == "--windowed");
                     }
                     else
                     {
+                        // Final retry probe after 2s
+                        Thread.Sleep(2000);
+                        if (IsPortListening(3000))
+                        {
+                            LaunchBrowser(args.Length > 0 && args[0].ToLower() == "--windowed");
+                            return;
+                        }
                         MessageBox.Show(
-                            "Peyala local server took too long to respond on port 3000.\nCheck if Node.js is installed or start manually with start-local-kiosk.bat.",
-                            "Peyala POS Warning",
+                            "Peyala local server is taking longer than expected to bind port 3000.\nServers are still initializing in the background.\nYou can click 'Open Peyala POS Station' in the system tray or run start-local-kiosk.bat.",
+                            "Peyala POS Starting",
                             MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning
+                            MessageBoxIcon.Information
                         );
                     }
                 });
@@ -162,7 +169,7 @@ namespace PeyalaPOS
             menu.MenuItems.Add(new MenuItem("-"));
 
             MenuItem openStation = new MenuItem("Open Peyala POS Station", (s, e) => LaunchApp(false));
-            MenuItem openBrowser = new MenuItem("Open in Web Browser", (s, e) => Process.Start("http://localhost:3000/login"));
+            MenuItem openBrowser = new MenuItem("Open in Web Browser", (s, e) => Process.Start("http://localhost:3000/login?printStation=true"));
             MenuItem restart = new MenuItem("Restart Local Servers", (s, e) => RestartServers());
             MenuItem exit = new MenuItem("Stop Servers & Exit", (s, e) => ExitApplication());
 
@@ -198,15 +205,31 @@ namespace PeyalaPOS
             return "node.exe";
         }
 
+        private static void CleanStaleLocks()
+        {
+            try
+            {
+                string dbDir = Path.Combine(appDir, "backend", "data", "db");
+                string mLock = Path.Combine(dbDir, "mongod.lock");
+                string wtLock = Path.Combine(dbDir, "WiredTiger.lock");
+                if (File.Exists(mLock)) try { File.Delete(mLock); } catch { }
+                if (File.Exists(wtLock)) try { File.Delete(wtLock); } catch { }
+            }
+            catch { }
+        }
+
         private static void StartServers()
         {
             try
             {
+                CleanStaleLocks();
                 string nodeExe = GetNodePath();
                 string backendDir = Path.Combine(appDir, "backend");
                 string frontendDir = Path.Combine(appDir, "frontend");
                 string backendScript = Path.Combine(backendDir, "src", "server.js");
                 string nextCli = Path.Combine(frontendDir, "node_modules", "next", "dist", "bin", "next");
+
+                string combinedPath = portableNodeDir + ";" + (Environment.GetEnvironmentVariable("PATH") ?? "");
 
                 // Start Backend
                 ProcessStartInfo bInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\"", backendScript))
@@ -216,20 +239,43 @@ namespace PeyalaPOS
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
+                bInfo.EnvironmentVariables["PATH"] = combinedPath;
+                bInfo.EnvironmentVariables["NODE_ENV"] = "production";
+                bInfo.EnvironmentVariables["PORT"] = "4000";
                 backendProcess = Process.Start(bInfo);
 
                 // Start Frontend
-                ProcessStartInfo fInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\" start -p 3000 -H 0.0.0.0", nextCli))
+                ProcessStartInfo fInfo;
+                if (File.Exists(nextCli))
                 {
-                    WorkingDirectory = frontendDir,
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
+                    fInfo = new ProcessStartInfo(nodeExe, string.Format("\"{0}\" start -p 3000 -H 0.0.0.0", nextCli));
+                }
+                else
+                {
+                    string npmCmd = Path.Combine(portableNodeDir, "npm.cmd");
+                    if (File.Exists(npmCmd))
+                    {
+                        fInfo = new ProcessStartInfo(npmCmd, "run start");
+                    }
+                    else
+                    {
+                        fInfo = new ProcessStartInfo("cmd.exe", "/c call npm run start");
+                    }
+                }
+
+                fInfo.WorkingDirectory = frontendDir;
+                fInfo.CreateNoWindow = true;
+                fInfo.UseShellExecute = false;
+                fInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                fInfo.EnvironmentVariables["PATH"] = combinedPath;
+                fInfo.EnvironmentVariables["NODE_ENV"] = "production";
+                fInfo.EnvironmentVariables["PORT"] = "3000";
+
                 frontendProcess = Process.Start(fInfo);
             }
             catch (Exception ex)
             {
+                try { File.WriteAllText(Path.Combine(appDir, "launcher_servers_error.log"), ex.ToString()); } catch { }
                 MessageBox.Show("Failed to start servers: " + ex.Message, "Peyala POS Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -257,7 +303,7 @@ namespace PeyalaPOS
 
         private static void LaunchBrowser(bool windowed)
         {
-            string url = "http://localhost:3000/login";
+            string url = "http://localhost:3000/login?printStation=true";
             string userDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PeyalaPOSProfile");
 
             if (string.IsNullOrEmpty(browserPath) || !File.Exists(browserPath))

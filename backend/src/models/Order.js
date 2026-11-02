@@ -109,13 +109,11 @@ const orderSchema = new mongoose.Schema({
 
 orderSchema.index({ billPrintQueued: 1, billPrintQueuedAt: 1, updatedAt: 1 });
 orderSchema.index({ status: 1, billPrinted: 1 });
-orderSchema.index({ status: 1, paidAt: -1 });
 orderSchema.index({ status: 1, 'kotRounds.printed': 1, createdAt: 1 });
 orderSchema.index({ status: 1, table: 1, createdAt: -1 });
 orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ customer: 1, dueSettled: 1 });
 orderSchema.index({ paymentMethod: 1, dueSettled: 1 });
-orderSchema.index({ fiscalQuarter: 1, billNumber: 1 });
 
 // Static helper to calculate order financial totals excluding cancelled items
 orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discountType = 'flat') {
@@ -162,7 +160,9 @@ orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discoun
     }
   }
 
-  const cleanTax = Math.round(taxAmount * 100) / 100;
+  const orderCgst = Math.round(((taxAmount / 2) * 100)) / 100;
+  const orderSgst = Math.round(((taxAmount / 2) * 100)) / 100;
+  const cleanTax = Math.round((orderCgst + orderSgst) * 100) / 100;
   const rawTotal = Math.max(0, Math.round((discountedBase + cleanTax) * 100) / 100);
 
   return {
@@ -177,6 +177,19 @@ orderSchema.statics.calcTotals = function(items = [], discountInput = 0, discoun
 
 orderSchema.index({ table: 1, status: 1 });
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ status: 1, paidAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ 'items.status': 1, status: 1 });
+orderSchema.index({ billNumber: -1 }, { sparse: true });
+orderSchema.index(
+  { fiscalQuarter: 1, billNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { billNumber: { $type: 'number' } },
+    name: 'fiscalQuarter_1_billNumber_1_unique',
+  }
+);
+orderSchema.index({ table: 1, status: 1, createdAt: -1 });
 
 const syncPlugin = require('../utils/syncPlugin');
 orderSchema.plugin(syncPlugin, { modelName: 'Order' });

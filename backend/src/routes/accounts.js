@@ -12,14 +12,17 @@ const Payment = require('../models/Payment');
 const Receipt = require('../models/Receipt');
 const Transfer = require('../models/Transfer');
 const SalesEntry = require('../models/SalesEntry');
+const CustomerDuePayment = require('../models/CustomerDuePayment');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
+const { recalculateAccountBalances } = require('../utils/accountLedger');
 
 router.use(auth);
 
 // ── GET /api/accounts ─────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
+    await recalculateAccountBalances();
     const accounts = await Account.find({ isActive: true }).sort('name');
     res.json(accounts);
   } catch (err) { res.status(500).json({ message: err.message }); }
@@ -84,19 +87,43 @@ router.get('/:id/ledger', async (req, res) => {
       .select('date amount fromAccount description');
 
     // 5. Sales credited to this account
-    // Cash sales → cash-type accounts; digital sales → bank/digital accounts
+    // Strictly account-isolated:
+    // - Cash sales → Cash Counter ONLY
+    // - Digital sales → Current Account ONLY
+    // - Personal/director accounts (e.g. Kishalaya Maity) or other cash accounts (e.g. Petty Cash) get ZERO outlet sales
     const account = await Account.findById(accountId);
     let salesCredits = [];
     if (account) {
-      const allSales = await SalesEntry.find(dateQ).select('date paymentBreakdown zomato fatafat otherSales otherSalesReceivedIn');
+      const isCashCounter = (/cash counter/i.test(account.name) || account._id.toString() === '6a45128e43474cf64bb06ee6') && account.type === 'cash';
+      const isCurrentAccount = (/current account/i.test(account.name) || account._id.toString() === '6a4512dd43474cf64bb06eef') && ['bank', 'digital'].includes(account.type);
+
+      const allSales = await SalesEntry.find(dateQ).select('date paymentBreakdown cash upi card online other zomato fatafat otherSales otherSalesReceivedIn');
       allSales.forEach(s => {
         const pb = s.paymentBreakdown || {};
-        if (account.type === 'cash' && (pb).cash > 0) {
-          salesCredits.push({ _id: s._id, date: s.date, amount: (pb).cash, description: 'Outlet Sales (Cash)', type: 'sale_credit', paymentMode: 'cash' });
-        } else if (['bank', 'digital'].includes(account.type)) {
-          const digital = ((pb).upi || 0) + ((pb).card || 0) + ((pb).bankTransfer || 0);
+        const cashAmt = Number(pb.cash) || Number(s.cash) || 0;
+        if (isCashCounter && cashAmt > 0) {
+          salesCredits.push({
+            _id: s._id,
+            date: s.date,
+            amount: cashAmt,
+            description: 'Outlet Sales (Cash)',
+            type: 'sale_credit',
+            paymentMode: 'cash'
+          });
+        } else if (isCurrentAccount) {
+          const digital = (Number(pb.upi) || Number(s.upi) || 0) +
+                          (Number(pb.card) || Number(s.card) || 0) +
+                          (Number(pb.bankTransfer) || Number(s.online) || 0) +
+                          (Number(pb.other) || Number(s.other) || 0);
           if (digital > 0) {
-            salesCredits.push({ _id: s._id, date: s.date, amount: digital, description: 'Outlet Sales (UPI/Card/Bank)', type: 'sale_credit', paymentMode: 'upi/card/bank' });
+            salesCredits.push({
+              _id: s._id,
+              date: s.date,
+              amount: digital,
+              description: 'Outlet Sales (UPI/Card/Bank)',
+              type: 'sale_credit',
+              paymentMode: 'upi/card/bank'
+            });
           }
         }
 
@@ -112,6 +139,32 @@ router.get('/:id/ledger', async (req, res) => {
       });
     }
 
+    // 6. Customer Due Payments INTO this account (money IN)
+    const duePayments = await CustomerDuePayment.find({
+      $or: [
+        { receivedIn: accountId },
+        { receivedInAccount: accountId }
+      ],
+      ...(dateFilter.$gte || dateFilter.$lte ? {
+        $or: [
+          {
+            date: {
+              ...(dateFilter.$gte ? { $gte: dateFilter.$gte } : {}),
+              ...(dateFilter.$lte ? { $lte: dateFilter.$lte } : {})
+            }
+          },
+          {
+            paymentDate: {
+              ...(dateFilter.$gte ? { $gte: dateFilter.$gte } : {}),
+              ...(dateFilter.$lte ? { $lte: dateFilter.$lte } : {})
+            }
+          }
+        ]
+      } : {})
+    })
+      .populate('customer', 'name phone')
+      .select('date paymentDate amount customer paymentMethod paymentMode notes referenceNote');
+
     // Normalise all into a unified ledger format
     const ledger = [
       ...payments.map((p) => ({
@@ -126,6 +179,16 @@ router.get('/:id/ledger', async (req, res) => {
         description: r.description || `Receipt from ${r.source}`,
         amount: r.amount, paymentMode: null,
         meta: r.category,
+      })),
+      ...duePayments.map((d) => ({
+        id: d._id,
+        date: d.date || d.paymentDate,
+        type: 'receipt',
+        direction: 'in',
+        description: `Customer Due Payment: ${d.customer?.name || 'Customer'}${d.notes ? ' (' + d.notes + ')' : ''}`,
+        amount: d.amount,
+        paymentMode: d.paymentMethod || d.paymentMode || 'cash',
+        meta: d.notes || d.referenceNote || 'Due Collection',
       })),
       ...transfersOut.map((t) => ({
         id: t._id, date: t.date, type: 'transfer_out', direction: 'out',

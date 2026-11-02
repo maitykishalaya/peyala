@@ -262,6 +262,13 @@ export default function KitchenDisplayPage() {
     return () => clearInterval(interval);
   }, [loadKdsData]);
 
+  // Auto-refresh when background sync completes
+  useEffect(() => {
+    const handleSync = () => loadKdsData(true);
+    window.addEventListener('peyala_data_synced', handleSync);
+    return () => window.removeEventListener('peyala_data_synced', handleSync);
+  }, [loadKdsData]);
+
   // Handle marking an individual item status in ticket or category view
   const handleUpdateItemStatus = async (
     orderId: string,
@@ -953,16 +960,7 @@ export default function KitchenDisplayPage() {
               )}
             </button>
 
-            {/* Live Sync Badge & Refresh Button */}
-            <button
-              type="button"
-              onClick={() => loadKdsData()}
-              disabled={refreshing}
-              className="bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
-              <span>{refreshing ? 'Syncing...' : 'Sync (8s)'}</span>
-            </button>
+            
           </div>
         </div>
 

@@ -50,6 +50,20 @@ router.post('/trigger', auth, staffOrAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/sync/hydrate-from-central
+ * Manually trigger full replication of Central DB into local MongoDB
+ */
+router.post('/hydrate-from-central', auth, staffOrAdmin, async (req, res) => {
+  try {
+    console.log(`[SyncRoute] Full Central DB hydration triggered by ${req.user.name || req.user.email}`);
+    const result = await syncEngine.hydrateFromCentral();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * GET /api/sync/outbox
  * View pending or recent outbox mutations
  */

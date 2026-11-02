@@ -296,9 +296,9 @@ router.get('/sales', async (req, res) => {
     const filter = {};
 
     // Date range filter using effective billing/settlement timestamp
+    let startRange = null;
+    let endRange = null;
     if (startDate || endDate) {
-      let startRange = null;
-      let endRange = null;
       if (startDate) {
         startRange = getIstDayRange(startDate).start;
       }
@@ -313,10 +313,8 @@ router.get('/sales', async (req, res) => {
         { billedAt: null, billPrintedAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
         // 3. Order with paidAt timestamp
         { billedAt: null, billPrintedAt: null, paidAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
-        // 4. Order with due settlement timestamp (due settled in selected period)
-        { dueSettledAt: { $ne: null, ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } },
-        // 5. Legacy order fallback to createdAt
-        { billedAt: null, billPrintedAt: null, paidAt: null, dueSettledAt: null, createdAt: { ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } }
+        // 4. Legacy order fallback to createdAt
+        { billedAt: null, billPrintedAt: null, paidAt: null, createdAt: { ...(startRange ? { $gte: startRange } : {}), ...(endRange ? { $lte: endRange } : {}) } }
       ];
     }
 
@@ -327,7 +325,7 @@ router.get('/sales', async (req, res) => {
       filter.status = 'paid';
     }
 
-    // Payment method filter (Other / Dues filter shows bills that are due settled in the selected period or paid as other)
+    // Payment method filter (Other / Dues filter shows bills that are due/other)
     if (paymentMethod && paymentMethod !== 'all') {
       if (paymentMethod === 'other' || paymentMethod === 'other_dues' || paymentMethod === 'dues') {
         const otherDuesCondition = {

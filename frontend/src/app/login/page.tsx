@@ -801,6 +801,10 @@ export default function LoginPage() {
     try {
       await login(email, password);
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      if (params?.get('printStation') === 'true' || params?.get('kiosk') === 'true') {
+        localStorage.setItem('peyala_is_print_station', 'true');
+        localStorage.setItem('peyala_pos_print_mode', 'production');
+      }
       const redirectTarget = params?.get('redirect') || '/dashboard';
       router.push(redirectTarget);
     } catch (err: any) {

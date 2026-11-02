@@ -150,6 +150,7 @@ class RealtimeClient {
     }
 
     if (data.type === 'SYNC_STATUS_CHANGED') {
+      const prevSyncing = this.currentSyncStatus.isSyncing;
       this.currentSyncStatus = {
         isOnline: Boolean(data.payload?.isOnline),
         isSyncing: Boolean(data.payload?.isSyncing),
@@ -158,6 +159,21 @@ class RealtimeClient {
         lastError: data.payload?.lastError || null,
       };
       this.notifySyncStatus();
+
+      // Trigger automatic background page updates when a sync cycle finishes
+      if (prevSyncing && !this.currentSyncStatus.isSyncing) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('peyala_data_synced', { detail: data.payload }));
+          window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
+        }
+      }
+    }
+
+    if (data.type === 'DATA_SYNCED_FROM_CLOUD') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('peyala_data_synced', { detail: data.payload }));
+        window.dispatchEvent(new CustomEvent('peyala_sales_updated'));
+      }
     }
 
     // Normal broadcast event

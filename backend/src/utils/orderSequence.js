@@ -38,6 +38,14 @@ async function ensureSequenceInitialized() {
   }
 }
 
+let orderAllocationChain = Promise.resolve();
+
+function withOrderAllocationLock(fn) {
+  const next = orderAllocationChain.then(fn, fn);
+  orderAllocationChain = next.catch(() => {});
+  return next;
+}
+
 /**
  * Atomically generates the next sequential order number.
  * Thread-safe and race-condition proof under high concurrent traffic.
@@ -45,15 +53,29 @@ async function ensureSequenceInitialized() {
  * @returns {Promise<number>} - Next unique order number (e.g. 4501, 4502...)
  */
 async function getNextOrderNumber() {
-  await ensureSequenceInitialized();
+  return withOrderAllocationLock(async () => {
+    await ensureSequenceInitialized();
 
-  const seqDoc = await OrderSequence.findByIdAndUpdate(
-    'orderNumber',
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true }
-  );
+    const highest = await Order.findOne({ orderNumber: { $exists: true, $ne: null } })
+      .sort({ orderNumber: -1 })
+      .select('orderNumber')
+      .lean();
+    const maxOrderNumber = highest?.orderNumber || 4500;
 
-  return seqDoc.seq;
+    const existingSeq = await OrderSequence.findById('orderNumber');
+    const currentSeq = existingSeq?.seq || 4500;
+
+    const baseSeq = Math.max(currentSeq, maxOrderNumber);
+    const nextSeq = baseSeq + 1;
+
+    const seqDoc = await OrderSequence.findByIdAndUpdate(
+      'orderNumber',
+      { $set: { seq: nextSeq } },
+      { new: true, upsert: true }
+    );
+
+    return seqDoc.seq;
+  });
 }
 
 module.exports = {

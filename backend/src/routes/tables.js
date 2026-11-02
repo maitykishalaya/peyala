@@ -436,20 +436,24 @@ router.get('/', async (req, res) => {
     for (const t of tables) {
       const activeOrd = activeOrderMap.get(String(t._id));
       if (activeOrd) {
+        const needsUpdate = t.status !== 'occupied' || String(t.activeOrder) !== String(activeOrd._id);
         t.activeOrder = activeOrd;
         t.status = 'occupied';
-        bulkOps.push({
-          updateOne: {
-            filter: {
-              _id: t._id,
-              $or: [{ status: { $ne: 'occupied' } }, { activeOrder: { $ne: activeOrd._id } }],
+        if (needsUpdate) {
+          bulkOps.push({
+            updateOne: {
+              filter: {
+                _id: t._id,
+                $or: [{ status: { $ne: 'occupied' } }, { activeOrder: { $ne: activeOrd._id } }],
+              },
+              update: { $set: { status: 'occupied', activeOrder: activeOrd._id } },
             },
-            update: { $set: { status: 'occupied', activeOrder: activeOrd._id } },
-          },
-        });
+          });
+        }
       } else {
+        const needsUpdate = t.status === 'occupied' || t.activeOrder !== null;
         t.activeOrder = null;
-        if (t.status === 'occupied') {
+        if (needsUpdate) {
           t.status = 'available';
           bulkOps.push({
             updateOne: {

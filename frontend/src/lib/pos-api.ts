@@ -365,6 +365,7 @@ export const ordersApi = {
     tableId: string;
     items: OrderInputItem[];
     shouldPrint?: boolean;
+    isPrintStation?: boolean;
     orderNotes?: string;
     customerName?: string;
     customerPhone?: string;
@@ -378,6 +379,7 @@ export const ordersApi = {
     items: OrderInputItem[],
     options?: {
       shouldPrint?: boolean;
+      isPrintStation?: boolean;
       orderNotes?: string;
       customerName?: string;
       customerPhone?: string;
@@ -389,6 +391,7 @@ export const ordersApi = {
     api.post<Order>(`/orders/${id}/items`, {
       items,
       shouldPrint: options?.shouldPrint,
+      isPrintStation: options?.isPrintStation,
       orderNotes: options?.orderNotes,
       customerName: options?.customerName,
       customerPhone: options?.customerPhone,

@@ -7,6 +7,7 @@
 
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { toast } from './toast';
+import { realtime } from './realtime';
 
 export interface QueuedRequest {
   id: string;
@@ -149,16 +150,31 @@ export function enqueueRequest(config: AxiosRequestConfig, tempId?: string): Que
 
 /**
  * Checks if the backend database connection is actually reachable and responsive.
- * Uses local HTTP ping rather than navigator.onLine so local-first offline cafes operate seamlessly.
+ * In a local-first cafe station:
+ * 1. An active local WebSocket connection proves the backend server and DB are online.
+ * 2. Probe /api/health and /health with a resilient 4000ms timeout.
  */
 export async function isBackendReachable(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
 
+  // 1. If local realtime WebSocket connection is already established and active
   try {
-    const res = await syncClient.get('/health', { timeout: 2000 });
+    if (realtime && typeof realtime.getIsConnected === 'function' && realtime.getIsConnected()) {
+      return true;
+    }
+  } catch (_) {}
+
+  // 2. Perform HTTP probe to backend health endpoint (/api/health and /health)
+  try {
+    const res = await syncClient.get('/api/health', { timeout: 4000 });
     return res.status === 200;
   } catch {
-    return false;
+    try {
+      const res2 = await syncClient.get('/health', { timeout: 4000 });
+      return res2.status === 200;
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -308,15 +308,7 @@ export default function WastagePage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => fetchEntries(true)}
-              disabled={refreshing}
-              className="btn-secondary text-sm flex items-center gap-1.5 py-2 px-3"
-              title="Refresh entries"
-            >
-              <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+            
             {canWrite ? (
               <>
                 <button

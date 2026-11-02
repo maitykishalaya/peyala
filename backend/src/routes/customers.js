@@ -283,15 +283,30 @@ router.post('/:id/collect-due', async (req, res) => {
       return res.status(400).json({ message: 'Payment amount must be greater than zero' });
     }
 
-    const customer = await Customer.findById(req.params.id);
+    // Atomically check balance and decrement customer totalDue to prevent concurrent double-credit to accounts
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, totalDue: { $gte: numAmount - 0.05 } },
+      {
+        $inc: { totalDue: -numAmount },
+        $set: { lastVisit: new Date() },
+      },
+      { new: true }
+    );
+
     if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
+      const existing = await Customer.findById(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: 'Customer not found' });
+      }
+      return res.status(400).json({
+        message: `Amount (₹${numAmount}) exceeds customer's outstanding balance of ₹${(existing.totalDue || 0).toFixed(2)} or has already been settled.`,
+      });
     }
 
-    if (numAmount > customer.totalDue + 0.05) {
-      return res.status(400).json({
-        message: `Amount (₹${numAmount}) cannot exceed customer's outstanding balance of ₹${customer.totalDue}`,
-      });
+    // Ensure totalDue does not stay slightly negative due to floating-point imprecision
+    if (customer.totalDue < 0) {
+      customer.totalDue = 0;
+      await Customer.updateOne({ _id: customer._id }, { $set: { totalDue: 0 } });
     }
 
     // Resolve Account to credit
@@ -351,11 +366,6 @@ router.post('/:id/collect-due', async (req, res) => {
       remainingToApply = Math.round((remainingToApply - applyAmount) * 100) / 100;
     }
 
-    // Decrement customer totalDue
-    customer.totalDue = Math.max(0, Math.round((customer.totalDue - numAmount) * 100) / 100);
-    customer.lastVisit = new Date();
-    await customer.save();
-
     // Create Due Payment audit record
     const paymentRecord = await CustomerDuePayment.create({
       customer: customer._id,
@@ -367,6 +377,14 @@ router.post('/:id/collect-due', async (req, res) => {
       billsAffected,
       date: new Date(),
     });
+
+    // Immediately recalculate live account balances deterministically
+    try {
+      const { recalculateAccountBalances } = require('../utils/accountLedger');
+      await recalculateAccountBalances();
+      const realtimeHub = require('../services/realtimeHub');
+      realtimeHub.broadcast('ACCOUNT_UPDATED', { accountId: targetAccount?._id });
+    } catch (_) {}
 
     res.json({
       success: true,

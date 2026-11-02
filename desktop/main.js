@@ -27,7 +27,7 @@ function logEngine(msg) {
     if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true });
     const logPath = path.join(userData, 'peyala_engine.log');
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch (_) {}
+  } catch (_) { }
 }
 
 // ── Smart Dynamic Project Root Discovery ─────────────────────────────
@@ -36,7 +36,7 @@ function saveRootDir(dir) {
     const userData = app.getPath('userData');
     if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true });
     fs.writeFileSync(path.join(userData, 'peyala_config.json'), JSON.stringify({ rootDir: dir }, null, 2));
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function findRootDir() {
@@ -71,7 +71,7 @@ function findRootDir() {
         return cfg.rootDir;
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // 5. Search standard locations on Windows:
   const homeDir = os.homedir();
@@ -109,7 +109,7 @@ function findRootDir() {
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return candidateDev;
 }
@@ -129,8 +129,8 @@ function refreshDirs(newRoot) {
 const ICON_PATH = fs.existsSync(path.join(__dirname, 'icon.ico'))
   ? path.join(__dirname, 'icon.ico')
   : fs.existsSync(path.join(ROOT_DIR, 'icon.ico'))
-  ? path.join(ROOT_DIR, 'icon.ico')
-  : path.join(FRONTEND_DIR, 'public', 'icon.png');
+    ? path.join(ROOT_DIR, 'icon.ico')
+    : path.join(FRONTEND_DIR, 'public', 'icon.png');
 
 // Prevent unhandled errors from terminating the process unexpectedly
 process.on('uncaughtException', (err) => {
@@ -157,8 +157,14 @@ if (!gotTheLock) {
 
 // ── Utility: Resolve Node.js binary reliably on Windows ──────────────
 function getNodeExecutable() {
-  const portableNode = path.join(ROOT_DIR, 'portable-node', 'node.exe');
-  if (fs.existsSync(portableNode)) return portableNode;
+  const portableNodeDir = path.join(ROOT_DIR, 'portable-node');
+  const portableNode = path.join(portableNodeDir, 'node.exe');
+  if (fs.existsSync(portableNode)) {
+    if (!process.env.PATH || !process.env.PATH.includes(portableNodeDir)) {
+      process.env.PATH = `${portableNodeDir};${process.env.PATH || ''}`;
+    }
+    return portableNode;
+  }
   const standardNode = 'C:\\Program Files\\nodejs\\node.exe';
   if (fs.existsSync(standardNode)) return standardNode;
   const localAppDataNode = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs', 'node.exe');
@@ -200,7 +206,7 @@ function killPort(port) {
           try {
             execSync(`taskkill /F /PID ${pid} >nul 2>&1`);
             console.log(`[Peyala] Freed port ${port} by terminating PID ${pid}`);
-          } catch (_) {}
+          } catch (_) { }
         }
       }
     }
@@ -323,13 +329,13 @@ function stopLocalEngines() {
     if (backendProcess && !backendProcess.killed) {
       backendProcess.kill();
     }
-  } catch (_) {}
+  } catch (_) { }
 
   try {
     if (frontendProcess && !frontendProcess.killed) {
       frontendProcess.kill();
     }
-  } catch (_) {}
+  } catch (_) { }
 
   killPort(3000);
   killPort(4000);
@@ -373,7 +379,7 @@ function createMainWindow() {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.focus();
       }
-    } catch (_) {}
+    } catch (_) { }
   });
 
   // Handle window close
@@ -423,7 +429,7 @@ function getLocalLanIp() {
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
   return 'localhost';
 }
 
@@ -525,7 +531,7 @@ ipcMain.handle('ensure-window-focus', () => {
       mainWindow.focus();
       mainWindow.webContents.focus();
     }
-  } catch (_) {}
+  } catch (_) { }
   return true;
 });
 
@@ -540,7 +546,7 @@ ipcMain.handle('resync-focus', () => {
       }
       mainWindow.webContents.focus();
     }
-  } catch (_) {}
+  } catch (_) { }
   return true;
 });
 
@@ -563,7 +569,7 @@ ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent =
         if (printWindow && !printWindow.isDestroyed()) {
           printWindow.close();
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // CRITICAL: Ensure mainWindow maintains or restores focus so cashiers never lose typing focus
       // Defer focus slightly so Windows OS completes destruction of child window HWND
@@ -573,7 +579,7 @@ ipcMain.handle('print-thermal-slip', async (event, { html, printerName, silent =
             mainWindow.focus();
             mainWindow.webContents.focus();
           }
-        } catch (_) {}
+        } catch (_) { }
       }, 60);
 
       resolve(res);
@@ -774,12 +780,27 @@ function getRecoveryHtml(currentRootDir) {
           <h2>Peyala POS Station Setup</h2>
           <p>Local server did not respond on port 3000. Ensure the Peyala project folder is located or reconnect.</p>
           <div class="path-box">Search Path: ${displayDir}</div>
+          <p id="probeStatus" style="font-size: 13px; color: #38bdf8; margin-top: 10px; margin-bottom: 20px;">⚡ Auto-probing port 3000 every 1.5s in background... Will connect automatically once ready.</p>
           <div class="btn-group">
             <button class="btn-primary" onclick="if(window.electronAPI && window.electronAPI.restartServers){window.electronAPI.restartServers().then(res => { if (!res.success) alert(res.error); });}else{window.location.reload();}">🔄 Restart Local Engines</button>
             <button class="btn-secondary" onclick="if(window.electronAPI && window.electronAPI.selectProjectFolder){window.electronAPI.selectProjectFolder().then(res => { if (!res.success && res.error !== 'Cancelled') alert(res.error); });}">📁 Select Peyala Project Folder</button>
             <button class="btn-outline" onclick="window.location.href='http://127.0.0.1:3000/login'">🌐 Retry Connecting to Port 3000</button>
           </div>
         </div>
+        <script>
+          let autoProbe = setInterval(() => {
+            fetch('http://127.0.0.1:3000/login', { mode: 'no-cors' })
+              .then(() => {
+                clearInterval(autoProbe);
+                const st = document.getElementById('probeStatus');
+                if (st) st.innerText = '✅ Port 3000 is ready! Opening Peyala POS Station...';
+                setTimeout(() => {
+                  window.location.href = 'http://127.0.0.1:3000/login';
+                }, 400);
+              })
+              .catch(() => {});
+          }, 1500);
+        </script>
       </body>
     </html>
   `;
@@ -865,9 +886,9 @@ app.whenReady().then(async () => {
   await startLocalEngines();
 
   try {
-    logEngine('Waiting for local production server on port 3000...');
-    console.log('[Peyala] Waiting for local production server on port 3000...');
-    await waitForPort(3000, 35000);
+    logEngine('Waiting for local production server on port 3000 (up to 120s)...');
+    console.log('[Peyala] Waiting for local production server on port 3000 (up to 120s)...');
+    await waitForPort(3000, 120000);
     logEngine('Local server is online on port 3000! Loading POS terminal...');
     console.log('[Peyala] Local server is online! Loading POS terminal...');
     if (mainWindow) {

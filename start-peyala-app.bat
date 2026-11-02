@@ -89,7 +89,7 @@ tasklist /FI "IMAGENAME eq electron.exe" 2>nul | find /I "electron.exe" >nul
 if not errorlevel 1 (
     echo [*] Peyala POS Desktop Application is already running!
     echo [*] Bringing window to front...
-    start http://localhost:3000/login
+    start http://localhost:3000/login?printStation=true
     exit /b 0
 )
 

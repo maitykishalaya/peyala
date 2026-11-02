@@ -178,17 +178,10 @@ export default function SalesPage() {
     const isDefaultView = page === 1 && !filters.startDate && !filters.endDate;
     if (isDefaultView) {
       const cached = readCache(SALES_LIST_CACHE_KEY, userRole);
-      if (cached && Array.isArray(cached.sales)) {
+      if (cached && Array.isArray(cached.sales) && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
         setSales(cached.sales);
         setTotal(cached.total || 0);
         setLoading(false);
-        // Valid cache exists — serve from browser storage with 0 network calls to save free tier hosting limits!
-        // Only makes a network call when:
-        // 1. First visit (no cache)
-        // 2. An order payment is settled (which deletes SALES_LIST_CACHE_KEY)
-        // 3. User clicks manual "Refresh" button
-        // 4. Filters or page numbers change
-        return;
       }
     }
     load();
@@ -200,8 +193,12 @@ export default function SalesPage() {
       load();
     };
     window.addEventListener('peyala_sales_updated', handleSalesUpdate);
+    window.addEventListener('peyala_data_synced', handleSalesUpdate);
+    window.addEventListener('focus', handleSalesUpdate);
     return () => {
+      window.removeEventListener('focus', handleSalesUpdate);
       window.removeEventListener('peyala_sales_updated', handleSalesUpdate);
+      window.removeEventListener('peyala_data_synced', handleSalesUpdate);
     };
   }, [page, filters, userRole]);
 
@@ -449,19 +446,7 @@ export default function SalesPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => {
-                clearFinancialCaches();
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center justify-center gap-1.5 flex-1 sm:flex-initial"
-              title="Fetch latest sales numbers from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             {canWrite ? (
               <button
                 onClick={() => { setForm(blank()); setZomatoOpen(false); setFatafatOpen(false); setModal('create'); }}

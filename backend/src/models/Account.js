@@ -29,7 +29,11 @@ const accountSchema = new mongoose.Schema({
   // Balance when account was first created / opening balance
   openingBalance: { type: Number, default: 0 },
 
-  // Live running balance — updated automatically on every transaction
+  // Anchor milestone for deterministic ledger-derived calculation
+  anchorDate: { type: Date, default: () => new Date('2026-11-01T00:00:00.000Z') },
+  anchorBalance: { type: Number, default: 0 },
+
+  // Live running balance — updated automatically from ledger
   currentBalance: { type: Number, default: 0 },
 
   // Optional bank details shown in the UI

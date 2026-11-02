@@ -63,13 +63,23 @@ class LocalDbRunner {
    */
   cleanStaleLocks() {
     try {
-      const lockFile = path.join(this.dataDir, 'mongod.lock');
-      if (fs.existsSync(lockFile)) {
-        fs.unlinkSync(lockFile);
-        console.log('[LocalDbRunner] Cleaned stale mongod.lock file for fresh start.');
+      const lockFiles = [
+        path.join(this.dataDir, 'mongod.lock'),
+        path.join(this.dataDir, 'WiredTiger.lock'),
+        path.join(this.dataDir, '_tmp', 'spilldb', 'WiredTiger.lock'),
+      ];
+      for (const lf of lockFiles) {
+        if (fs.existsSync(lf)) {
+          try {
+            fs.unlinkSync(lf);
+            console.log(`[LocalDbRunner] Cleaned stale lock file (${path.basename(lf)}) for fresh start.`);
+          } catch (delErr) {
+            console.warn(`[LocalDbRunner] Could not remove ${lf}:`, delErr.message);
+          }
+        }
       }
     } catch (e) {
-      console.warn('[LocalDbRunner] Note on mongod.lock:', e.message);
+      console.warn('[LocalDbRunner] Note on cleaning locks:', e.message);
     }
   }
 
@@ -111,54 +121,98 @@ class LocalDbRunner {
     const binaryPath = this.findMongodBinary();
     if (binaryPath) {
       process.env.MONGOMS_SYSTEM_BINARY = binaryPath;
-      try {
-        console.log(`[LocalDbRunner] Spawning standalone mongod from ${binaryPath}...`);
-        const mongodArgs = [
-          '--dbpath', this.dataDir,
-          '--port', String(this.port),
-          '--bind_ip', '127.0.0.1',
-        ];
-        if (process.platform !== 'win32') {
-          mongodArgs.push('--nounixsocket');
-        }
-
-        this.process = spawn(binaryPath, mongodArgs, {
-          windowsHide: true,
-          detached: false,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-
-        this.process.stdout?.on('data', (d) => {
-          const str = d.toString();
-          if (str.includes('waiting for connections on port')) {
-            console.log(`[LocalDbRunner] Standalone mongod is ready and listening on port ${this.port}`);
+      const attemptStartMongod = async (retryHeal = true) => {
+        try {
+          console.log(`[LocalDbRunner] Spawning standalone mongod with memory tuning from ${binaryPath}...`);
+          const mongodArgs = [
+            '--dbpath', this.dataDir,
+            '--port', String(this.port),
+            '--bind_ip', '127.0.0.1',
+            '--wiredTigerCacheSizeGB', '0.25',
+            '--syncdelay', '60',
+            '--quiet',
+          ];
+          if (process.platform !== 'win32') {
+            mongodArgs.push('--nounixsocket');
           }
-        });
 
-        this.process.stderr?.on('data', (d) => {
-          console.warn(`[LocalDbRunner stderr] ${d.toString().trim()}`);
-        });
+          this.process = spawn(binaryPath, mongodArgs, {
+            windowsHide: true,
+            detached: false,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
 
-        this.process.on('error', (err) => {
-          console.warn('[LocalDbRunner] Spawning mongod binary error:', err.message);
-        });
+          let exitCode = null;
+          let stderrLogs = '';
 
-        // Wait up to 10 seconds for the port to accept connections
-        for (let i = 0; i < 50; i++) {
-          await new Promise((r) => setTimeout(r, 200));
-          if (await this.checkPortOpen(this.port, 200)) {
-            console.log(`[LocalDbRunner] Standalone MongoDB started successfully on port ${this.port} (Storage: ${this.dataDir})`);
-            this.isEmbedded = true;
-            return this.getUri();
+          this.process.stdout?.on('data', (d) => {
+            const str = d.toString();
+            if (str.includes('waiting for connections on port')) {
+              console.log(`[LocalDbRunner] Standalone mongod is ready and listening on port ${this.port}`);
+            }
+          });
+
+          this.process.stderr?.on('data', (d) => {
+            const str = d.toString();
+            stderrLogs += str;
+            console.warn(`[LocalDbRunner stderr] ${str.trim()}`);
+          });
+
+          this.process.on('exit', (code) => {
+            exitCode = code;
+          });
+
+          this.process.on('error', (err) => {
+            console.warn('[LocalDbRunner] Spawning mongod binary error:', err.message);
+          });
+
+          // Wait up to 10 seconds for the port to accept connections
+          for (let i = 0; i < 50; i++) {
+            await new Promise((r) => setTimeout(r, 200));
+            if (await this.checkPortOpen(this.port, 200)) {
+              console.log(`[LocalDbRunner] Standalone MongoDB started successfully on port ${this.port} (Storage: ${this.dataDir})`);
+              this.isEmbedded = true;
+              return this.getUri();
+            }
+
+            // Early detection: If process already exited with incompatibility code 62 or format error
+            if (exitCode !== null) {
+              const isVersionIncompatible =
+                exitCode === 62 ||
+                exitCode === 100 ||
+                stderrLogs.includes('featureCompatibilityVersion') ||
+                stderrLogs.includes('WiredTiger version') ||
+                stderrLogs.includes('corrupted') ||
+                stderrLogs.includes('incompatible');
+
+              if (retryHeal && isVersionIncompatible) {
+                console.warn(`[LocalDbRunner] ⚠️ Detected incompatible/corrupted database format (Exit code ${exitCode}). Auto-healing for native MongoDB 9.0...`);
+                this.killOrphanedMongod();
+                const archivePath = `${this.dataDir}_incompatible_${Date.now()}`;
+                try {
+                  fs.renameSync(this.dataDir, archivePath);
+                  fs.mkdirSync(this.dataDir, { recursive: true });
+                  console.log(`[LocalDbRunner] ✅ Archived incompatible database to ${archivePath}. Spawning fresh instance...`);
+                  return await attemptStartMongod(false);
+                } catch (archiveErr) {
+                  console.warn(`[LocalDbRunner] Database auto-heal archive notice: ${archiveErr.message}`);
+                }
+              }
+              break;
+            }
           }
+          console.warn('[LocalDbRunner] Standalone mongod did not open port in 10s, attempting fallback...');
+        } catch (spawnErr) {
+          console.warn('[LocalDbRunner] Standalone mongod spawn failed:', spawnErr.message);
         }
-        console.warn('[LocalDbRunner] Standalone mongod did not open port in 10s, attempting fallback...');
-      } catch (spawnErr) {
-        console.warn('[LocalDbRunner] Standalone mongod spawn failed:', spawnErr.message);
-      }
+        return null;
+      };
+
+      const uri = await attemptStartMongod(true);
+      if (uri) return uri;
     }
 
-    // 2b. Fallback to MongoMemoryServer with local system binary
+    // 2b. Fallback to MongoMemoryServer with local system binary and constrained cache
     try {
       this.cleanStaleLocks();
       this.server = await MongoMemoryServer.create({
@@ -167,6 +221,7 @@ class LocalDbRunner {
           dbPath: this.dataDir,
           storageEngine: 'wiredTiger',
           dbName: this.dbName,
+          args: ['--wiredTigerCacheSizeGB', '0.25', '--syncdelay', '60'],
         },
         binary: binaryPath ? { systemBinary: binaryPath } : undefined,
         autoStart: true,

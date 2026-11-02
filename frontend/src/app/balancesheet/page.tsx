@@ -120,7 +120,7 @@ export default function BalanceSheetPage() {
 
   useEffect(() => {
     const cached = readCache();
-    if (cached?.bs) {
+    if (cached?.bs && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
       setBs(cached.bs);
       setAllAccounts(cached.allAccounts || []);
       if (cached.savedAt) {
@@ -155,6 +155,7 @@ export default function BalanceSheetPage() {
     });
 
     window.addEventListener('peyala_sales_updated', handleRefresh);
+    window.addEventListener('peyala_data_synced', handleRefresh);
     window.addEventListener('focus', handleRefresh);
 
     const interval = setInterval(handleRefresh, 20000);
@@ -162,6 +163,7 @@ export default function BalanceSheetPage() {
     return () => {
       unsub();
       window.removeEventListener('peyala_sales_updated', handleRefresh);
+      window.removeEventListener('peyala_data_synced', handleRefresh);
       window.removeEventListener('focus', handleRefresh);
       clearInterval(interval);
     };
@@ -336,19 +338,6 @@ export default function BalanceSheetPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(CACHE_KEY);
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs sm:text-sm py-2 px-3.5 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-4 h-4", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
           </div>
         </div>
 

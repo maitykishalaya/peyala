@@ -97,15 +97,28 @@ export default function StaffPage() {
 
   useEffect(() => {
     const cached = readCache(userRole);
-    if (cached?.staff && cached?.accounts) {
+    if (cached?.staff && cached?.accounts && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
       setStaff(cached.staff);
       setAccounts(cached.accounts);
       if (cached.savedAt) {
         setLastUpdated(new Date(cached.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
-      return;
     }
+    // Always fetch fresh live data in the background (stale-while-revalidate)
     load();
+  }, [userRole]);
+
+  // Auto-refresh when background sync completes or tab regains window focus
+  useEffect(() => {
+    const handleSync = () => {
+      load();
+    };
+    window.addEventListener('peyala_data_synced', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('peyala_data_synced', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, [userRole]);
 
   const openEdit = (s: any) => {
@@ -255,19 +268,7 @@ export default function StaffPage() {
                 Cached ({lastUpdated})
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(`${CACHE_KEY}_${userRole}`);
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch latest data from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            
             {canWrite ? (
               <button
                 onClick={() => { setForm(blank()); setModal('create'); }}

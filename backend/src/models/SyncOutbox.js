@@ -56,5 +56,12 @@ const syncOutboxSchema = new mongoose.Schema(
 
 syncOutboxSchema.index({ status: 1, createdAt: 1 });
 syncOutboxSchema.index({ collectionName: 1, documentId: 1, status: 1 });
+// Native MongoDB TTL index: automatically auto-expires historical synced envelopes after 24 hours
+// Leaves all pending or failed documents (where syncedAt is null) permanently untouched
+syncOutboxSchema.index(
+  { syncedAt: 1 },
+  { expireAfterSeconds: 86400, partialFilterExpression: { status: 'synced' } }
+);
 
 module.exports = mongoose.model('SyncOutbox', syncOutboxSchema);
+

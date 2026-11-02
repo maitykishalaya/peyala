@@ -11,7 +11,7 @@ router.use(auth);
 // module stays admin-only.
 router.get('/', async (req, res) => {
   try {
-    const { module, user, page = 1, limit = 50 } = req.query;
+    const { module, user, search, q, page = 1, limit = 50 } = req.query;
 
     const isInventory = module === 'Inventory';
     const allowedRoles = isInventory ? ['admin', 'manager'] : ['admin'];
@@ -19,27 +19,73 @@ router.get('/', async (req, res) => {
       return res.status(403).json({ message: isInventory ? 'Admin or manager access required' : 'Admin access required' });
     }
 
-    const filter = {};
-    if (module) filter.module = module;
+    const baseFilter = {};
+    if (module && module !== 'All') baseFilter.module = module;
 
-    let total = 0;
-    let logs = [];
+    const searchTerm = (search || q || user || '').trim();
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
+    const skipNum = (pageNum - 1) * limitNum;
 
-    if (user && user.trim()) {
-      const allLogs = await AuditLog.find(filter).sort('-createdAt').lean();
-      const matched = allLogs.filter((l) => matchesSearch(l.userName, user));
-      total = matched.length;
-      logs = matched.slice((page - 1) * limit, page * limit);
-    } else {
-      total = await AuditLog.countDocuments(filter);
-      logs = await AuditLog.find(filter)
+    if (!searchTerm) {
+      const total = await AuditLog.countDocuments(baseFilter);
+      const logs = await AuditLog.find(baseFilter)
         .sort('-createdAt')
-        .skip((page - 1) * limit)
-        .limit(Number(limit));
+        .skip(skipNum)
+        .limit(limitNum)
+        .lean();
+      return res.json({ logs, total, page: pageNum, pages: Math.ceil(total / limitNum) });
     }
 
-    res.json({ logs, total, page: Number(page), pages: Math.ceil(total / limit) });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const phraseRegex = new RegExp(escaped.replace(/\s+/g, '\\s+'), 'i');
+
+    // 1. Direct contiguous phrase match across description, userName, module, action
+    const phraseFilter = {
+      ...baseFilter,
+      $or: [
+        { description: phraseRegex },
+        { userName: phraseRegex },
+        { module: phraseRegex },
+        { action: phraseRegex },
+      ],
+    };
+
+    const phraseCount = await AuditLog.countDocuments(phraseFilter);
+    if (phraseCount > 0) {
+      const logs = await AuditLog.find(phraseFilter)
+        .sort('-createdAt')
+        .skip(skipNum)
+        .limit(limitNum)
+        .lean();
+      return res.json({ logs, total: phraseCount, page: pageNum, pages: Math.ceil(phraseCount / limitNum) });
+    }
+
+    // 2. If no direct phrase match, fall back to cross-field multi-token match (e.g. "Joydev Indoor 1")
+    const tokens = searchTerm.split(/\s+/).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const tokenFilter = {
+      ...baseFilter,
+      $and: tokens.map((t) => ({
+        $or: [
+          { description: new RegExp(t, 'i') },
+          { userName: new RegExp(t, 'i') },
+          { module: new RegExp(t, 'i') },
+          { action: new RegExp(t, 'i') },
+        ],
+      })),
+    };
+
+    const tokenCount = await AuditLog.countDocuments(tokenFilter);
+    const logs = await AuditLog.find(tokenFilter)
+      .sort('-createdAt')
+      .skip(skipNum)
+      .limit(limitNum)
+      .lean();
+
+    return res.json({ logs, total: tokenCount, page: pageNum, pages: Math.ceil(tokenCount / limitNum) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;

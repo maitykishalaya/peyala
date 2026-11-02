@@ -72,6 +72,31 @@ if ($ExistingPayload -and (Test-Path $ExistingPayload)) {
     Write-Host "[*] Packaging clean application payload into archive..." -ForegroundColor Yellow
     Write-Host "    (Excluding dev caches, test databases, and Android SDKs to minimize size...)"
 
+    # Ensure baseline snapshot is bundled inside backend/data/ and data/
+    $snapshotTarget = Join-Path $rootDir "backend\data\baseline_snapshot.json"
+    $snapshotSource = Join-Path $rootDir "restore_points\v10.0.0_baseline\atlas_data_snapshot.json"
+    if (-not (Test-Path $snapshotTarget) -and (Test-Path $snapshotSource)) {
+        Copy-Item $snapshotSource $snapshotTarget -Force
+        Write-Host "[OK] Bundled baseline snapshot into backend/data/baseline_snapshot.json" -ForegroundColor Green
+    }
+    $rootSnapshot = Join-Path $rootDir "data\baseline_snapshot.json"
+    if (-not (Test-Path $rootSnapshot) -and (Test-Path $snapshotTarget)) {
+        $rootDataDir = Join-Path $rootDir "data"
+        if (-not (Test-Path $rootDataDir)) { New-Item -ItemType Directory -Path $rootDataDir -Force | Out-Null }
+        Copy-Item $snapshotTarget $rootSnapshot -Force
+        Write-Host "[OK] Bundled baseline snapshot into data/baseline_snapshot.json" -ForegroundColor Green
+    }
+
+    # Temporarily move root dist directory out of rootDir so tar doesn't pack installer outputs,
+    # without using '--exclude=dist' which unintentionally deletes next/dist and electron/dist!
+    $rootDist = Join-Path $rootDir "dist"
+    $distBackup = Join-Path $env:TEMP ("peyala_dist_backup_" + [System.Guid]::NewGuid().ToString("N"))
+    $distRelocated = $false
+    if (Test-Path $rootDist) {
+        Move-Item $rootDist $distBackup -Force
+        $distRelocated = $true
+    }
+
 $excludeList = @(
     '--exclude=.git',
     '--exclude=./.git*',
@@ -83,12 +108,13 @@ $excludeList = @(
     '--exclude=./portable-jdk*',
     '--exclude=android',
     '--exclude=./android*',
-    '--exclude=dist',
-    '--exclude=./dist*',
     '--exclude=restore_points',
     '--exclude=./restore_points*',
     '--exclude=test-runner',
     '--exclude=./test-runner*',
+    '--exclude=backend/data/db',
+    '--exclude=./backend/data/db*',
+    '--exclude=*/backend/data/db*',
     '--exclude=*/.next/cache*',
     '--exclude=*/.next/dev*',
     '--exclude=.next/cache*',
@@ -96,6 +122,8 @@ $excludeList = @(
     '--exclude=*db_test_run_*',
     '--exclude=*test_db*',
     '--exclude=*mongod.lock',
+    '--exclude=*WiredTiger.lock',
+    '--exclude=*/WiredTiger.lock*',
     '--exclude=*.log',
     '--exclude=*.tmp',
     '--exclude=Peyala-POS-Setup.exe',
@@ -106,9 +134,15 @@ $excludeList = @(
     '--exclude=./Peyala-POS-AllInOne-Installer.exe'
 )
 
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    & tar.exe -a -cf $tempZip $excludeList -C $rootDir .
-    $sw.Stop()
+    try {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        & tar.exe -a -cf $tempZip $excludeList -C $rootDir .
+        $sw.Stop()
+    } finally {
+        if ($distRelocated -and (Test-Path $distBackup)) {
+            Move-Item $distBackup $rootDist -Force
+        }
+    }
 
     if (-not (Test-Path $tempZip)) {
         Write-Error "Failed to generate payload zip file."
@@ -154,6 +188,8 @@ if not "!USER_INPUT_DIR!"=="" set "TARGET_DIR=!USER_INPUT_DIR!"
 
 :: Strip any surrounding quotes
 set "TARGET_DIR=%TARGET_DIR:"=%"
+if "!TARGET_DIR:~-1!"=="\" set "TARGET_DIR=!TARGET_DIR:~0,-1!"
+if "!TARGET_DIR:~-1!"=="/" set "TARGET_DIR=!TARGET_DIR:~0,-1!"
 
 echo.
 echo [*] Target installation directory: "!TARGET_DIR!"
@@ -173,18 +209,33 @@ if not exist "!TARGET_DIR!" (
     exit /b 1
 )
 
-:: 2. Check for running processes on ports 3000 & 4000
-echo [*] Checking for conflicting background services...
-for %%P in (3000 4000) do (
+:: 2. Terminate any running Peyala processes & free ports
+echo [*] Terminating any existing Peyala processes and releasing ports...
+taskkill /F /IM PeyalaPOS.exe >nul 2>&1
+taskkill /F /IM electron.exe >nul 2>&1
+taskkill /F /IM mongod.exe >nul 2>&1
+for %%P in (3000 4000 27017) do (
     for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr /r /c:":%%P .*LISTENING"') do (
         echo [*] Stopping conflicting process on port %%P (PID %%a)...
         taskkill /F /PID %%a >nul 2>&1
     )
 )
 
+:: Clean bloat and old caches from previous installs if target exists
+if exist "!TARGET_DIR!\frontend\.next\cache" (
+    rmdir /s /q "!TARGET_DIR!\frontend\.next\cache" >nul 2>&1
+)
+if exist "!TARGET_DIR!\backend\node_modules\.cache" (
+    rmdir /s /q "!TARGET_DIR!\backend\node_modules\.cache" >nul 2>&1
+)
+del /f /q "!TARGET_DIR!\*.tmp" >nul 2>&1
+del /f /q "!TARGET_DIR!\*.zip" >nul 2>&1
+del /f /q "!TARGET_DIR!\backend\data\db\mongod.lock" >nul 2>&1
+del /f /q "!TARGET_DIR!\backend\data\db\WiredTiger.lock" >nul 2>&1
+
 :: 3. Extract Embedded Archive
 echo.
-echo [*] Extracting all application components into "!TARGET_DIR!"...
+echo [*] Extracting and updating all application components into "!TARGET_DIR!"...
 echo     (This takes only ~15 to 30 seconds - please wait...)
 echo.
 
@@ -200,14 +251,29 @@ if "!EXTRACT_OK!"=="0" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
         "$src = '%~f0'; $dest = '!TARGET_DIR!';" ^
         "Add-Type -AssemblyName System.IO.Compression.FileSystem;" ^
-        "$fs = [System.IO.File]::OpenRead($src);" ^
-        "$fs.Seek(8192, [System.IO.SeekOrigin]::Begin) | Out-Null;" ^
         "$tmpZip = Join-Path $env:TEMP ('peyala_extract_' + [System.Guid]::NewGuid().ToString('N') + '.zip');" ^
-        "$outStream = [System.IO.File]::Create($tmpZip);" ^
-        "$fs.CopyTo($outStream);" ^
-        "$fs.Close(); $outStream.Close();" ^
-        "[System.IO.Compression.ZipFile]::ExtractToDirectory($tmpZip, $dest);" ^
-        "Remove-Item $tmpZip -Force;"
+        "try {" ^
+        "  $fs = [System.IO.File]::OpenRead($src);" ^
+        "  $fs.Seek(8192, [System.IO.SeekOrigin]::Begin) | Out-Null;" ^
+        "  $outStream = [System.IO.File]::Create($tmpZip);" ^
+        "  $fs.CopyTo($outStream);" ^
+        "  $fs.Close(); $outStream.Close();" ^
+        "  $zip = [System.IO.Compression.ZipFile]::OpenRead($tmpZip);" ^
+        "  foreach ($entry in $zip.Entries) {" ^
+        "    $targetPath = Join-Path $dest $entry.FullName;" ^
+        "    if ($entry.Length -eq 0 -and ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\'))) {" ^
+        "      if (-not (Test-Path $targetPath)) { [System.IO.Directory]::CreateDirectory($targetPath) | Out-Null }" ^
+        "    } else {" ^
+        "      $parent = [System.IO.Path]::GetDirectoryName($targetPath);" ^
+        "      if (-not (Test-Path $parent)) { [System.IO.Directory]::CreateDirectory($parent) | Out-Null };" ^
+        "      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true);" ^
+        "    }" ^
+        "  };" ^
+        "  $zip.Dispose();" ^
+        "  $EXTRACT_OK = 1;" ^
+        "} finally {" ^
+        "  if (Test-Path $tmpZip) { Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue };" ^
+        "}"
     if not errorlevel 1 set "EXTRACT_OK=1"
 )
 
@@ -220,13 +286,16 @@ if "!EXTRACT_OK!"=="0" (
 )
 
 echo.
-echo [OK] All system files extracted successfully!
+echo [OK] All system files extracted and updated successfully!
 
 :: 4. Post-Extraction Configuration
 echo.
 echo [*] Configuring database and runtime security...
 if exist "!TARGET_DIR!\backend\data\db\mongod.lock" (
     del /f /q "!TARGET_DIR!\backend\data\db\mongod.lock" >nul 2>&1
+)
+if exist "!TARGET_DIR!\backend\data\db\WiredTiger.lock" (
+    del /f /q "!TARGET_DIR!\backend\data\db\WiredTiger.lock" >nul 2>&1
 )
 
 :: Ensure native launcher is compiled with logo

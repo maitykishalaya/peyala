@@ -9,7 +9,7 @@ echo ====================================================================
 echo.
 
 :: Hardcoded Vercel Production Portal
-set "DEFAULT_URL=https://peyala.vercel.app/login"
+set "DEFAULT_URL=https://peyala.vercel.app/login?printStation=true"
 set "USER_DATA_DIR=%LOCALAPPDATA%\PeyalaPOSChrome"
 
 :: Check for windowed mode flag or custom URL override

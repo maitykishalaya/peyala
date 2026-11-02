@@ -169,6 +169,8 @@ async function startIsolatedServer({ port = 4001, verbose = false } = {}) {
     MONGODB_URI: TEST_URI,
     MONGODB_LOCAL_DB: TEST_DB_NAME,
     NODE_ENV: 'test',
+    DISABLE_SYNC: 'true',
+    UV_THREADPOOL_SIZE: '64',
   });
 
   const serverProc = spawn(process.execPath, ['src/server.js'], {

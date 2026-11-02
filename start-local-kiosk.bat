@@ -13,7 +13,7 @@ set "BACKEND_DIR=%SCRIPT_DIR%backend"
 set "FRONTEND_DIR=%SCRIPT_DIR%frontend"
 set "PORTABLE_NODE_DIR=%SCRIPT_DIR%portable-node"
 set "USER_DATA_DIR=%LOCALAPPDATA%\PeyalaPOSProfile"
-set "DEFAULT_URL=http://localhost:3000/"
+set "DEFAULT_URL=http://localhost:3000/?printStation=true"
 set "MODE=kiosk"
 
 :: Parse command line flags
@@ -179,6 +179,8 @@ for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":3000 " ^| findstr "L
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":4000 " ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a >nul 2>&1
 )
+if exist "%BACKEND_DIR%\data\db\mongod.lock" del /f /q "%BACKEND_DIR%\data\db\mongod.lock" >nul 2>&1
+if exist "%BACKEND_DIR%\data\db\WiredTiger.lock" del /f /q "%BACKEND_DIR%\data\db\WiredTiger.lock" >nul 2>&1
 
 :: 5.5 Verify Frontend Production Build exists
 if not exist "%FRONTEND_DIR%\.next\BUILD_ID" (

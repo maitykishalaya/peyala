@@ -20,6 +20,8 @@ router.use(auth);
 
 // Concurrency lock to prevent simultaneous table transfers / double clicks / race conditions
 const activeTransferLocks = new Set();
+// Concurrency lock to prevent simultaneous table orders / double bookings
+const activeTableOrderLocks = new Set();
 
 // Helper to safely deduplicate, create or update customer, preventing E11000 duplicate keys
 async function resolveAndLinkCustomer({ name, phone, address, customerId } = {}) {
@@ -833,6 +835,13 @@ router.get('/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 router.post('/', staffOrAdmin, async (req, res) => {
   let claimedTableId = null;
+  const tableLockKey = req.body && req.body.tableId ? String(req.body.tableId) : null;
+  if (tableLockKey) {
+    if (activeTableOrderLocks.has(tableLockKey)) {
+      return res.status(400).json({ message: 'Order creation already in progress for this table. Please wait a moment.' });
+    }
+    activeTableOrderLocks.add(tableLockKey);
+  }
   try {
     const {
       tableId,
@@ -863,7 +872,7 @@ router.post('/', staffOrAdmin, async (req, res) => {
     });
 
     // Atomically claim table to prevent double-booking race condition
-    const table = await Table.findOneAndUpdate(
+    let table = await Table.findOneAndUpdate(
       { _id: tableId, status: { $ne: 'occupied' }, activeOrder: null },
       { $set: { status: 'occupied' } },
       { new: true }
@@ -876,24 +885,40 @@ router.post('/', staffOrAdmin, async (req, res) => {
       }
       // Resilient fallback for mobile/touch race conditions:
       // If table is already occupied with an active order, append items as an add-on round instead of erroring
+      let activeOrder = null;
       if (existing.activeOrder) {
-        const activeOrder = await Order.findById(existing.activeOrder);
-        if (activeOrder && !['paid', 'cancelled'].includes(activeOrder.status)) {
-          const populated = await appendItemsToOrder(activeOrder, {
-            items,
-            shouldPrint,
-            kotAlreadyPrinted: req.body.kotAlreadyPrinted,
-            orderNotes: customerInstruction,
-            customerName: resolvedCust?.customerName || customerName,
-            customerPhone: resolvedCust?.customerPhone || customerPhone,
-            customerAddress: resolvedCust?.customerAddress || customerAddress,
-            customerId: resolvedCust?.customer || customerId,
-            user: req.user,
-          });
-          return res.json(populated);
-        }
+        activeOrder = await Order.findById(existing.activeOrder);
+      } else {
+        activeOrder = await Order.findOne({ table: tableId, status: { $nin: ['paid', 'cancelled'] } }).sort({ createdAt: -1 });
       }
-      return res.status(400).json({ message: `Table ${existing.tableNumber} is already occupied with an active order` });
+
+      if (activeOrder && !['paid', 'cancelled'].includes(activeOrder.status)) {
+        const populated = await appendItemsToOrder(activeOrder, {
+          items,
+          shouldPrint,
+          isPrintStation: req.body.isPrintStation,
+          kotAlreadyPrinted: req.body.kotAlreadyPrinted,
+          orderNotes: customerInstruction,
+          customerName: resolvedCust?.customerName || customerName,
+          customerPhone: resolvedCust?.customerPhone || customerPhone,
+          customerAddress: resolvedCust?.customerAddress || customerAddress,
+          customerId: resolvedCust?.customer || customerId,
+          user: req.user,
+        });
+        return res.json(populated);
+      }
+
+      // If table is already marked occupied and no active order could be found or self-healed, reject double-booking
+      if (existing.status === 'occupied') {
+        return res.status(400).json({ message: `Table ${existing.tableNumber} is already occupied or order creation is in progress.` });
+      }
+
+      // Self-healing: Table was marked occupied without a valid active order (e.g. cancelled/aborted prior order)
+      console.log(`[Orders] Auto-healing orphaned table ${existing.tableNumber} (activeOrder was: ${existing.activeOrder}) -> re-claiming for new order.`);
+      existing.status = 'occupied';
+      existing.activeOrder = null;
+      await existing.save();
+      table = existing;
     }
     claimedTableId = table._id;
 
@@ -967,7 +992,9 @@ router.post('/', staffOrAdmin, async (req, res) => {
     // Sequential 4-digit order number (atomic and collision-free)
     const orderNumber = await getNextOrderNumber();
 
-    const isAutoPrint = shouldPrint !== false && req.body.kotAlreadyPrinted !== true;
+    const isAutoPrint = req.body.kotAlreadyPrinted === true
+      ? false
+      : (req.body.isPrintStation === false ? true : shouldPrint !== false);
     const orderNow = new Date();
     const dailyKotNumber = await getNextDailyKotNumber(orderNow);
     const initialKotRound = {
@@ -1030,11 +1057,15 @@ router.post('/', staffOrAdmin, async (req, res) => {
       await Table.findByIdAndUpdate(claimedTableId, { $set: { status: 'available', activeOrder: null } }).catch(() => {});
     }
     res.status(400).json({ message: err.message });
+  } finally {
+    if (tableLockKey) {
+      activeTableOrderLocks.delete(tableLockKey);
+    }
   }
 });
 
 // Helper: append items and create a new KOT round for an order
-async function appendItemsToOrder(order, { items, shouldPrint, kotAlreadyPrinted, orderNotes, notes, customerName, customerPhone, customerAddress, customerId, customerInfo, user }) {
+async function appendItemsToOrder(order, { items, shouldPrint, isPrintStation, kotAlreadyPrinted, orderNotes, notes, customerName, customerPhone, customerAddress, customerId, customerInfo, user }) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items array is required');
   }
@@ -1164,7 +1195,9 @@ async function appendItemsToOrder(order, { items, shouldPrint, kotAlreadyPrinted
     order.kotRounds = [];
   }
 
-  const isAutoPrint = shouldPrint !== false && kotAlreadyPrinted !== true;
+  const isAutoPrint = kotAlreadyPrinted === true
+    ? false
+    : (isPrintStation === false ? true : shouldPrint !== false);
   const dailyKotNumber = await getNextDailyKotNumber(now);
   const sortedRoundItems = [...newRoundItems].sort(
     (a, b) => (isBeverageItem(a) ? 1 : 0) - (isBeverageItem(b) ? 1 : 0)
@@ -1214,6 +1247,7 @@ router.post('/:id/items', staffOrAdmin, async (req, res) => {
     const populated = await appendItemsToOrder(order, {
       items: req.body.items,
       shouldPrint: req.body.shouldPrint,
+      isPrintStation: req.body.isPrintStation,
       kotAlreadyPrinted: req.body.kotAlreadyPrinted,
       orderNotes: req.body.orderNotes,
       notes: req.body.notes,
@@ -1483,10 +1517,17 @@ router.post('/:id/bill', staffOrAdmin, async (req, res) => {
   }
 });
 
+const activeSettlementLocks = new Set();
+
 // ─────────────────────────────────────────────────────────────────
 // POST /api/orders/:id/pay — Accounting integration endpoint
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/pay', staffOrAdmin, async (req, res) => {
+  if (activeSettlementLocks.has(req.params.id)) {
+    return res.status(409).json({ message: 'Order payment is already being processed, please wait.' });
+  }
+  activeSettlementLocks.add(req.params.id);
+
   try {
     const { paymentMethod, settlementAmount } = req.body;
     const order = await Order.findById(req.params.id);
@@ -1765,6 +1806,8 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
     res.json(populated);
   } catch (err) {
     res.status(400).json({ message: err.message });
+  } finally {
+    activeSettlementLocks.delete(req.params.id);
   }
 });
 

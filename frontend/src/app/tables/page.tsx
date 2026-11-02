@@ -866,15 +866,41 @@ export default function TablesPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('printStation') === 'true' || urlParams.get('kiosk') === 'true') {
+      const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const hasStationParam = urlParams.get('printStation') === 'true' || urlParams.get('kiosk') === 'true';
+      const savedStation = localStorage.getItem('peyala_is_print_station');
+
+      if (hasStationParam) {
+        localStorage.setItem('peyala_is_print_station', 'true');
+        setIsPrintStation(true);
+        setPrintMode('production');
+        setPrintModeState('production');
+      } else if (savedStation !== null) {
+        setIsPrintStation(savedStation === 'true');
+      } else if (isLocalHost) {
         localStorage.setItem('peyala_is_print_station', 'true');
         setIsPrintStation(true);
         setPrintMode('production');
         setPrintModeState('production');
       } else {
-        const savedStation = localStorage.getItem('peyala_is_print_station');
-        setIsPrintStation(savedStation === 'true');
+        setIsPrintStation(false);
       }
+
+      const handleStationChanged = (e: any) => {
+        setIsPrintStation(Boolean(e.detail));
+      };
+      const handleKotPrinted = (e: any) => {
+        if (e.detail?.label) {
+          setLastPrintedKOT(e.detail.label);
+        }
+      };
+
+      window.addEventListener('peyala_print_station_changed', handleStationChanged);
+      window.addEventListener('peyala_kot_printed', handleKotPrinted);
+      return () => {
+        window.removeEventListener('peyala_print_station_changed', handleStationChanged);
+        window.removeEventListener('peyala_kot_printed', handleKotPrinted);
+      };
     }
   }, []);
 
@@ -883,120 +909,9 @@ export default function TablesPage() {
     setIsPrintStation(nextVal);
     if (typeof window !== 'undefined') {
       localStorage.setItem('peyala_is_print_station', nextVal ? 'true' : 'false');
+      window.dispatchEvent(new CustomEvent('peyala_print_station_changed', { detail: nextVal }));
     }
   };
-
-  // Background KOT & Customer Bill Print Station Listener
-  // When active (on counter laptop with printer attached), polls unprinted KOTs and Bills placed from mobiles
-  useEffect(() => {
-    if (!isPrintStation) return;
-
-    let isPolling = false;
-
-    const checkPendingPrintJobs = async () => {
-      if (isPolling) return;
-      isPolling = true;
-
-      try {
-        // 1. Check and Auto-Print Pending KOTs
-        const kotRes = await ordersApi.getPendingKots().catch(() => ({ data: [] }));
-        const pendingKots = kotRes.data || [];
-        const localPrintedSet = getPrintedKotSet();
-
-        for (const job of pendingKots) {
-          const jobKey = `${job.orderId}-${job.roundId}`;
-          if (inFlightKotsRef.current.has(jobKey) || localPrintedSet.has(jobKey)) {
-            // Already printed locally on this device, mark printed on server to silence queue
-            ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
-            continue;
-          }
-
-          inFlightKotsRef.current.add(jobKey);
-          recordKotPrintedLocally(jobKey);
-
-          printKOT({
-            tableNumber: job.tableNumber,
-            kotNumber: job.kotNumber,
-            orderNumber: job.orderNumber,
-            roundTag: job.roundTag,
-            billerName: job.billerName,
-            createdAt: job.createdAt,
-            items: job.items,
-          }, 'production');
-
-          await ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
-          setLastPrintedKOT(`Table ${job.tableNumber} (${job.roundTag})`);
-          await new Promise((resolve) => setTimeout(resolve, 400));
-        }
-
-        // 2. Check and Auto-Print Pending Finalized / Settled Customer Bills
-        const billRes = await ordersApi.getPendingBills();
-        const pendingBills = billRes.data || [];
-
-        for (const bJob of pendingBills) {
-          const billKey = `${bJob.orderId}-seq-${bJob.billPrintSeq || 1}`;
-          if (inFlightBillsRef.current.has(billKey)) continue;
-
-          inFlightBillsRef.current.add(billKey);
-
-          try {
-            printCustomerBill({
-              billNumber: bJob.billNumber,
-              orderNumber: bJob.orderNumber,
-              tokenNo: bJob.tokenNo,
-              tableNumber: bJob.tableNumber,
-              billerName: bJob.billerName,
-              customerName: bJob.customerName,
-              customerPhone: bJob.customerPhone,
-              customerAddress: bJob.customerAddress,
-              customerTotalDue: bJob.customerTotalDue,
-              dueAmount: bJob.dueAmount,
-              createdAt: bJob.createdAt,
-              items: bJob.items,
-              subtotal: bJob.subtotal,
-              taxAmount: bJob.taxAmount,
-              discount: bJob.discount,
-              discountType: bJob.discountType,
-              discountValue: bJob.discountValue,
-              total: bJob.total,
-              settledAmount: bJob.settledAmount,
-              waivedAmount: bJob.waivedAmount,
-              paymentMethod: bJob.paymentMethod,
-              paymentBreakdown: bJob.paymentBreakdown,
-              isPaid: bJob.isPaid,
-            }, 'production');
-
-            await ordersApi.markBillPrinted(bJob.orderId, bJob.billPrintSeq);
-            setLastPrintedBill(`Table ${bJob.tableNumber} (${bJob.isPaid ? 'Receipt' : 'Bill'})`);
-            await loadData();
-          } catch (printErr) {
-            console.error('Failed to print bill job:', printErr);
-            inFlightBillsRef.current.delete(billKey);
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-
-        if (inFlightBillsRef.current.size > 200) {
-          const arr = Array.from(inFlightBillsRef.current);
-          inFlightBillsRef.current = new Set(arr.slice(arr.length - 100));
-        }
-      } catch (err) {
-        console.error('Error polling pending print jobs for Print Station:', err);
-      } finally {
-        isPolling = false;
-      }
-    };
-
-    checkPendingPrintJobs();
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      checkPendingPrintJobs();
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [isPrintStation]);
 
   // Periodic background refresh for tables status (syncs green bill status & real-time changes across devices)
   useEffect(() => {
@@ -1018,7 +933,7 @@ export default function TablesPage() {
       }
     };
 
-    const tablePoller = setInterval(handleRefresh, 4000);
+    const tablePoller = setInterval(handleRefresh, 8000);
     window.addEventListener('focus', handleRefresh);
     document.addEventListener('visibilitychange', handleRefresh);
 
@@ -1639,7 +1554,8 @@ export default function TablesPage() {
         // CASE: Add round to existing table order
         const roundNum = (effectiveOrder.kotRounds?.length || 1) + 1;
         const res = await ordersApi.addItems(effectiveOrder._id, payloadItems, {
-          shouldPrint,
+          shouldPrint: isPrintStation ? shouldPrint : true,
+          isPrintStation,
           orderNotes: orderNotes.trim() || undefined,
           customerName: cartCustomerName.trim() || undefined,
           customerPhone: cartCustomerPhone.trim() || undefined,
@@ -1649,7 +1565,7 @@ export default function TablesPage() {
         const updatedOrder = res.data;
         dispatchedOrder = updatedOrder;
 
-        if (shouldPrint) {
+        if (isPrintStation && shouldPrint) {
           const printableItems = Object.values(cart).map((c) => {
             const mi = menuItems.find((m) => m._id === c.menuItemId);
             return {
@@ -1687,9 +1603,11 @@ export default function TablesPage() {
           }
         }
 
-        const msg = shouldPrint
-          ? `Round ${roundNum} KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
-          : `Round ${roundNum} KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        const msg = isPrintStation
+          ? (shouldPrint
+              ? `Round ${roundNum} KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
+              : `Round ${roundNum} KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`)
+          : `Round ${roundNum} KOT sent to Counter Printer for Table ${targetTable?.tableNumber || ''} 🖨️`;
         toast.success(msg);
         setNoticeMessage(msg);
         setTimeout(() => setNoticeMessage(null), 4000);
@@ -1698,7 +1616,8 @@ export default function TablesPage() {
         const res = await ordersApi.create({
           tableId: targetTable?._id || tables[0]?._id,
           items: payloadItems,
-          shouldPrint,
+          shouldPrint: isPrintStation ? shouldPrint : true,
+          isPrintStation,
           orderNotes: orderNotes.trim() || undefined,
           customerName: cartCustomerName.trim() || undefined,
           customerPhone: cartCustomerPhone.trim() || undefined,
@@ -1708,7 +1627,7 @@ export default function TablesPage() {
         const createdOrder = res.data;
         dispatchedOrder = createdOrder;
 
-        if (shouldPrint) {
+        if (isPrintStation && shouldPrint) {
           const printableItems = Object.values(cart).map((c) => {
             const mi = menuItems.find((m) => m._id === c.menuItemId);
             return {
@@ -1746,9 +1665,11 @@ export default function TablesPage() {
           }
         }
 
-        const msg = shouldPrint
-          ? `KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
-          : `KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`;
+        const msg = isPrintStation
+          ? (shouldPrint
+              ? `KOT sent & printed for Table ${targetTable?.tableNumber || ''} 🖨️`
+              : `KOT sent for Table ${targetTable?.tableNumber || ''} 👨‍🍳`)
+          : `KOT sent to Counter Printer for Table ${targetTable?.tableNumber || ''} 🖨️`;
         toast.success(msg);
         setNoticeMessage(msg);
         setTimeout(() => setNoticeMessage(null), 4000);
@@ -2012,28 +1933,40 @@ export default function TablesPage() {
         }
       }
 
-      printKOT({
-        tableNumber: selectedTable?.tableNumber || (activeOrder.table as any)?.tableNumber || 'Table',
-        kotNumber: roundKotNum,
-        orderNumber: activeOrder.orderNumber,
-        tokenNo: activeOrder.orderNumber ? String(activeOrder.orderNumber).slice(-2) : undefined,
-        billerName: user?.name || 'Staff',
-        roundTag: isAll ? '[REPRINT KOT - ALL ITEMS]' : `[REPRINT - ROUND ${roundNum}]`,
-        createdAt: new Date(),
-        items: printableItems,
-        orderNotes: activeOrder.orderNotes,
-        isReprint: true,
-      });
+      if (isPrintStation || printMode === 'test') {
+        printKOT({
+          tableNumber: selectedTable?.tableNumber || (activeOrder.table as any)?.tableNumber || 'Table',
+          kotNumber: roundKotNum,
+          orderNumber: activeOrder.orderNumber,
+          tokenNo: activeOrder.orderNumber ? String(activeOrder.orderNumber).slice(-2) : undefined,
+          billerName: user?.name || 'Staff',
+          roundTag: isAll ? '[REPRINT KOT - ALL ITEMS]' : `[REPRINT - ROUND ${roundNum}]`,
+          createdAt: new Date(),
+          items: printableItems,
+          orderNotes: activeOrder.orderNotes,
+          isReprint: true,
+        });
+      }
 
       // Also notify print station if remote print station is active
       try {
-        await ordersApi.reprintOrderKot(activeOrder._id);
+        if (!isAll && typeof roundNum === 'number') {
+          const foundRound = activeOrder.kotRounds?.find((r) => r.roundNumber === roundNum);
+          if (foundRound?._id) {
+            await ordersApi.reprintKot(activeOrder._id, foundRound._id);
+          } else {
+            await ordersApi.reprintOrderKot(activeOrder._id);
+          }
+        } else {
+          await ordersApi.reprintOrderKot(activeOrder._id);
+        }
       } catch (_) {}
 
       setReprintKotModalOpen(false);
-      toast.success(
-        `KOT Reprinted: ${activeCount} active, ${cancelledCount} cancelled item(s)`
-      );
+      const reprintMsg = isPrintStation
+        ? `KOT Reprinted: ${activeCount} active, ${cancelledCount} cancelled item(s)`
+        : `KOT Reprint sent to Counter Printer for Table ${selectedTable?.tableNumber || ''} 🖨️`;
+      toast.success(reprintMsg);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to reprint KOT');
     } finally {
@@ -2596,13 +2529,7 @@ export default function TablesPage() {
                   <span>{isPrintStation ? 'Station ON' : 'Station OFF'}</span>
                 </button>
 
-                <button
-                  onClick={() => loadData()}
-                  className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  title="Refresh Tables"
-                >
-                  <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-                </button>
+                
 
                 {isAdmin && (
                   <button

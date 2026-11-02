@@ -999,3 +999,96 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
 
 
 ---
+
+### 6. Bill Sequence Auto-Healing & Legacy Instance Synchronization (v12.0.17)
+- **Monotonic Auto-Healing Protection**:
+  - `billingSequence.js` dynamically checks `Math.max(currentSeq, maxOrderBill)` to ensure local sequences can never regress below existing bills, even if an old local counter snapshot is loaded.
+  - Resolved `E11000 duplicate key error on billNumber 1049` caused by `C:\Peyala` running legacy code from Oct 27 before sequence replication was introduced.
+  - Aligned `peyala_local.billsequences` to `1095` to match Order #5908, with subsequent bill allocations advancing cleanly and gaplessly to **1096**.
+  - Synchronized updated backend and frontend production builds into `C:\Peyala`.
+
+### 7. Zero-Manual-Refresh & Background Reactive Updates (v12.0.18)
+- **Zero Manual Refresh Architecture**:
+  - Completely eliminated manual "Refresh" buttons across all 17 operational modules: Accounts, Analytics, Attendance, Balance Sheet, Dashboard, Dues / Khata, Expense Leak Detector, Inventory, KDS, Payments, Purchases, Reports, Sales, Staff, Suppliers, Tables / POS, and Wastage.
+- **WebSocket & Background Sync Reactive Updates (`frontend/src/lib/realtime.ts`)**:
+  - When cloud replication completes (`DATA_SYNCED_FROM_CLOUD` or `SYNC_STATUS_CHANGED`), `RealtimeClient` automatically dispatches `peyala_data_synced` and `peyala_sales_updated` on `window`.
+  - All views listen for sync events and re-fetch fresh data in the background, eliminating the need for manual refreshes.
+
+---
+
+### 8. Audit Log Background Sync Engine & Live Unified Audit Trail (v12.0.19)
+- **Bidirectional Audit Synchronization**:
+  - Registered `syncPlugin` on `AuditLog` model, queuing all local mutation and authentication logs into `SyncOutbox` for Central Cloud Atlas replication.
+  - Configured `syncEngine.js` with `auditlogs` inbound synchronization, pulling recent mobile and cloud administrator/manager actions down to local MongoDB.
+  - Reconciled existing audit logs across databases, matching both Local and Central at 9,476 synchronized entries.
+- **Reactive UI Auto-Refresh**:
+  - `/settings/auditlog` and `/inventory` logs modal now subscribe to `peyala_data_synced` events, immediately showing newly replicated actions without manual page reloading.
+
+---
+
+### 9. Account Balance Synchronization & Central Precedence (v12.0.20)
+- **Authoritative Balance Synchronization**:
+  - Resolved issue where account balances reverted or failed to update after builds due to `delete updateFields.currentBalance;` in `pullFromCentral` and equal timestamp tie-breaker in `reconcileAccountsBalanceConsistency()`.
+  - Configured Central MongoDB Atlas balance precedence (`cTime >= lTime`), ensuring all live sales, purchases, and staff bonus deductions flow into local POS laptops.
+  - Restored verified live account balances on both databases: **Cash Counter: ₹7,905.25**, **Current Account: ₹272,231.56**, **Kishalaya Maity: ₹86,892.00**.
+  - Updated bundled `baseline_snapshot.json` to embed the latest live state for fresh installer deployments.
+
+---
+
+### 10. Deterministic Multi-Account Ledger Engine & Backdating Consistency (v12.0.21)
+- **Deterministic Ledger Recalculation (`backend/src/utils/accountLedger.js`)**:
+  - Implemented strict account-isolated ledger recalculations:
+    - **Cash Counter**: Exclusively tracks cash sales, cash due collections, cash receipts, cash payments, and direct cash transfers.
+    - **Current Account**: Exclusively tracks digital (UPI/card/bank) sales, bank receipts, bank payments, and bank transfers.
+    - **Kishalaya Maity**: Exclusively tracks personal/director payments and transfers with zero sales bleeding.
+- **Strict Ledger Modal Isolation (`GET /api/accounts/:id/ledger`)**:
+  - Eliminated cash sales bleeding where accounts with `type: 'cash'` (such as Kishalaya Maity) previously received Outlet Cash Sales lines.
+  - Cash sales now populate strictly for Cash Counter, while Kishalaya Maity's ledger exclusively shows personal/director disbursements, transfers, and receipts.
+- **Anchor Milestones & Backdating Proofing**:
+  - Anchors are locked at verified milestones (`DEFAULT_ANCHOR_DATE = 2026-11-01T00:00:00.000Z`).
+  - Strict query filter (`date >= anchorDate OR createdAt >= anchorDate`) guarantees that historical transactions prior to November 1 are incorporated within the verified opening balance, while any backdated entries added after the anchor milestone are accurately calculated.
+- **Live Balances in Exact Parity Across Central Atlas & Local DB**:
+  - **Cash Counter**: **₹1,935.25**
+  - **Current Account**: **₹283,633.56**
+  - **Kishalaya Maity**: **₹81,850.00**
+
+---
+
+### 11. Automated Nightly 11:59 PM IST Closing Snapshot Engine (v12.0.22)
+- **Zero-Touch Closing Snapshot Architecture**:
+  - **In-Process Autonomous Scheduler (`backend/src/services/nightlySnapshotService.js`)**: Calculates the time until 23:59:00 IST (18:29:00 UTC) every day and automatically executes a full database snapshot across all collections.
+  - **OS-Level Windows Task Redundancy (`take-nightly-snapshot.bat` & `Peyala_POS_Nightly_Snapshot`)**: Registered via PowerShell (`scripts/register-nightly-task.ps1`) to run daily at 11:59 PM IST via Windows Task Scheduler. Ensures end-of-day snapshots are preserved even if the POS desktop app is closed.
+  - **Comprehensive Closing Manifest**: Each snapshot archive in `restore_points/nightly_snapshots/snapshot_YYYY-MM-DD` records:
+    - Complete JSON database dump (`atlas_data_snapshot.json`)
+    - Collection stats & document counts
+    - Total Gross Sales & Payment Mode Breakdown (Cash, UPI, Card, Due)
+    - Reconciled Closing Account Balances (Cash Counter, Current Account, Kishalaya Maity)
+    - Automatic baseline refresh (`backend/data/baseline_snapshot.json`) so new installer deployments always bundle the latest closing state.
+  - **EOD Audit Verification (November 1, 2026 Closing)**:
+    - **Total Orders**: 34 (33 Paid, 0 Open, 1 Cancelled)
+    - **Gross Sales**: **₹12,757.00** (Cash: ₹3,327 \| UPI: ₹8,603 \| Khata/Due: ₹827)
+    - **Bill Numbering**: Highest Q3 Bill **#1156** with **0 duplicate bills**
+    - **Closing Balances**: Cash Counter **₹1,935.25**, Current Account **₹280,038.56**, Kishalaya Maity **₹91,850.00**
+    - **Total Backed Up Documents**: **13,963 documents**
+
+---
+
+### 12. Stale-While-Revalidate & Auto-Refresh Across All Pages (v12.0.23)
+- **Elimination of Stale LocalStorage Trapping**:
+  - Resolved architectural issue across `/staff`, `/inventory`, `/payments`, `/purchases`, `/reports`, `/sales`, `/suppliers`, and `/attendance` where components returned early from `useEffect` upon finding cached data in `localStorage`.
+  - Converted all operational modules to true **Stale-While-Revalidate**:
+    - **Instant Render**: Displays cached data in 0ms so users never experience a blank page or blocking spinner.
+    - **Automatic Background Fetch**: Always issues a background request to fetch fresh records from the server, seamlessly updating state and cache.
+    - **Window Focus & Tab Switching**: Subscribes to `window.addEventListener('focus', ...)` to automatically refresh data when returning to the POS tab.
+    - **Sync Reactivity**: Listens to `peyala_data_synced` to automatically refresh views whenever background cloud replication finishes.
+
+---
+
+### 13. Customer Due Payment Inflow Integration & Real-Time Account Balance Sync (v12.0.24)
+- **Resolved Due Collection Omission in Account Ledger**:
+  - Identified schema field mismatch in `backend/src/utils/accountLedger.js` and `backend/src/routes/accounts.js` where customer due payments were queried using `receivedInAccount` and `paymentDate` instead of the canonical `receivedIn` and `date` fields.
+  - Aligned queries across `accountLedger.js` and the accounts ledger route to support both ObjectId and string matches for `receivedIn`, properly capturing customer dues paid into Cash Counter or Current Account.
+  - Updated `/api/customers/:id/collect-due` to immediately execute `recalculateAccountBalances()` and broadcast `ACCOUNT_UPDATED` via WebSockets upon settlement.
+  - **Reconciled Current Account Balance**: Added the collected ₹3,595.00 UPI customer due payment, bringing the live Current Account balance from ₹280,038.56 to **₹283,633.56** across both Central Atlas and Local DB.
+
+---

@@ -124,7 +124,7 @@ export default function AccountsPage() {
   // Run load() on mount — show cache immediately, then fetch fresh data from API (stale-while-revalidate)
   useEffect(() => {
     const cached = readCache();
-    if (cached?.accounts) {
+    if (cached?.accounts && cached?.savedAt && (Date.now() - cached.savedAt < 15 * 60 * 1000)) {
       setAccounts(cached.accounts || []);
       setTransfers(cached.transfers || []);
       if (cached.savedAt) {
@@ -138,7 +138,8 @@ export default function AccountsPage() {
   // Listen for real-time account/transfer updates and background sync events
   useEffect(() => {
     const handleRefresh = () => {
-      load();
+      localStorage.removeItem(ACCOUNTS_CACHE_KEY);
+      load(true);
     };
 
     const unsub = realtime.on('*', (event) => {
@@ -160,6 +161,7 @@ export default function AccountsPage() {
     });
 
     window.addEventListener('peyala_sales_updated', handleRefresh);
+    window.addEventListener('peyala_data_synced', handleRefresh);
     window.addEventListener('focus', handleRefresh);
 
     // Refresh every 20 seconds so counter balances stay up-to-date across all devices
@@ -168,6 +170,7 @@ export default function AccountsPage() {
     return () => {
       unsub();
       window.removeEventListener('peyala_sales_updated', handleRefresh);
+      window.removeEventListener('peyala_data_synced', handleRefresh);
       window.removeEventListener('focus', handleRefresh);
       clearInterval(interval);
     };
@@ -340,19 +343,6 @@ export default function AccountsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.removeItem(ACCOUNTS_CACHE_KEY);
-                load(true);
-              }}
-              disabled={refreshing}
-              className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
-              title="Fetch fresh account balances from server"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-brand-500")} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
             {canWrite ? (
               <>
                 <button onClick={() => setModal('transfer')} className="btn-secondary flex items-center gap-2">

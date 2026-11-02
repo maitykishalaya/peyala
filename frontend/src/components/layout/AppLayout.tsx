@@ -10,6 +10,7 @@ const ThermalPreviewModal = dynamic(() => import('@/components/ui/ThermalPreview
 import WastagePromptBanner from '@/components/ui/WastagePromptBanner';
 import OfflineSyncBanner from '@/components/ui/OfflineSyncBanner';
 import LocalServerStatus from '@/components/LocalServerStatus';
+import PrintStationManager from '@/components/PrintStationManager';
 import {
   LayoutDashboard, Wallet, Package, ShoppingCart, Users, TrendingUp,
   ArrowUpRight, UserCheck, BarChart3, Settings,
@@ -526,6 +527,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </footer>
         <OfflineSyncBanner />
+        <PrintStationManager />
       </div>
     </div>
   );
