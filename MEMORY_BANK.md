@@ -1364,6 +1364,10 @@ Whenever changes are made, run this validation suite before concluding:
       3. *REST Endpoints (`backend/src/routes/backup.js`)*:
          - `GET /api/backup/nightly-snapshot/status`: Returns schedule health, next execution time, and minutes remaining.
          - `POST /api/backup/nightly-snapshot`: Allows authorized administrators to trigger an immediate closing snapshot on demand.
+      4. *Triple-Layer Anti-Collision Architecture*:
+         - **OS-Level Cross-Process Mutex File Lock (`.snapshot.lock`)**: Guarantees that separate Node processes (e.g. backend service vs Windows Scheduled Task) cannot write simultaneously to disk.
+         - **5-Minute Deduplication Cooldown Guard**: When both in-process scheduler and Windows Task fire around 23:59 IST, the second runner detects the fresh manifest (<5m old) and skips redundant execution cleanly in 0.5s without file writes or duplicate DB insertions.
+         - **Atomic Safe Writes (`.tmp` -> Atomic Rename)**: All JSON snapshot dumps are written to temporary unique paths before atomic replacement, eliminating race conditions and partial file corruption.
     - **November 1, 2026 Closing Business Audit & Snapshot Results**:
       - **Orders**: 34 created (33 Paid, 0 Open, 1 Cancelled).
       - **Gross Sales**: **₹12,757.00** (Cash: ₹3,327.00 | UPI: ₹8,603.00 | Card: ₹0.00 | Customer Due: ₹827.00).
