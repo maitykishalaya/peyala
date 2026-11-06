@@ -1415,5 +1415,16 @@ Whenever changes are made, run this validation suite before concluding:
       - Re-packaged single-file installers: `INSTALL-PEYALA-ALL-IN-ONE.bat` (535.06 MB), `Peyala-POS-AllInOne-Installer.exe` (535.18 MB), and `Peyala-POS.apk` (4.51 MB).
       - Mirrored directly to `C:\Peyala` and `C:\Desktop\Peyala_v8`.
 
+  - **Distributed Sync Terminal-Status Immutability & Orphan Order Prevention Safeguards (v12.1.1)**:
+    - **Identified Cross-Device Multi-Instance State Regression (Split-Brain)**:
+      1. When multiple POS servers run concurrently (e.g. Cafe Store Laptop and Home Laptop), `syncEngine.js` previously executed a coarse-grained `replaceOne` based on timestamp LWW.
+      2. Older snapshots pushed by a waking device would overwrite settled/paid orders back to `open` or `billed`, and overwrite KOT rounds added by floor staff.
+      3. Tables cleared by subsequent customer parties left older unclosed orders orphaned in the database, which were auto-resurrected upon next POS initialization.
+    - **Permanent Architectural Safeguards (Zero-Logic-Breaking)**:
+      1. *Terminal Status Protection in SyncEngine*: In both `pushToCentral` and `pullFromCentral`, once an order reaches `status: 'paid'` or `'cancelled'`, it is strictly immutable against state regression. Incoming sync documents with `open` or `billed` states are prohibited from overwriting a paid order.
+      2. *Additive KOT Round Union*: During inbound and outbound synchronization, existing `kotRounds` are merged additively so that newly added food items/rounds on floor devices can never be erased by a concurrent status update.
+      3. *Pre-Flight Double-Booking & Orphan Shield*: In `backend/src/routes/orders.js`, opening an order on a table that has an unclosed active order automatically appends items to that active order, preventing tables from silently burying unclosed orders.
+      4. *Section Tab Active Pulse & 45-Minute Long-Wait Alert*: In `frontend/src/app/tables/page.tsx`, section tabs (e.g. `Pick Up`) render a pulsing active count badge whenever running orders exist. A top-level alert banner notifies floor staff if any order has been running for 45+ minutes with a one-click "View & Settle" button.
+
 ---
-*Last Updated: November 2, 2026 (Version 12.1.0 Release & Anti-Collision Snapshot Engine) · Peyala v12.1 Engineering*
+*Last Updated: November 6, 2026 (Terminal Status Immutability & Multi-Device Sync Safeguards v12.1.1) · Peyala v12.1 Engineering*

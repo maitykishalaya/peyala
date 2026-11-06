@@ -23,7 +23,7 @@ function recordKotPrintedLocally(key: string) {
     set.add(key);
     const arr = Array.from(set).slice(-500);
     localStorage.setItem(PRINTED_KOTS_CACHE_KEY, JSON.stringify(arr));
-  } catch {}
+  } catch { }
 }
 
 export default function PrintStationManager() {
@@ -68,7 +68,7 @@ export default function PrintStationManager() {
           const jobKey = `${job.orderId}-${job.roundId}`;
           if (inFlightKotsRef.current.has(jobKey) || localPrintedSet.has(jobKey)) {
             // Already printed locally on this device, mark printed on server to silence queue
-            ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
+            ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => { });
             continue;
           }
 
@@ -88,7 +88,7 @@ export default function PrintStationManager() {
             'production'
           );
 
-          await ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => {});
+          await ordersApi.markKotPrinted(job.orderId, job.roundId).catch(() => { });
           window.dispatchEvent(
             new CustomEvent('peyala_kot_printed', {
               detail: { label: `Table ${job.tableNumber} (${job.roundTag})` },
@@ -137,7 +137,7 @@ export default function PrintStationManager() {
               'production'
             );
 
-            await ordersApi.markBillPrinted(bJob.orderId, bJob.billPrintSeq).catch(() => {});
+            await ordersApi.markBillPrinted(bJob.orderId, bJob.billPrintSeq).catch(() => { });
             await new Promise((resolve) => setTimeout(resolve, 400));
           } catch (printErr) {
             console.error('[PrintStation] Failed to auto-print bill for table', bJob.tableNumber, printErr);

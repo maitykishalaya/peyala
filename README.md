@@ -1103,3 +1103,16 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Re-packaged single-file installers (`INSTALL-PEYALA-ALL-IN-ONE.bat` 535 MB, `Peyala-POS-AllInOne-Installer.exe` 535 MB, `Peyala-POS.apk` 4.51 MB).
 
 ---
+
+### 15. Terminal Status Immutability & Multi-Device Sync Safeguards (v12.1.1)
+- **Terminal Status Protection in SyncEngine**:
+  - In both `pushToCentral` and `pullFromCentral`, once an order achieves `status: 'paid'` or `'cancelled'`, it is strictly immutable against state regression. Incoming sync documents carrying stale `open` or `billed` states are barred from reverting paid cloud or local records.
+- **Additive KOT Round Union**:
+  - Synchronizing orders additively merges `kotRounds` by round number across devices, preventing food add-ons and kitchen orders from being overwritten by concurrent status bumps.
+- **Pre-Flight Double-Booking & Table Orphan Shield**:
+  - `POST /api/orders` checks for existing unclosed orders on the requested table before claiming it, automatically appending items to keep the table and dining session unified rather than orphaning previous orders.
+- **Floor Section Active Pulse & 45-Minute Long-Wait Alert Banner**:
+  - Floor section tabs (Indoor, Outdoor, Pick Up) show active count badges when running orders exist in that section.
+  - Surfaces a proactive banner on the Tables floor plan when any order has been active for 45+ minutes with a one-click "View & Settle" button so floor staff never leave unclosed orders behind at closing.
+
+---

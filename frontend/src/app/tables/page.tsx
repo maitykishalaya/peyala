@@ -2575,12 +2575,16 @@ export default function TablesPage() {
                     if (sec !== 'all' && (!sectionGroupedTables[sec] || sectionGroupedTables[sec].length === 0)) {
                       return null;
                     }
+                    const secActiveCount = sec === 'all'
+                      ? tables.filter((t) => t.status === 'occupied').length
+                      : sectionGroupedTables[sec]?.filter((t) => t.status === 'occupied').length || 0;
+
                     return (
                       <button
                         key={sec}
                         onClick={() => setSectionFilter(sec)}
                         className={cn(
-                          'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap',
+                          'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1',
                           sectionFilter === sec
                             ? 'bg-red-600 text-white shadow-xs'
                             : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100'
@@ -2588,8 +2592,20 @@ export default function TablesPage() {
                       >
                         {sec === 'all' ? 'All Sections' : sec}
                         {sec !== 'all' && (
-                          <span className="ml-1 opacity-80 text-[10px]">
+                          <span className="opacity-80 text-[10px]">
                             ({sectionGroupedTables[sec].length})
+                          </span>
+                        )}
+                        {secActiveCount > 0 && (
+                          <span
+                            className={cn(
+                              'ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-black',
+                              sectionFilter === sec
+                                ? 'bg-white text-red-700'
+                                : 'bg-amber-500 text-white animate-pulse'
+                            )}
+                          >
+                            {secActiveCount} active
                           </span>
                         )}
                       </button>
@@ -2666,6 +2682,40 @@ export default function TablesPage() {
               </div>
             </div>
 
+            {/* Long-Running / Stale Order Warning Banner (E.g. Pick Up / Takeaway forgotten orders) */}
+            {(() => {
+              const staleOccupiedTables = tables.filter((t) => {
+                if (t.status !== 'occupied' || !t.activeOrder) return false;
+                const kotMins = getKotElapsedMinutes(t.activeOrder);
+                return kotMins !== null && kotMins >= 45;
+              });
+              if (staleOccupiedTables.length === 0) return null;
+              return (
+                <div className="bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700/80 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-lg">⏳</span>
+                    <div>
+                      <p className="text-xs font-bold text-amber-950 dark:text-amber-100">
+                        {staleOccupiedTables.length} table/takeaway order(s) active for 45+ minutes:
+                      </p>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        {staleOccupiedTables.map((t) => `${t.tableNumber} (${getKotElapsedMinutes(t.activeOrder)}m)`).join(', ')} — Don&apos;t forget to Bill &amp; Settle or Cancel before closing shift!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (staleOccupiedTables[0]) {
+                        handleViewOrderDetails(staleOccupiedTables[0]);
+                      }
+                    }}
+                    className="btn bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg shrink-0 w-fit shadow-xs"
+                  >
+                    View &amp; Settle ({staleOccupiedTables[0]?.tableNumber})
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Grouped Floor Sections: Indoor, Outdoor, Pick Up, Other (Matching Image 2) */}
             {loading ? (

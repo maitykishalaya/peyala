@@ -418,6 +418,51 @@ class SyncEngine {
                     await centralCol.updateOne({ _id: queryId }, { $set: updateFields });
                   }
                 }
+              } else if (colName === 'orders') {
+                const centralDoc = await centralCol.findOne({ _id: queryId });
+                if (!centralDoc) {
+                  await centralCol.replaceOne({ _id: queryId }, docToSync, { upsert: true });
+                } else {
+                  const wasPaidCentral = centralDoc.status === 'paid' || centralDoc.status === 'cancelled';
+                  const isPaidLocal = docToSync.status === 'paid' || docToSync.status === 'cancelled';
+
+                  // Terminal Status Protection: Never allow a stale open/billed local snapshot to overwrite a paid/cancelled cloud order!
+                  if (wasPaidCentral && !isPaidLocal) {
+                    console.warn(`[SyncEngine] Protected Central Order ${queryId} from status regression: Central is "${centralDoc.status}", local tried to push "${docToSync.status}". Syncing Central paid state back to local.`);
+                    await localCol.updateOne(
+                      { _id: queryId },
+                      {
+                        $set: {
+                          status: centralDoc.status,
+                          paidAt: centralDoc.paidAt,
+                          billNumber: centralDoc.billNumber,
+                          settledAmount: centralDoc.settledAmount,
+                          paymentMethod: centralDoc.paymentMethod,
+                          paymentBreakdown: centralDoc.paymentBreakdown,
+                          updatedAt: new Date(),
+                        },
+                      }
+                    ).catch(() => {});
+                    continue;
+                  }
+
+                  // Additive Round & Item Union: Never let an incoming snapshot wipe out existing KOT rounds!
+                  if (Array.isArray(centralDoc.kotRounds) && centralDoc.kotRounds.length > 0) {
+                    if (Array.isArray(docToSync.kotRounds)) {
+                      const localRoundNums = new Set(docToSync.kotRounds.map((r) => r.roundNumber));
+                      const missingRounds = centralDoc.kotRounds.filter((r) => !localRoundNums.has(r.roundNumber));
+                      if (missingRounds.length > 0) {
+                        docToSync.kotRounds = [...docToSync.kotRounds, ...missingRounds].sort((a, b) => a.roundNumber - b.roundNumber);
+                      }
+                    }
+                  }
+
+                  await centralCol.replaceOne(
+                    { _id: queryId },
+                    docToSync,
+                    { upsert: true }
+                  );
+                }
               } else if (colName === 'balancesheets') {
                 const centralDoc = await centralCol.findOne({ _id: queryId });
                 if (!centralDoc) {
@@ -722,6 +767,31 @@ class SyncEngine {
             const ops = [];
             for (const doc of docs) {
               const localDoc = localMap.get(String(doc._id));
+
+              // ── Orders Protection: Terminal Status & Additive Rounds ──
+              if (colName === 'orders' && localDoc) {
+                const wasPaidLocally = localDoc.status === 'paid' || localDoc.status === 'cancelled';
+                const isPaidCentral = doc.status === 'paid' || doc.status === 'cancelled';
+
+                // Terminal Status Protection: Never allow a stale open/billed cloud doc to revert a local paid/cancelled order!
+                if (wasPaidLocally && !isPaidCentral) {
+                  console.warn(`[SyncEngine] Protected Local Order ${doc._id} from status regression: Local is "${localDoc.status}", Cloud incoming is "${doc.status}". Re-pushing local paid state to Central.`);
+                  this.recordMutation(colName, localDoc._id, 'update', localDoc).catch(() => {});
+                  continue;
+                }
+
+                // Additive Round Union: Never let an incoming cloud doc delete locally added rounds (e.g. newly placed KOTs)!
+                if (Array.isArray(localDoc.kotRounds) && localDoc.kotRounds.length > 0) {
+                  if (Array.isArray(doc.kotRounds)) {
+                    const centralRoundNums = new Set(doc.kotRounds.map((r) => r.roundNumber));
+                    const extraLocalRounds = localDoc.kotRounds.filter((r) => !centralRoundNums.has(r.roundNumber));
+                    if (extraLocalRounds.length > 0) {
+                      doc.kotRounds = [...doc.kotRounds, ...extraLocalRounds].sort((a, b) => a.roundNumber - b.roundNumber);
+                    }
+                  }
+                }
+              }
+
               if (localDoc && localDoc.updatedAt && doc.updatedAt) {
                 const localTime = new Date(localDoc.updatedAt).getTime();
                 const centralTime = new Date(doc.updatedAt).getTime();

@@ -871,6 +871,29 @@ router.post('/', staffOrAdmin, async (req, res) => {
       customerId: customerId || customerInfo?.customerId || customerInfo?._id,
     });
 
+    // Pre-flight check: Prevent orphaned double-booking if table already has an unclosed active order in DB
+    const existingUnclosedOrder = await Order.findOne({
+      table: tableId,
+      status: { $nin: ['paid', 'cancelled'] },
+    }).sort({ createdAt: -1 });
+
+    if (existingUnclosedOrder) {
+      const populated = await appendItemsToOrder(existingUnclosedOrder, {
+        items,
+        shouldPrint,
+        isPrintStation: req.body.isPrintStation,
+        kotAlreadyPrinted: req.body.kotAlreadyPrinted,
+        orderNotes: customerInstruction,
+        customerName: resolvedCust?.customerName || customerName,
+        customerPhone: resolvedCust?.customerPhone || customerPhone,
+        customerAddress: resolvedCust?.customerAddress || customerAddress,
+        customerId: resolvedCust?.customer || customerId,
+        user: req.user,
+      });
+      await Table.findByIdAndUpdate(tableId, { $set: { status: 'occupied', activeOrder: existingUnclosedOrder._id } }).catch(() => {});
+      return res.json(populated);
+    }
+
     // Atomically claim table to prevent double-booking race condition
     let table = await Table.findOneAndUpdate(
       { _id: tableId, status: { $ne: 'occupied' }, activeOrder: null },
