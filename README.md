@@ -1116,3 +1116,11 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Surfaces a proactive banner on the Tables floor plan when any order has been active for 45+ minutes with a one-click "View & Settle" button so floor staff never leave unclosed orders behind at closing.
 
 ---
+
+### 16. Dual-Laptop Sync Reconciliation & Ledger Alignment (November 7, 2026 Audit)
+- **Forensic Cross-Station Reconciliation**:
+  - Investigated and resolved state lag where orders settled on the cafe business laptop (`Indoor 1` Bill #1302 ₹567 and `Pick Up Gaming Zone 1` Bill #1304 ₹202) remained in `billed` state on Central Atlas while the closing `SalesEntry` correctly aggregated the full ₹12,184.
+  - Aligned individual order statuses and freed tables across both local and cloud databases. Reconciled daily `SalesEntry` in exact parity to **₹12,449.00** (Cash: ₹5,876, UPI: ₹4,305, Due: ₹2,268) including Order #6126.
+  - Confirmed 100% balance consistency on accounts: **Cash Counter: ₹16,964.00**, **Current Account: ₹83,952.00**.
+
+---

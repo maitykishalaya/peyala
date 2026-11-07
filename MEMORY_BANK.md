@@ -1426,5 +1426,23 @@ Whenever changes are made, run this validation suite before concluding:
       3. *Pre-Flight Double-Booking & Orphan Shield*: In `backend/src/routes/orders.js`, opening an order on a table that has an unclosed active order automatically appends items to that active order, preventing tables from silently burying unclosed orders.
       4. *Section Tab Active Pulse & 45-Minute Long-Wait Alert*: In `frontend/src/app/tables/page.tsx`, section tabs (e.g. `Pick Up`) render a pulsing active count badge whenever running orders exist. A top-level alert banner notifies floor staff if any order has been running for 45+ minutes with a one-click "View & Settle" button.
 
+  - **Dual-Laptop Sync Replay Reconciliation & Ledger Alignment (November 7, 2026 Audit)**:
+    - **Identified Operational Incident**:
+      1. Upon returning home, user started the local POS on home laptop (`LAPTOP-IE5N8G3H`) and discovered unsettled orders on `Indoor 1` (Bill #1302, ₹567), `Pick Up Gaming Zone 1` (Bill #1304, ₹202), and `Indoor 8` (Order #6102, ₹21).
+      2. Daily sales register on home laptop displayed ₹11,415 instead of the business laptop's closing figure of ₹12,184 (a ₹769 mismatch).
+    - **Mathematical Forensic Investigation & Root Cause Discovery**:
+      1. *Root Cause*: The business laptop was running the unpatched v12.1.0 codebase (installer update was withheld for testing). At closing, `reconcileDailySales` executed on the business laptop and pushed `SalesEntry` totaling ₹12,184 (Cash: ₹5,876, UPI: ₹4,305, Due: ₹2,003). However, the individual order documents for Bill #1302 and #1304 remained in `status: 'billed'` in Central Atlas because the business laptop was closed before their mutation queues completed outbound push.
+      2. *Exact Rupee Alignment*:
+         - Paid Orders (30 bills): ₹11,415 (Cash: ₹5,676, UPI: ₹3,938, Due: ₹1,801)
+         - Bill #1302 (Indoor 1): ₹567 (Cash: ₹200, UPI: ₹367)
+         - Bill #1304 (Pick Up Gaming Zone 1): ₹202 (Customer Due: ₹202)
+         - `₹11,415 + ₹567 + ₹202 = ₹12,184.00` — exact 1-to-1 match across all payment buckets!
+      3. *Indoor 8 (Order #6102)*: Abandoned Milk Tea (₹20 + 5% tax = ₹21) from 6:17 PM IST; was never billed or settled at the cafe.
+    - **Resolution Executed**:
+      1. Atomically marked Order #6119 as `paid` (₹200 Cash, ₹367 UPI) and freed `Indoor 1`.
+      2. Atomically marked Order #6121 as `paid` (₹202 Due) and confirmed `Pick Up Gaming Zone 1` is free.
+      3. Reconciled both Local and Central `SalesEntry` documents to **₹12,449.00** (reflecting Order #6126 settled at 11:12 PM IST: Cash: ₹5,876, UPI: ₹4,305, Due: ₹2,268).
+      4. Validated account balances in both Local and Central Atlas: `Cash Counter: ₹16,964.00`, `Current Account: ₹83,952.00` — 100% matched with zero discrepancies.
+
 ---
-*Last Updated: November 6, 2026 (Terminal Status Immutability & Multi-Device Sync Safeguards v12.1.1) · Peyala v12.1 Engineering*
+*Last Updated: November 7, 2026 (Dual-Laptop Sync Reconciliation & Ledger Alignment) · Peyala v12.1 Engineering*
