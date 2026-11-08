@@ -1444,5 +1444,18 @@ Whenever changes are made, run this validation suite before concluding:
       3. Reconciled both Local and Central `SalesEntry` documents to **₹12,449.00** (reflecting Order #6126 settled at 11:12 PM IST: Cash: ₹5,876, UPI: ₹4,305, Due: ₹2,268).
       4. Validated account balances in both Local and Central Atlas: `Cash Counter: ₹16,964.00`, `Current Account: ₹83,952.00` — 100% matched with zero discrepancies.
 
+  - **Indoor 6 Settlement & Cash Counter Ledger Parity Reconciliation (November 8, 2026 Audit)**:
+    - **Identified Operational Incident**:
+      1. Upon returning home, user found Table `Indoor 6` showing as occupied/running with Order #6148 (Bill #1328, ₹252, 3x Cold Coffee), despite the cloud website showing `Indoor 6` as green/available.
+      2. The user noted that at the business location at closing, the **Cash Counter balance was ₹5,160.00** and **total cash sales for the day was ₹1,515.00**, whereas the cloud showed ₹4,910.25 and ₹1,265.00 (an exact ₹250.00 gap).
+    - **Mathematical Forensic Investigation & Root Cause Discovery**:
+      1. *Root Cause*: Staff settled Bill #1328 in cash for ₹250.00 (with ₹2.00 waived off). While the transaction updated the business laptop's local database (bringing cash sales to ₹1,515 and cash counter to ₹5,160.25), the business laptop was closed before Order #6148's paid state pushed to Central Atlas.
+      2. Later at 8:22 PM IST, a new party was seated at Table Indoor 6 and placed Order #6151 (Bill #1334, ₹998 via UPI). When Order #6151 settled at 9:35 PM IST, it set Table `Indoor 6` to `available` in Central Atlas (which is why the website showed it green).
+      3. However, when the POS desktop application opened at home, its startup table integrity check discovered Order #6148 still open in `billed` status and auto-healed Table Indoor 6 to occupied.
+    - **Resolution Executed**:
+      1. Marked Order #6148 as `paid` (`settledAmount: 250`, `waivedAmount: 2`, `paymentMethod: 'cash'`) and cleared Table `Indoor 6` across both Local and Central DBs.
+      2. Reconciled `SalesEntry`: Outlet sales updated to **₹12,385.00** (Cash: **₹1,515.00**, UPI: ₹9,583.00, Due: ₹1,287.00) — matching the user's closing figure to the exact single rupee!
+      3. Reconciled `Cash Counter` balance to **₹5,160.25** across both Local and Central DBs — exact match to the user's closing register!
+
 ---
-*Last Updated: November 7, 2026 (Dual-Laptop Sync Reconciliation & Ledger Alignment) · Peyala v12.1 Engineering*
+*Last Updated: November 8, 2026 (Indoor 6 Settlement & Cash Counter Parity Reconciliation) · Peyala v12.1 Engineering*

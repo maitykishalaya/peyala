@@ -1124,3 +1124,11 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Confirmed 100% balance consistency on accounts: **Cash Counter: ₹16,964.00**, **Current Account: ₹83,952.00**.
 
 ---
+
+### 17. Indoor 6 Cash Settlement & Counter Balance Parity (November 8, 2026 Audit)
+- **Resolved Unclosed Bill & Cash Balance Discrepancy**:
+  - Reconciled Order #6148 (Bill #1328 on Indoor 6) settled in cash for ₹250.00 (₹2.00 waived off) which was omitted from cloud push before shop shutdown.
+  - Aligned daily sales: Total outlet sales **₹12,385.00** with **Cash Sales: ₹1,515.00**, UPI: ₹9,583.00, Due: ₹1,287.00.
+  - Reconciled **Cash Counter: ₹5,160.25** and freed Table `Indoor 6` across both local and Central Atlas.
+
+---
