@@ -2639,7 +2639,7 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
 
     // 4. Reconcile Daily Sales Register for the calendar date in IST
     const orderDate = order.paidAt || order.createdAt || new Date();
-    const salesEntry = await reconcileDailySales(orderDate, req.user._id);
+    const salesEntry = await reconcileDailySales(orderDate, req.user._id, { isExplicitAudit: true });
 
     // 5. Reverse GST Liability on BalanceSheet
     const gstToRemove = order.taxAmount > 0
@@ -2865,7 +2865,7 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
 
     // 7. Reconcile Daily Sales Register strictly from all settled orders for this IST day
     const orderDate = order.paidAt || order.createdAt || new Date();
-    const salesEntry = await reconcileDailySales(orderDate, req.user._id);
+    const salesEntry = await reconcileDailySales(orderDate, req.user._id, { isExplicitAudit: true });
 
     // 8. Reconcile GST Liability on BalanceSheet
     const effectiveNewGst = newTaxAmount > 0

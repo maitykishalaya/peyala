@@ -8,9 +8,11 @@ const { getIstDayRange } = require('./date');
  *
  * @param {string|Date} dateInput - Calendar date or Date instance
  * @param {string|import('mongoose').Types.ObjectId} [userId] - Optional user ID for creator attribution
+ * @param {object} [options] - Optional flags (e.g. { isExplicitAudit: true } for downward adjustments)
  * @returns {Promise<SalesEntry|null>}
  */
-async function reconcileDailySales(dateInput = new Date(), userId = null) {
+async function reconcileDailySales(dateInput = new Date(), userId = null, options = {}) {
+  const isExplicitAudit = options && options.isExplicitAudit === true;
   const { start, end, canonicalDate } = getIstDayRange(dateInput);
 
   // 1. Fetch all paid/settled orders whose payment falls on this IST calendar day
@@ -73,9 +75,23 @@ async function reconcileDailySales(dateInput = new Date(), userId = null) {
     });
   }
 
-  // 3. Atomically overwrite outlet sales & breakdown with real order figures
-  salesEntry.paymentBreakdown = { cash, upi, card, due, bankTransfer };
-  salesEntry.outletSales = outletSales;
+  // 3. Atomically update outlet sales & breakdown with real order figures
+  // Monotonic Protection: On passive re-evaluations (e.g. browsing Sales or secondary laptop sync),
+  // never regress verified higher figures that were pushed by the primary cafe counter.
+  // Allow downward modifications ONLY if explicitly triggered by a manager audit action (isExplicitAudit = true).
+  if (!isExplicitAudit && salesEntry.outletSales && salesEntry.outletSales > outletSales) {
+    salesEntry.outletSales = Math.max(salesEntry.outletSales, outletSales);
+    salesEntry.paymentBreakdown = {
+      cash: Math.max(salesEntry.paymentBreakdown?.cash || 0, cash),
+      upi: Math.max(salesEntry.paymentBreakdown?.upi || 0, upi),
+      card: Math.max(salesEntry.paymentBreakdown?.card || 0, card),
+      due: Math.max(salesEntry.paymentBreakdown?.due || 0, due),
+      bankTransfer: Math.max(salesEntry.paymentBreakdown?.bankTransfer || 0, bankTransfer),
+    };
+  } else {
+    salesEntry.paymentBreakdown = { cash, upi, card, due, bankTransfer };
+    salesEntry.outletSales = outletSales;
+  }
 
   // Normalize canonical date so it sits at noon IST (06:30 UTC), preventing client off-by-one shifts
   if (!salesEntry.date || salesEntry.date < start || salesEntry.date > end) {

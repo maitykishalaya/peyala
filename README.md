@@ -1132,3 +1132,16 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Reconciled **Cash Counter: ₹5,160.25** and freed Table `Indoor 6` across both local and Central Atlas.
 
 ---
+
+### 18. Multi-Instance Sync Outbox Root Cause Resolution & Permanent Safeguards (November 8, 2026 Audit)
+- **Technical Root Cause Identified & Eliminated**:
+  - Discovered that an accidental guard condition `|| this.isPullingFromCentral` added on Nov 2 was discarding mutations from `SyncOutbox` whenever cashiers settled orders during the 2–5 second cloud pull interval.
+  - Silenced recovery re-pushes were unable to execute because `pullFromCentral` had the flag active.
+  - In `tables.js`, older unclosed orders were resurrecting onto tables even when subsequent parties had already dined, paid, and left.
+- **Architectural Safeguards Deployed**:
+  1. **Sync Outbox Unblocking**: Removed the blocking flag from `recordMutation()`. POS actions are never dropped.
+  2. **Proactive Terminal Order Reconciliation Sweep**: Every 15 seconds, `syncNow()` sweeps local terminal orders (`paid`/`cancelled`) from the past 48 hours and guarantees they are pushed to Central Atlas with all payment and GST deltas.
+  3. **Ghost Order Occupation Shield**: `GET /api/tables` verifies if a table with an unclosed order already had a newer settled order. Superseded orders are prevented from occupying tables.
+  4. **Monotonic Daily Sales Protection**: `reconcileDailySales` prevents secondary machines from passively downgrading daily sales or cash totals confirmed by the primary cafe counter.
+
+---

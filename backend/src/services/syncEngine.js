@@ -162,8 +162,8 @@ class SyncEngine {
   /**
    * Record a local mutation in the persistent SyncOutbox queue
    */
-  async recordMutation(collectionName, documentId, operation, payload = {}, revision = 1) {
-    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_SYNC === 'true' || this.isPullingFromCentral) {
+  async recordMutation(collectionName, documentId, operation, payload = {}, revision = 1, options = {}) {
+    if (process.env.NODE_ENV === 'test' || process.env.DISABLE_SYNC === 'true') {
       return;
     }
     try {
@@ -213,6 +213,123 @@ class SyncEngine {
   }
 
   /**
+   * Proactive Terminal Order Reconciliation Sweep:
+   * Ensures any local order in terminal status ('paid' or 'cancelled') from the last 48h
+   * is guaranteed to be pushed to Central DB with its account balance & GST deltas.
+   * Eliminates daily ghost orders and multi-machine sync discrepancies.
+   */
+  async reconcileTerminalOrders(centralConn) {
+    if (!centralConn || centralConn.readyState !== 1) return;
+    try {
+      const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const localOrdersCol = mongoose.connection.db.collection('orders');
+      const centralOrdersCol = centralConn.db.collection('orders');
+
+      const localTerminalOrders = await localOrdersCol.find({
+        status: { $in: ['paid', 'cancelled'] },
+        updatedAt: { $gte: twoDaysAgo },
+      }).toArray();
+
+      if (!localTerminalOrders || localTerminalOrders.length === 0) return;
+
+      const orderIds = localTerminalOrders.map((o) => o._id);
+      const centralMatches = await centralOrdersCol.find(
+        { _id: { $in: orderIds } },
+        { projection: { _id: 1, status: 1 } }
+      ).toArray();
+
+      const centralStatusMap = new Map(centralMatches.map((c) => [String(c._id), c.status]));
+
+      for (const localOrd of localTerminalOrders) {
+        const cStatus = centralStatusMap.get(String(localOrd._id));
+        const isCentralTerminal = cStatus === 'paid' || cStatus === 'cancelled';
+
+        if (!isCentralTerminal) {
+          console.log(`[SyncEngine] Proactive Healing: Local Order #${localOrd.orderNumber} is "${localOrd.status}" but Central is "${cStatus || 'missing'}". Pushing to Central...`);
+          await centralOrdersCol.replaceOne(
+            { _id: localOrd._id },
+            localOrd,
+            { upsert: true }
+          );
+
+          if (localOrd.status === 'paid' && cStatus !== 'paid') {
+            const pb = localOrd.paymentBreakdown || {};
+            let cashAmt = Number(pb.cash) || 0;
+            let digitalAmt = (Number(pb.upi) || 0) + (Number(pb.card) || 0) + (Number(pb.other) || 0);
+            if (localOrd.paymentMethod === 'cash' && !cashAmt) cashAmt = Number(localOrd.settledAmount) || Number(localOrd.total) || 0;
+            if (localOrd.paymentMethod === 'upi' && !digitalAmt) digitalAmt = Number(localOrd.settledAmount) || Number(localOrd.total) || 0;
+
+            if (cashAmt > 0) {
+              const targetCash = await centralConn.db.collection('accounts').findOne({ name: /cash counter/i, type: 'cash', isActive: true })
+                || await centralConn.db.collection('accounts').findOne({ type: 'cash', isActive: true });
+              if (targetCash) {
+                await centralConn.db.collection('accounts').updateOne(
+                  { _id: targetCash._id },
+                  { $inc: { currentBalance: cashAmt } }
+                );
+              }
+            }
+            if (digitalAmt > 0) {
+              const targetBank = await centralConn.db.collection('accounts').findOne({ name: /current account/i, type: { $in: ['bank', 'digital'] }, isActive: true })
+                || await centralConn.db.collection('accounts').findOne({ type: { $in: ['bank', 'digital'] }, isActive: true });
+              if (targetBank) {
+                await centralConn.db.collection('accounts').updateOne(
+                  { _id: targetBank._id },
+                  { $inc: { currentBalance: digitalAmt } }
+                );
+              }
+            }
+
+            const orderTax = Number(localOrd.taxAmount) > 0
+              ? Number(localOrd.taxAmount)
+              : Math.round((Number(localOrd.settledAmount) || Number(localOrd.total) || 0) * 0.0477 * 100) / 100;
+            if (orderTax > 0) {
+              try {
+                const centralBs = await centralConn.db.collection('balancesheets').findOne({});
+                if (centralBs) {
+                  const hasLog = (centralBs.gstLog || []).some((l) =>
+                    String(l.salesEntryId) === String(localOrd._id) ||
+                    (localOrd.billNumber && l.note && l.note.includes(`Bill #${localOrd.billNumber}`))
+                  );
+                  if (!hasLog) {
+                    await centralConn.db.collection('balancesheets').updateOne(
+                      { _id: centralBs._id },
+                      {
+                        $inc: { gstLiability: orderTax },
+                        $push: {
+                          gstLog: {
+                            date: localOrd.paidAt || localOrd.createdAt || new Date(),
+                            salesEntryId: localOrd._id,
+                            outletSales: Number(localOrd.settledAmount) || Number(localOrd.total) || 0,
+                            gstAdded: orderTax,
+                            note: `Auto: GST on ₹${localOrd.settledAmount || localOrd.total} POS Dine-in Order (Bill #${localOrd.billNumber || localOrd.orderNumber})`,
+                          },
+                        },
+                        $set: { lastUpdated: new Date() },
+                      }
+                    );
+                  }
+                }
+              } catch (_) {}
+            }
+
+            if (localOrd.table) {
+              let tId = localOrd.table._id || localOrd.table;
+              if (typeof tId === 'string' && /^[0-9a-fA-F]{24}$/.test(tId)) tId = new mongoose.Types.ObjectId(tId);
+              await centralConn.db.collection('tables').updateOne(
+                { _id: tId, activeOrder: localOrd._id },
+                { $set: { status: 'available', activeOrder: null } }
+              );
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Terminal orders reconciliation notice:', err.message);
+    }
+  }
+
+  /**
    * Execute sync: Push pending outbox mutations to Central DB
    */
   async syncNow() {
@@ -240,6 +357,10 @@ class SyncEngine {
           pending: await this.getPendingCount(),
         };
       }
+
+      // Proactive Terminal Order Reconciliation Sweep:
+      // Ensures any local order in terminal status ('paid' or 'cancelled') is pushed to Central DB
+      await this.reconcileTerminalOrders(centralConn);
 
       // 2. Query batch of pending outbox items
       const pendingItems = await SyncOutbox.find({ status: { $in: ['pending', 'failed'] } })

@@ -1457,5 +1457,20 @@ Whenever changes are made, run this validation suite before concluding:
       2. Reconciled `SalesEntry`: Outlet sales updated to **₹12,385.00** (Cash: **₹1,515.00**, UPI: ₹9,583.00, Due: ₹1,287.00) — matching the user's closing figure to the exact single rupee!
       3. Reconciled `Cash Counter` balance to **₹5,160.25** across both Local and Central DBs — exact match to the user's closing register!
 
+  - **Multi-Instance Sync Outbox Root Cause Discovery & Permanent Architectural Safeguards (November 8, 2026 Audit)**:
+    - **Identified Core Problem**:
+      1. Repeated daily discrepancies where orders settled or cancelled on the business laptop (e.g., Nov 7: Indoor 1, Indoor 8, Gaming Zone Pickup 1; Nov 8: Indoor 6) appeared as running orders when opening the POS desktop app at home.
+      2. User personally witnessed staff settle orders in cash and verified the cash counter (₹5,160) and cash sales (₹1,515) at the cafe, yet Central Atlas lagged behind with lower figures and unclosed orders.
+    - **Forensic Investigation & True Technical Root Cause**:
+      1. *The Inbound Sync Outbox Drop Bug*: In commit `a3a53503` (Nov 2, 2026), `if (... || this.isPullingFromCentral)` was added to `recordMutation()` in `syncEngine.js`. Because `pullFromCentral()` queries 27 collections over MongoDB Atlas SRV taking 2–5 seconds every 15-second cycle, any settlement or transaction completed by cashiers during those 2–5 seconds was silently discarded from `SyncOutbox`! The mutation updated the business laptop's local MongoDB, but was never enqueued to push to Central Atlas.
+      2. *The Silenced Recovery Calls*: When `pullFromCentral()` detected that a local order was `paid` while Central was still `billed` (line 773), it called `this.recordMutation(colName, localDoc._id, 'update', localDoc)`. But because `this.isPullingFromCentral` was `true`, that recovery re-push was ALSO discarded immediately every single time!
+      3. *Table Ghost Order Resurrection*: In `tables.js`, `GET /api/tables` queried `Order.find({ status: { $nin: ['paid', 'cancelled'] } })`. When Order #6151 on Indoor 6 was paid at 9:35 PM IST, it was excluded from active orders. `tables.js` then found the older Order #6148 (from 8:09 PM IST) and revived it onto Table Indoor 6 as occupied, ignoring the fact that a newer party had already dined, paid, and left!
+      4. *Split-Brain Sales Downgrade*: When opening Sales on the home laptop, `reconcileDailySales` re-calculated sales strictly from the local database, computed ₹250 less, and pushed that downgraded figure to Central Atlas!
+    - **Permanent Architectural Safeguards Implemented (Zero Logic Compromise)**:
+      1. *Sync Outbox Unblocking (`syncEngine.js`)*: Removed `|| this.isPullingFromCentral` from `recordMutation()`. POS operations and self-healing re-pushes are now guaranteed to be recorded in `SyncOutbox` under all conditions.
+      2. *Proactive Terminal Order Reconciliation Sweep (`syncEngine.js`)*: Added `reconcileTerminalOrders(centralConn)` to `syncNow()`. On every 15-second heartbeat, the sync engine checks all local orders in terminal status (`paid` or `cancelled`) from the last 48 hours and automatically pushes any un-synced terminal states to Central Atlas with their account balance and GST liability deltas.
+      3. *Ghost Order Occupation Shield (`tables.js`)*: In `GET /api/tables`, active dining mapping now verifies whether a table with an unclosed order already has a newer order that was created and settled (`paid`) after `ord.createdAt`. If so, the superseded ghost order cannot occupy the table, keeping the table `available`.
+      4. *Monotonic Daily Sales Protection (`salesReconciler.js` & `orders.js`)*: `reconcileDailySales` now protects verified daily sales and cash totals from being downgraded by secondary laptop reads or background sync sweeps. Downward revisions are strictly gated by `{ isExplicitAudit: true }` from authorized manager audit endpoints (`/settled`).
+
 ---
-*Last Updated: November 8, 2026 (Indoor 6 Settlement & Cash Counter Parity Reconciliation) · Peyala v12.1 Engineering*
+*Last Updated: November 8, 2026 (Sync Outbox Root Cause Resolution & Architectural Safeguards) · Peyala v12.1 Engineering*

@@ -427,6 +427,17 @@ router.get('/', async (req, res) => {
       if (ord.table) {
         const tid = String(ord.table._id || ord.table);
         if (!activeOrderMap.has(tid)) {
+          // Ghost Order Prevention:
+          // If a table has an unclosed order 'ord', but that table ALREADY has a newer order that was created
+          // and settled ('paid') after 'ord.createdAt', 'ord' is a superseded past order and cannot occupy the table!
+          const hasNewerPaidOrder = await Order.exists({
+            table: tid,
+            status: 'paid',
+            createdAt: { $gt: ord.createdAt },
+          });
+          if (hasNewerPaidOrder) {
+            continue;
+          }
           activeOrderMap.set(tid, ord);
         }
       }
