@@ -1146,11 +1146,13 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
 
 ---
 
-### 19. Outdoor 2 UPI Settlement & Floor Plan Alignment (November 9, 2026 Audit)
+### 19. Outdoor 1 & Outdoor 2 Final Settlements & Floor Plan Alignment (November 9, 2026 Audit)
 - **Reconciliation & Parity Executed**:
-  - Investigated Table `Outdoor 2` showing occupied in POS application while settled in UPI from business laptop.
-  - Verified in Central Atlas: `BalanceSheet` already logged GST (`₹49.50`), and `SalesEntry` already aggregated UPI total of `₹10,172.00` (including Order #6189 ₹1,040).
-  - Aligned Order #6189 to `paid` via UPI (₹1,040) and freed Table `Outdoor 2` (`status: 'available'`, `activeOrder: null`) across both Local and Central DBs.
-  - Also aligned Order #6184 to `paid` via Cash (₹633) and freed Table `Indoor 5`, matching `SalesEntry` cash total of `₹3,865.00`. Total outlet sales verified at **₹15,901.00**.
+  - Investigated Tables `Outdoor 2` and `Outdoor 1` showing occupied in POS application while settled on the cafe business laptop.
+  - Verified in Central Atlas: `BalanceSheet` had already logged GST for Order #6189 (`₹49.50`) and Order #6197 (`₹31.50`).
+  - Aligned Order #6189 to `paid` via UPI (₹1,040.00) and freed Table `Outdoor 2` (`status: 'available'`).
+  - Aligned Order #6184 to `paid` via Cash (₹633.00) and freed Table `Indoor 5` (`status: 'available'`).
+  - Aligned Order #6197 to `paid` via Part Payment (Cash: ₹600.00, UPI: ₹62.00, Total: ₹662.00) and freed Table `Outdoor 1` (`status: 'available'`).
+  - Reconciled Nov 9 `SalesEntry` across both Local and Central DBs: **Total Outlet Sales: ₹16,563.00** (Cash: ₹4,465.00, UPI: ₹10,234.00, Due: ₹1,864.00). All tables are now green/available.
 
 ---

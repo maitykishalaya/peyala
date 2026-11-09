@@ -1472,19 +1472,24 @@ Whenever changes are made, run this validation suite before concluding:
       3. *Ghost Order Occupation Shield (`tables.js`)*: In `GET /api/tables`, active dining mapping now verifies whether a table with an unclosed order already has a newer order that was created and settled (`paid`) after `ord.createdAt`. If so, the superseded ghost order cannot occupy the table, keeping the table `available`.
       4. *Monotonic Daily Sales Protection (`salesReconciler.js` & `orders.js`)*: `reconcileDailySales` now protects verified daily sales and cash totals from being downgraded by secondary laptop reads or background sync sweeps. Downward revisions are strictly gated by `{ isExplicitAudit: true }` from authorized manager audit endpoints (`/settled`).
 
-  - **Outdoor 2 Settlement & Daily Sales Ledger Alignment (November 9, 2026 Audit)**:
+  - **Outdoor 1 & Outdoor 2 Final Settlements & Nov 9 Daily Sales Parity (November 9, 2026 Audit)**:
     - **Identified Operational Incident**:
-      1. User reported that Table `Outdoor 2` was showing as occupied/running in the home POS desktop application, but was already settled in UPI on the business laptop at the cafe.
-      2. Since the user was testing the new v12.1.2 installer at home first and had not yet deployed it to the cafe, the business laptop was still running the unpatched version where mutations during the inbound sync pull could be dropped from `SyncOutbox`.
+      1. User reported Table `Outdoor 2` and subsequently Table `Outdoor 1` showing as occupied/running in the home POS application after closing, despite staff settling them on the business laptop at the cafe.
+      2. The business laptop was running the unpatched v12.1.0 codebase (deployment scheduled for tomorrow morning), causing the `order` documents to drop from `SyncOutbox` while `BalanceSheet` GST logs successfully reached Central Atlas.
     - **Forensic Investigation & Exact Rupee Alignment**:
-      1. *Order Details*: Order #6189 (Bill #1380, Table Outdoor 2, Total ₹1,040.00, billed at 10:15 PM IST).
-      2. *Accounting Proof*: In Central Atlas, `BalanceSheet` already contained the GST log recorded at 10:16 PM IST (`gstAdded: ₹49.50` on `Bill #1380 - Table Outdoor 2`), and `SalesEntry` for Nov 9 already included the ₹1,040 in UPI (`outletSales: ₹15,901.00`, `upi: ₹10,172.00`, `cash: ₹3,865.00`, `due: ₹1,864.00`).
-      3. *Exact Reconciliation*: The total paid orders in Central Atlas without #6189 and #6184 summed to UPI ₹9,132 and Cash ₹3,232. Adding Order #6189 (UPI ₹1,040) brought UPI to exactly ₹10,172, and adding Order #6184 (Cash ₹633) brought Cash to exactly ₹3,865. `₹10,172 + ₹3,865 + ₹1,864 = ₹15,901.00` — 100% exact match across all payment channels!
+      1. *Order #6189 (Bill #1380, Outdoor 2)*: ₹1,040.00 settled via UPI. Central `BalanceSheet` had logged ₹49.50 GST at 10:16 PM IST.
+      2. *Order #6184 (Bill #1373, Indoor 5)*: ₹633.00 settled via Cash. Central `BalanceSheet` had logged ₹30.16 GST at 8:47 PM IST.
+      3. *Order #6197 (Bill #1385, Outdoor 1)*: ₹662.00 settled via Part Payment (Cash: ₹600.00, UPI: ₹62.00). Central `BalanceSheet` logged ₹31.50 GST at 11:24 PM IST.
+      4. *Daily Sales Alignment*:
+         - Cash Sales: `₹3,865.00 + ₹600.00 = ₹4,465.00`
+         - UPI Sales: `₹10,172.00 + ₹62.00 = ₹10,234.00`
+         - Due Sales: `₹1,864.00`
+         - Total Outlet Sales: `₹4,465 + ₹10,234 + ₹1,864 = ₹16,563.00` — 100% exact parity across both Local and Central DBs!
     - **Resolution Executed**:
-      1. Settle Order #6189 as `paid` (`paymentMethod: 'upi'`, `settledAmount: 1040`, `waivedAmount: 0`, `paidAt: 2026-11-09T16:46:47.031Z`) across both Local and Central DBs.
-      2. Freed Table `Outdoor 2` (`status: 'available'`, `activeOrder: null`) across both Local and Central DBs.
-      3. Aligned Order #6184 as `paid` (`paymentMethod: 'cash'`, `settledAmount: 633`) and freed Table `Indoor 5` across both databases.
-      4. Verified complete ledger and floor plan parity: `Outdoor 2` is green/available, `SalesEntry` stands at **₹15,901.00** (Cash: ₹3,865, UPI: ₹10,172, Due: ₹1,864).
+      1. Settle Order #6197 as `paid` (`paymentMethod: 'part'`, `paymentBreakdown: { cash: 600, upi: 62 }`, `settledAmount: 662`) and freed Table `Outdoor 1`.
+      2. Settle Order #6189 as `paid` (`paymentMethod: 'upi'`, `settledAmount: 1040`) and freed Table `Outdoor 2`.
+      3. Settle Order #6184 as `paid` (`paymentMethod: 'cash'`, `settledAmount: 633`) and freed Table `Indoor 5`.
+      4. Updated `SalesEntry` across both Local and Central DBs to **₹16,563.00** (Cash: ₹4,465, UPI: ₹10,234, Due: ₹1,864). All floor tables are now available/green.
 
 ---
-*Last Updated: November 9, 2026 (Outdoor 2 Settlement & Nov 9 Parity Reconciliation) · Peyala v12.1 Engineering*
+*Last Updated: November 9, 2026 (Outdoor 1 & Outdoor 2 Settlement & Sales Parity) · Peyala v12.1 Engineering*
