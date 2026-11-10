@@ -1,6 +1,6 @@
 **CRITICAL RULE: WHEN REQUESTED TO UPDATE OR CHANGE ANYTHING, NEVER CHANGE, BREAK, OR COMPROMISE ANY EXISTING LOGIC EVER.**
 
-# Peyala v8 — Comprehensive Memory Bank (Version 12.0.0)
+# Peyala v8 — Comprehensive Memory Bank (Version 12.1.0)
 
 > [!IMPORTANT]
 > **MANDATORY MAINTENANCE & BUILD RULES**:
@@ -27,6 +27,7 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 10. **Customer Dues & Khata Ledger System** (credit orders tracking, customer profiles, instant autocomplete, due collections, thermal receipts, and double-entry Balance Sheet asset reconciliation).
 11. **Sales Analytics & Statutory Tax Auditing** (executive business cockpit, daily pace monitoring, autonomous heuristic suggestions, delivery margin leakage auditing, and GSTR-1/3B compliant GST registers with invoice range tracking).
 12. **Local-First Performance & Multi-Device Real-Time Sync** (sub-1ms operational database reads and writes running on the cafe's local server, sub-10ms real-time WebSocket event broadcasting between floor laptops and waiter phones, background 15-minute delta outbox push to Central MongoDB Atlas, and versioned restore point system with safe 8-step rollback).
+13. **Recipe Management, Universal Unit Conversion & Automated Inventory Consumption Engine** (connecting menu items to raw materials, decimal-safe unit conversion adapter for purchases in packets/bottles/boxes/cartons, automated multi-round KOT consumption, idempotent stock movements ledger, heuristic auto-recipe generator, cancellation reversals, and admin-controlled master toggle).
 
 ---
 
@@ -630,6 +631,36 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 - **Root Cause & Hardening**:
   - `orders.js` was modified to explicitly record `salesEntryId: order._id` and `(Bill #${order.billNumber || order.orderNumber} - Table ${tableNum})` in `BalanceSheet.gstLog`.
   - `syncEngine.js` inbound order reconciliation enhanced with a multi-layered deduplication check: verifies order `_id`, `doc.billNumber`, `doc.orderNumber`, and matching outlet sales within a 60-second window before applying any GST liability increment.
+
+---
+
+### 3.30 Recipe Management, Universal Unit Conversion & Automated Inventory Consumption Engine (`/recipes`)
+- **Operational Need**: Automatically deduct raw materials from inventory upon selling menu items, eliminate manual stock entry drift, and allow purchasing in bulk packaging (packets, cartons, bottles, boxes, kg) while maintaining canonical stock in usable kitchen units (grams, ml, pieces).
+- **Core Principles & Architecture**:
+  1. **Strict Zero Existing Logic Break (Mandatory)**: All additions are additive. Historical inventory, purchases, accounts, and sales entries are never mutated.
+  2. **Admin-Controlled Master Toggle (`POSSetting.recipeInventoryAutomationEnabled`)**: Default: `false`. When disabled, the POS operates in standard manual inventory mode. When enabled, only verified and activated recipes consume inventory.
+  3. **Universal Unit Conversion Engine (`backend/src/utils/unitConverter.js` & `backend/src/models/UnitConversion.js`)**:
+     - Standard built-in metric conversions: Weight (`kg` $\leftrightarrow$ `gram`), Volume (`litre` $\leftrightarrow$ `ml`), Count (`dozen` $\leftrightarrow$ `piece`).
+     - Item-specific packaging rules: e.g. 1 Packet = 25 pieces; 1 Bottle = 750 ml; 1 Carton = 12 Bottles = 9,000 ml.
+     - Backward-compatible procurement adapter in `backend/src/routes/purchases.js`: converts received purchase units into canonical stock units before calculating Weighted Average Cost (WAC).
+  4. **Recipe Model (`backend/src/models/Recipe.js`)**:
+     - Links to `menuItem` + optional `variantName`.
+     - Supports versioning (`v1`, `v2`), yields, loss %, estimated cost calculated from current ingredient WAC, and confidence scores.
+     - Status: `draft`, `active`, `inactive`.
+  5. **Automated Recipe Generation Engine (`backend/src/services/recipeSuggestionEngine.js`)**:
+     - Evaluates all active menu items against inventory items using culinary taxonomy.
+     - Generated 289 initial draft recipes tagged strictly as `DRAFT — NOT ACTIVE` with confidence scores and requiring explicit admin review and approval before activation.
+  6. **Automated Inventory Consumption Engine (`backend/src/services/inventoryConsumptionEngine.js`)**:
+     - Triggered on KOT round creation (`POST /api/orders` Round 1 and `POST /api/orders/:id/items` add-on rounds).
+     - Direct billing fallback on `POST /api/orders/:id/pay`.
+     - Deterministic idempotency key (`order_${orderId}_item_${itemId}_rnd_${round}_inv_${invId}`) prevents duplicate deduction across retries or offline synchronization.
+     - Non-blocking shortage policy: hospitality food preparation is never halted by database stock levels.
+     - Stock reversals on soft item cancellation (`DELETE /api/orders/:id/items/:itemId`), whole order cancel (`POST /api/orders/:id/cancel`), and settled bill deletion (`DELETE /api/orders/:id/settled`).
+  7. **Immutable Movements Ledger (`backend/src/models/InventoryMovement.js`)**:
+     - Comprehensive audit trail of all automated stock deductions and reversals.
+  8. **Frontend Module (`frontend/src/app/recipes/page.tsx`)**:
+     - 4 tabbed workspaces: Recipe Directory & Builder, Unit Conversion Manager, Auto Suggestions, and Stock Movements Ledger.
+     - Added to sidebar/navigation via `AppLayout.tsx`.
 
 ---
 

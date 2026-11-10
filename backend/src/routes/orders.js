@@ -15,6 +15,7 @@ const { getNextOrderNumber } = require('../utils/orderSequence');
 const { getNextDailyKotNumber } = require('../utils/kotSequence');
 const { reconcileDailySales } = require('../utils/salesReconciler');
 const realtimeHub = require('../services/realtimeHub');
+const inventoryConsumptionEngine = require('../services/inventoryConsumptionEngine');
 
 router.use(auth);
 
@@ -1065,6 +1066,11 @@ router.post('/', staffOrAdmin, async (req, res) => {
     await table.save();
     claimedTableId = null; // Successfully bound to order
 
+    // Automated inventory consumption trigger for initial KOT round (safe & non-blocking)
+    inventoryConsumptionEngine.consumeForKotRound(order, initialKotRound, req.user).catch((err) => {
+      console.error('[Orders] Auto-consumption error on Round 1:', err.message);
+    });
+
     await log({
       user: req.user,
       action: 'CREATE',
@@ -1246,6 +1252,14 @@ async function appendItemsToOrder(order, { items, shouldPrint, isPrintStation, k
   order.effectiveActiveTime = effectivePriorityTime;
   await order.save();
 
+  // Automated inventory consumption trigger for add-on KOT round (safe & non-blocking)
+  const newlyAddedRound = order.kotRounds[order.kotRounds.length - 1];
+  if (newlyAddedRound) {
+    inventoryConsumptionEngine.consumeForKotRound(order, newlyAddedRound, user).catch((err) => {
+      console.error('[Orders] Auto-consumption error on add-on round:', err.message);
+    });
+  }
+
   if (user) {
     await log({
       user,
@@ -1358,6 +1372,11 @@ router.delete('/:id/items/:itemId', staffOrAdmin, async (req, res) => {
     order.total = totals.total;
 
     await order.save();
+
+    // Automated inventory reversal trigger for cancelled item (safe & non-blocking)
+    inventoryConsumptionEngine.reverseForCancelledItem(order, item, req.user).catch((err) => {
+      console.error('[Orders] Inventory reversal error on item cancel:', err.message);
+    });
 
     await log({
       user: req.user,
@@ -1728,6 +1747,11 @@ router.post('/:id/pay', staffOrAdmin, async (req, res) => {
 
     await order.save();
 
+    // Fallback inventory consumption for direct billing (safe & non-blocking)
+    inventoryConsumptionEngine.consumeForDirectBilling(order, req.user).catch((err) => {
+      console.error('[Orders] Auto-consumption error on billing pay:', err.message);
+    });
+
     // 2. Reconcile TODAY's single SalesEntry strictly from settled orders
     const salesEntry = await reconcileDailySales(order.paidAt, req.user._id);
 
@@ -1855,6 +1879,11 @@ router.post('/:id/cancel', staffOrAdmin, async (req, res) => {
     order.status = 'cancelled';
     order.cancelReason = finalReason;
     await order.save();
+
+    // Automated inventory reversal trigger for cancelled order (safe & non-blocking)
+    inventoryConsumptionEngine.reverseForCancelledOrder(order, req.user).catch((err) => {
+      console.error('[Orders] Inventory reversal error on order cancel:', err.message);
+    });
 
     const tableDoc = await Table.findById(order.table);
     if (tableDoc && String(tableDoc.activeOrder) === String(order._id)) {
@@ -2636,6 +2665,11 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
 
     // 3. Permanently remove the order document
     await Order.findByIdAndDelete(order._id);
+
+    // Automated inventory reversal trigger for deleted settled bill (safe & non-blocking)
+    inventoryConsumptionEngine.reverseForSettledBillDeletion(order, req.user).catch((err) => {
+      console.error('[Orders] Inventory reversal error on settled bill delete:', err.message);
+    });
 
     // 4. Reconcile Daily Sales Register for the calendar date in IST
     const orderDate = order.paidAt || order.createdAt || new Date();

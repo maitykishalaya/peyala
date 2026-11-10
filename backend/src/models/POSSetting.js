@@ -36,6 +36,11 @@ const posSettingSchema = new mongoose.Schema({
     min: 0.2, // min 12 seconds
     max: 1440, // max 24 hours
   },
+  // Master toggle for Recipe Management & Automated Inventory Consumption (default: false)
+  recipeInventoryAutomationEnabled: {
+    type: Boolean,
+    default: false,
+  },
   lastUpdatedBy: {
     type: String,
     default: null,

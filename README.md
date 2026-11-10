@@ -1156,3 +1156,6 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   - Reconciled Nov 9 `SalesEntry` across both Local and Central DBs: **Total Outlet Sales: ₹16,563.00** (Cash: ₹4,465.00, UPI: ₹10,234.00, Due: ₹1,864.00). All tables are now green/available.
 
 ---
+
+
+- **Recipe Management & Automated Inventory Consumption (`/recipes`)**: Connects menu items to raw materials, decimal-safe unit conversion adapter for bulk procurement (packets, bottles, boxes, cartons, kg) into canonical units (grams, ml, pieces), multi-round KOT auto-consumption, idempotency protection, item & order cancellation reversals, heuristic auto-recipe generator (289 draft recipes pre-seeded), and admin-controlled master toggle (`POSSetting.recipeInventoryAutomationEnabled`).

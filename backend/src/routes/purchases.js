@@ -26,6 +26,8 @@ const InventoryItem = require('../models/InventoryItem');
 const Account = require('../models/Account');
 const Supplier = require('../models/Supplier');
 const Payment = require('../models/Payment');
+const UnitConversion = require('../models/UnitConversion');
+const { convertUnit, normalizeUnit, roundPrecision } = require('../utils/unitConverter');
 const { auth } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { withOptionalTransaction } = require('../utils/transaction');
@@ -162,7 +164,7 @@ router.post('/', async (req, res) => {
     const { date, supplier, items, paidFrom, paymentMode, notes, referenceNumber } = req.body;
     const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
 
-    // Validate inventory line units against saved units
+    // Validate inventory line units and resolve canonical quantities using Unit Conversion adapter
     const itemIds = items.filter(i => i.item).map(i => i.item);
     const inventoryItems = await InventoryItem.find({ _id: { $in: itemIds } }).select('unit name');
     const unitMap = inventoryItems.reduce((map, inv) => {
@@ -170,11 +172,40 @@ router.post('/', async (req, res) => {
       return map;
     }, {});
 
-    items.forEach((line, idx) => {
-      if (line.item && unitMap[line.item.toString()] && line.unit !== unitMap[line.item.toString()]) {
-        throw new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory item unit '${unitMap[line.item.toString()]}'.`);
+    // Fetch any custom unit conversion rules for these items
+    const customConversions = await UnitConversion.find({
+      inventoryItem: { $in: itemIds },
+      isActive: true,
+    }).lean();
+
+    const conversionMap = new Map();
+    for (const rule of customConversions) {
+      conversionMap.set(`${rule.inventoryItem}_${normalizeUnit(rule.purchaseUnit)}`, rule);
+    }
+
+    const canonicalQuantities = [];
+    for (let idx = 0; idx < items.length; idx++) {
+      const line = items[idx];
+      if (!line.item) {
+        canonicalQuantities.push(line.quantity);
+        continue;
       }
-    });
+      const invUnit = unitMap[line.item.toString()];
+      const normLineUnit = normalizeUnit(line.unit);
+      const normInvUnit = normalizeUnit(invUnit);
+
+      if (normLineUnit === normInvUnit) {
+        canonicalQuantities.push(line.quantity);
+      } else {
+        const customRule = conversionMap.get(`${line.item}_${normLineUnit}`);
+        const conv = convertUnit(line.quantity, line.unit, invUnit, customRule?.conversionFactor);
+        if (conv.success) {
+          canonicalQuantities.push(conv.quantity);
+        } else {
+          throw new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory item unit '${invUnit}'. ${conv.error || 'No valid unit conversion rule configured.'}`);
+        }
+      }
+    }
 
     // Is this a credit/due purchase?
     const isDue = paymentMode === 'due';
@@ -193,17 +224,19 @@ router.post('/', async (req, res) => {
       createdBy: req.user._id,
     });
 
-    // Update inventory stock (weighted average cost)
-    for (const item of items) {
+    // Update inventory stock (weighted average cost in canonical stock units)
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const canonicalQty = canonicalQuantities[i];
       const inv = await InventoryItem.findById(item.item);
       if (inv) {
         const oldTotal = inv.currentStock * inv.averageCost;
-        const newQty = inv.currentStock + item.quantity;
-        const newAvg = newQty > 0 ? (oldTotal + item.totalPrice) / newQty : item.pricePerUnit;
+        const newQty = inv.currentStock + canonicalQty;
+        const newAvg = newQty > 0 ? (oldTotal + item.totalPrice) / newQty : (item.totalPrice / (canonicalQty || 1));
         await InventoryItem.findByIdAndUpdate(item.item, {
-          $inc: { currentStock: item.quantity },
+          $inc: { currentStock: canonicalQty },
           lastPurchasePrice: item.pricePerUnit,
-          averageCost: newAvg,
+          averageCost: roundPrecision(newAvg, 4),
         });
       }
     }
@@ -529,9 +562,21 @@ router.delete('/:id', async (req, res) => {
     const purchase = await PurchaseEntry.findById(req.params.id);
     if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
 
-    // Reverse inventory
+    // Reverse inventory (using canonical stock units)
     for (const item of purchase.items) {
-      await InventoryItem.findByIdAndUpdate(item.item, { $inc: { currentStock: -item.quantity } });
+      if (!item.item) continue;
+      const inv = await InventoryItem.findById(item.item).select('unit');
+      let reverseQty = item.quantity;
+      if (inv && normalizeUnit(item.unit) !== normalizeUnit(inv.unit)) {
+        const customRule = await UnitConversion.findOne({
+          inventoryItem: item.item,
+          purchaseUnit: normalizeUnit(item.unit),
+          isActive: true,
+        }).lean();
+        const conv = convertUnit(item.quantity, item.unit, inv.unit, customRule?.conversionFactor);
+        if (conv.success) reverseQty = conv.quantity;
+      }
+      await InventoryItem.findByIdAndUpdate(item.item, { $inc: { currentStock: -reverseQty } });
     }
 
     // Reverse account if paid

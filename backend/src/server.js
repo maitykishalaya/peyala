@@ -81,6 +81,8 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/sync', require('./routes/sync'));
 app.use('/api/maintenance', require('./routes/maintenance'));
 app.use('/api/pos-settings', require('./routes/posSettings'));
+app.use('/api/recipes', require('./routes/recipes'));
+app.use('/api/unit-conversions', require('./routes/unitConversions'));
 
 // Health check endpoints for Render, Docker, and local pinging
 const mongoose = require('mongoose');

@@ -369,6 +369,7 @@ export interface POSSetting {
   maxWaiveStaffPercent: number;
   maxWaiveManagerPercent: number;
   dbSyncIntervalMinutes?: number;
+  recipeInventoryAutomationEnabled?: boolean;
   lastUpdatedBy?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -384,6 +385,76 @@ export const syncApi = {
   trigger: () => api.post<any>('/sync/trigger'),
   getOutbox: (params?: { limit?: number; status?: string }) => api.get<any>('/sync/outbox', { params }),
   updateInterval: (intervalMinutes: number) => api.put<any>('/sync/interval', { intervalMinutes }),
+};
+
+export interface RecipeIngredient {
+  inventoryItem: any;
+  ingredientName: string;
+  recipeQuantity: number;
+  recipeUnit: string;
+  canonicalQuantity: number;
+  canonicalUnit: string;
+  lossPercent?: number;
+  notes?: string;
+}
+
+export interface Recipe {
+  _id: string;
+  menuItem: any;
+  variantName?: string | null;
+  name: string;
+  version: number;
+  status: 'draft' | 'active' | 'inactive';
+  confidenceScore?: number;
+  generationSource?: 'manual' | 'auto_generated' | 'duplicate';
+  prepYield: number;
+  preparationLossPercent: number;
+  ingredients: RecipeIngredient[];
+  estimatedCost: number;
+  notes?: string;
+  lastApprovedBy?: any;
+  lastApprovedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UnitConversionRule {
+  _id: string;
+  inventoryItem: any;
+  canonicalUnit: string;
+  purchaseUnit: string;
+  conversionFactor: number;
+  packageSize?: number;
+  packageLabel?: string;
+  notes?: string;
+  isActive: boolean;
+}
+
+export const recipesApi = {
+  list: (params?: { status?: string; menuItem?: string; search?: string }) =>
+    api.get<Recipe[]>('/recipes', { params }),
+  get: (id: string) => api.get<Recipe>(`/recipes/${id}`),
+  create: (data: Partial<Recipe>) => api.post<Recipe>('/recipes', data),
+  update: (id: string, data: Partial<Recipe>) => api.put<Recipe>(`/recipes/${id}`, data),
+  delete: (id: string) => api.delete<{ message: string }>(`/recipes/${id}`),
+  activate: (id: string) => api.post<{ message: string; recipe: Recipe }>(`/recipes/${id}/activate`),
+  deactivate: (id: string) => api.post<{ message: string; recipe: Recipe }>(`/recipes/${id}/deactivate`),
+  generateSuggestions: (data?: { menuItemId?: string }) =>
+    api.post<{ message: string; result: any }>('/recipes/generate-suggestions', data || {}),
+  getSummary: () => api.get<any>('/recipes/stats/summary'),
+  getMovements: (params?: { page?: number; limit?: number; inventoryItem?: string; orderId?: string; movementType?: string }) =>
+    api.get<any>('/recipes/movements/ledger', { params }),
+};
+
+export const unitConversionsApi = {
+  list: (params?: { inventoryItem?: string }) =>
+    api.get<UnitConversionRule[]>('/unit-conversions', { params }),
+  get: (id: string) => api.get<UnitConversionRule>(`/unit-conversions/${id}`),
+  create: (data: Partial<UnitConversionRule>) => api.post<UnitConversionRule>('/unit-conversions', data),
+  update: (id: string, data: Partial<UnitConversionRule>) => api.put<UnitConversionRule>(`/unit-conversions/${id}`, data),
+  delete: (id: string) => api.delete<{ message: string }>(`/unit-conversions/${id}`),
+  test: (data: { quantity: number; fromUnit: string; toUnit: string; customConversionFactor?: number }) =>
+    api.post<any>('/unit-conversions/test', data),
 };
 
 

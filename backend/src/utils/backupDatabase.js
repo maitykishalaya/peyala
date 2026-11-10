@@ -4,11 +4,12 @@ const fs = require('fs');
 const path = require('path');
 
 const models = [
-  'Account', 'Attendance', 'AuditLog', 'BalanceSheet',
-  'InventoryCategory', 'InventoryItem', 'MenuCategory', 'MenuItem',
-  'Order', 'OwnerNote', 'Payment', 'PaymentCategory',
-  'PurchaseEntry', 'SalesEntry', 'Staff', 'Supplier',
-  'Table', 'Transfer', 'User'
+  'Account', 'Addon', 'Attendance', 'AuditLog', 'BalanceSheet',
+  'Customer', 'CustomerDuePayment', 'InventoryCategory', 'InventoryItem',
+  'InventoryMovement', 'InventorySnapshot', 'MenuCategory', 'MenuItem',
+  'Order', 'OwnerNote', 'Payment', 'PaymentCategory', 'POSSetting',
+  'PurchaseEntry', 'Recipe', 'SalesEntry', 'Staff', 'Supplier',
+  'Table', 'TableCategory', 'Transfer', 'UnitConversion', 'User', 'Wastage'
 ];
 
 async function backup() {

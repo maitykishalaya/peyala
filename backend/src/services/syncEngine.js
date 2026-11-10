@@ -681,6 +681,9 @@ class SyncEngine {
       staff: 'staffs',
       balancesheet: 'balancesheets',
       auditlog: 'auditlogs',
+      recipe: 'recipes',
+      unitconversion: 'unitconversions',
+      inventorymovement: 'inventorymovements',
     };
     const lower = modelName.toLowerCase();
     if (map[lower]) return map[lower];

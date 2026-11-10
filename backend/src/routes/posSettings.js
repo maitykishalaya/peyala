@@ -24,6 +24,7 @@ router.put('/', adminOnly, async (req, res) => {
       maxWaiveStaffPercent,
       maxWaiveManagerPercent,
       dbSyncIntervalMinutes,
+      recipeInventoryAutomationEnabled,
     } = req.body;
 
     const setting = await POSSetting.getSingleton();
@@ -68,6 +69,10 @@ router.put('/', adminOnly, async (req, res) => {
       setting.dbSyncIntervalMinutes = Math.round(v * 10) / 10;
       const syncEngine = require('../services/syncEngine');
       syncEngine.setIntervalMinutes(setting.dbSyncIntervalMinutes);
+    }
+
+    if (recipeInventoryAutomationEnabled !== undefined) {
+      setting.recipeInventoryAutomationEnabled = Boolean(recipeInventoryAutomationEnabled);
     }
 
     setting.lastUpdatedBy = req.user.name;

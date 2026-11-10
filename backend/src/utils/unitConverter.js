@@ -1,0 +1,209 @@
+/**
+ * Peyala POS — Universal Unit Conversion Engine
+ * Decimal-safe unit normalization and conversion between purchase, stock, and recipe units.
+ */
+
+// Canonical alias map
+const UNIT_ALIASES = {
+  // Weight
+  'kg': 'kg',
+  'kgs': 'kg',
+  'kilo': 'kg',
+  'kilogram': 'kg',
+  'kilograms': 'kg',
+  'g': 'gram',
+  'gm': 'gram',
+  'gms': 'gram',
+  'gram': 'gram',
+  'grams': 'gram',
+  'mg': 'mg',
+  'milligram': 'mg',
+  'milligrams': 'mg',
+
+  // Volume
+  'l': 'litre',
+  'ltr': 'litre',
+  'liter': 'litre',
+  'liters': 'litre',
+  'litre': 'litre',
+  'litres': 'litre',
+  'ml': 'ml',
+  'millilitre': 'ml',
+  'millilitres': 'ml',
+  'milliliter': 'ml',
+  'milliliters': 'ml',
+
+  // Count / Discrete
+  'pc': 'piece',
+  'pcs': 'piece',
+  'piece': 'piece',
+  'pieces': 'piece',
+  'portion': 'piece',
+  'portions': 'piece',
+  'slice': 'piece',
+  'slices': 'piece',
+  'plate': 'piece',
+  'plates': 'piece',
+  'dozen': 'dozen',
+  'dozens': 'dozen',
+  'dz': 'dozen',
+
+  // Packaging
+  'packet': 'packet',
+  'packets': 'packet',
+  'pkt': 'packet',
+  'pkts': 'packet',
+  'bottle': 'bottle',
+  'bottles': 'bottle',
+  'btl': 'bottle',
+  'btls': 'bottle',
+  'box': 'box',
+  'boxes': 'box',
+  'carton': 'carton',
+  'cartons': 'carton',
+  'can': 'can',
+  'cans': 'can',
+  'tin': 'tin',
+  'tins': 'tin',
+  'cup': 'cup',
+  'cups': 'cup',
+};
+
+// Built-in standard metric conversion multipliers (to base canonical unit)
+// Weight base: gram
+const WEIGHT_TO_GRAM = {
+  'kg': 1000,
+  'gram': 1,
+  'mg': 0.001,
+};
+
+// Volume base: ml
+const VOLUME_TO_ML = {
+  'litre': 1000,
+  'ml': 1,
+};
+
+// Count base: piece
+const COUNT_TO_PIECE = {
+  'dozen': 12,
+  'piece': 1,
+};
+
+/**
+ * Normalize any unit string to its canonical representation.
+ */
+function normalizeUnit(unit) {
+  if (!unit || typeof unit !== 'string') return '';
+  const clean = unit.trim().toLowerCase();
+  return UNIT_ALIASES[clean] || clean;
+}
+
+/**
+ * Determine the physical measurement dimension of a unit ('weight', 'volume', 'count', or 'custom').
+ */
+function getUnitDimension(unit) {
+  const norm = normalizeUnit(unit);
+  if (WEIGHT_TO_GRAM[norm]) return 'weight';
+  if (VOLUME_TO_ML[norm]) return 'volume';
+  if (COUNT_TO_PIECE[norm]) return 'count';
+  return 'custom';
+}
+
+/**
+ * Check if two units belong to the same dimension and can be converted without an item-specific custom factor.
+ */
+function areDirectlyCompatible(fromUnit, toUnit) {
+  const normFrom = normalizeUnit(fromUnit);
+  const normTo = normalizeUnit(toUnit);
+  if (normFrom === normTo) return true;
+
+  const dimFrom = getUnitDimension(normFrom);
+  const dimTo = getUnitDimension(normTo);
+  return dimFrom !== 'custom' && dimFrom === dimTo;
+}
+
+/**
+ * Convert quantity from one unit to another.
+ * 
+ * Supports:
+ * 1. Identical units: returns same quantity
+ * 2. Standard metric conversion (kg <-> gram, litre <-> ml, dozen <-> piece)
+ * 3. Item-specific custom conversion factor (e.g. 1 packet = 25 pieces, 1 bottle = 750 ml)
+ *
+ * @param {number} quantity - Quantity to convert
+ * @param {string} fromUnit - Source unit
+ * @param {string} toUnit - Target unit
+ * @param {number|null} customConversionFactor - Multiplier if fromUnit is a package of toUnit (e.g. 25 pieces per packet)
+ * @returns {{ success: boolean, quantity: number, factor: number, error?: string }}
+ */
+function convertUnit(quantity, fromUnit, toUnit, customConversionFactor = null) {
+  const qty = Number(quantity);
+  if (isNaN(qty)) {
+    return { success: false, quantity: 0, factor: 0, error: `Invalid quantity: ${quantity}` };
+  }
+
+  const normFrom = normalizeUnit(fromUnit);
+  const normTo = normalizeUnit(toUnit);
+
+  // 1. Same unit
+  if (normFrom === normTo) {
+    return { success: true, quantity: roundPrecision(qty, 6), factor: 1 };
+  }
+
+  // 2. Direct standard metric conversion: Weight (kg <-> gram <-> mg)
+  if (WEIGHT_TO_GRAM[normFrom] && WEIGHT_TO_GRAM[normTo]) {
+    const inGrams = qty * WEIGHT_TO_GRAM[normFrom];
+    const targetQty = inGrams / WEIGHT_TO_GRAM[normTo];
+    const factor = WEIGHT_TO_GRAM[normFrom] / WEIGHT_TO_GRAM[normTo];
+    return { success: true, quantity: roundPrecision(targetQty, 6), factor: roundPrecision(factor, 6) };
+  }
+
+  // 3. Direct standard metric conversion: Volume (litre <-> ml)
+  if (VOLUME_TO_ML[normFrom] && VOLUME_TO_ML[normTo]) {
+    const inMl = qty * VOLUME_TO_ML[normFrom];
+    const targetQty = inMl / VOLUME_TO_ML[normTo];
+    const factor = VOLUME_TO_ML[normFrom] / VOLUME_TO_ML[normTo];
+    return { success: true, quantity: roundPrecision(targetQty, 6), factor: roundPrecision(factor, 6) };
+  }
+
+  // 4. Direct standard count conversion: dozen <-> piece
+  if (COUNT_TO_PIECE[normFrom] && COUNT_TO_PIECE[normTo]) {
+    const inPieces = qty * COUNT_TO_PIECE[normFrom];
+    const targetQty = inPieces / COUNT_TO_PIECE[normTo];
+    const factor = COUNT_TO_PIECE[normFrom] / COUNT_TO_PIECE[normTo];
+    return { success: true, quantity: roundPrecision(targetQty, 6), factor: roundPrecision(factor, 6) };
+  }
+
+  // 5. Item-specific custom conversion
+  // e.g. 1 packet = 25 pieces -> factor = 25. Converting 2 packets to pieces -> 2 * 25 = 50 pieces.
+  // Converting 50 pieces to packets -> 50 / 25 = 2 packets.
+  if (customConversionFactor && typeof customConversionFactor === 'number' && customConversionFactor > 0) {
+    // If fromUnit is the package (e.g. packet) and toUnit is canonical (e.g. piece):
+    const targetQty = qty * customConversionFactor;
+    return { success: true, quantity: roundPrecision(targetQty, 6), factor: customConversionFactor };
+  }
+
+  return {
+    success: false,
+    quantity: qty,
+    factor: 1,
+    error: `Cannot convert directly between '${fromUnit}' and '${toUnit}' without a custom conversion factor configured.`
+  };
+}
+
+/**
+ * Decimal-safe rounding to prevent IEEE 754 floating point precision drift.
+ */
+function roundPrecision(val, decimals = 4) {
+  const factor = Math.pow(10, decimals);
+  return Math.round((val + Number.EPSILON) * factor) / factor;
+}
+
+module.exports = {
+  UNIT_ALIASES,
+  normalizeUnit,
+  getUnitDimension,
+  areDirectlyCompatible,
+  convertUnit,
+  roundPrecision,
+};
