@@ -97,3 +97,4 @@ const syncPlugin = require('../utils/syncPlugin');
 inventoryMovementSchema.plugin(syncPlugin, { modelName: 'InventoryMovement' });
 
 module.exports = mongoose.model('InventoryMovement', inventoryMovementSchema);
+

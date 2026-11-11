@@ -60,3 +60,4 @@ const syncPlugin = require('../utils/syncPlugin');
 unitConversionSchema.plugin(syncPlugin, { modelName: 'UnitConversion' });
 
 module.exports = mongoose.model('UnitConversion', unitConversionSchema);
+

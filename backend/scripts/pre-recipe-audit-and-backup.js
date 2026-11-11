@@ -177,3 +177,4 @@ runAuditAndBackup().catch(err => {
   console.error('Audit and backup failed:', err);
   process.exit(1);
 });
+

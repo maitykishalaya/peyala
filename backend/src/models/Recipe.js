@@ -131,3 +131,4 @@ const syncPlugin = require('../utils/syncPlugin');
 recipeSchema.plugin(syncPlugin, { modelName: 'Recipe' });
 
 module.exports = mongoose.model('Recipe', recipeSchema);
+
