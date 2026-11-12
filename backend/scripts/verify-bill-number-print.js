@@ -40,3 +40,4 @@ if (!ordersContent.includes('for (const order of pendingOrders) {') || !ordersCo
 console.log('✅ orders.js: pending-bills ensures billNumber is allocated for all queued prints.');
 
 console.log('\n🎉 ALL CHECKS PASSED SUCCESSFULLY!');
+
