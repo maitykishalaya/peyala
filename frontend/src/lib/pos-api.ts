@@ -430,7 +430,7 @@ export const ordersApi = {
   getPendingBills: () =>
     api.get<PendingBillJob[]>('/orders/pending-bills'),
   markBillPrinted: (orderId: string, seq?: number) =>
-    api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/mark-bill-printed`, { seq }),
+    api.post<{ success: boolean; message: string; orderId: string; billNumber?: number }>(`/orders/${orderId}/mark-bill-printed`, { seq }),
   queueBillPrint: (orderId: string) =>
     api.post<{ success: boolean; message: string; orderId: string }>(`/orders/${orderId}/queue-bill-print`),
   updateSettled: (id: string, data: UpdateSettledOrderPayload) =>

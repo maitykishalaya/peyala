@@ -1157,5 +1157,13 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
 
 ---
 
+### 20. Printed Bill Number Parity & Thermal Print Sequence Resolution (November 12, 2026)
+- **Root Cause Eliminated**:
+  - Direct prints from the POS table view invoked `handlePrintCustomerBill()` in the browser before `ordersApi.markBillPrinted()` could allocate the quarterly `billNumber` on the backend.
+  - In `thermal-print.ts`, line 656 fell back to printing the order number (`orderNumber.slice(-4)`, e.g., `6265`) whenever `data.billNumber` was not yet populated.
+- **Architectural Safeguards Deployed**:
+  1. Removed `orderNumber` fallback from the "Bill Number" label in `thermal-print.ts`, guaranteeing strict rendering of the official sequential `billNumber` (e.g., `1452`).
+  2. Pre-allocated `billNumber` via `markBillPrinted()` in `tables/page.tsx` before dispatching thermal bills to the physical printer.
+  3. Added queue invariant in `backend/src/routes/orders.js` (`GET /pending-bills`) ensuring all mobile-queued print jobs have official bill numbers allocated before reaching the counter printer.
 
 - **Recipe Management & Automated Inventory Consumption (`/recipes`)**: Connects menu items to raw materials, decimal-safe unit conversion adapter for bulk procurement (packets, bottles, boxes, cartons, kg) into canonical units (grams, ml, pieces), multi-round KOT auto-consumption, idempotency protection, item & order cancellation reversals, heuristic auto-recipe generator (289 draft recipes pre-seeded), and admin-controlled master toggle (`POSSetting.recipeInventoryAutomationEnabled`).

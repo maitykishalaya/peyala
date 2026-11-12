@@ -653,7 +653,7 @@ export function generateBillHtml(data: BillPrintData): string {
           <tr>
             <td style="width: 50%;">
               <div style="color: #666; font-size: 9.5px;">Bill Number</div>
-              <div style="font-weight: 700;">${data.billNumber ? String(data.billNumber) : (data.orderNumber ? String(data.orderNumber).slice(-4) : '—')}${data.isReprint ? ' (REPRINT)' : ''}</div>
+              <div style="font-weight: 700;">${data.billNumber ? String(data.billNumber) : '—'}${data.isReprint ? ' (REPRINT)' : ''}</div>
             </td>
             <td style="width: 50%;">
               <div style="color: #666; font-size: 9.5px;">Date</div>

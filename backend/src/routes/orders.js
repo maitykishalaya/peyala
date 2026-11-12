@@ -297,6 +297,13 @@ router.get('/pending-bills', async (req, res) => {
       .populate('customer', 'name phone address totalDue')
       .sort({ billPrintQueuedAt: 1, updatedAt: 1 });
 
+    for (const order of pendingOrders) {
+      if (!order.billNumber) {
+        await ensureOrderBillNumber(order, order.billedAt || order.billPrintQueuedAt || new Date());
+        await order.save();
+      }
+    }
+
     const pending = pendingOrders.map((order) => {
       const activeItems = (order.items || [])
         .filter((i) => i.status !== 'cancelled')

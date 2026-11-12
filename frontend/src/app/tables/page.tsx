@@ -1328,11 +1328,16 @@ export default function TablesPage() {
         return;
       }
       if (isPrintStation || printMode === 'test') {
-        handlePrintCustomerBill(ord);
+        let billNum = ord.billNumber;
         try {
-          await ordersApi.markBillPrinted(ord._id);
+          const printRes = await ordersApi.markBillPrinted(ord._id);
+          if (printRes.data?.billNumber) {
+            billNum = printRes.data.billNumber;
+          }
         } catch (e) {}
-        toast.success(`Printing customer bill for Table ${table.tableNumber}`);
+        const orderWithBill = { ...ord, billNumber: billNum, status: 'billed' as const, billPrinted: true };
+        handlePrintCustomerBill(orderWithBill);
+        toast.success(`Printing customer bill #${billNum || ''} for Table ${table.tableNumber}`);
       } else {
         await ordersApi.queueBillPrint(ord._id);
         const printMsg = `Customer bill for Table ${table.tableNumber} sent to Counter Printer 🖨️`;
@@ -1794,9 +1799,18 @@ export default function TablesPage() {
 
       if (shouldPrintBill) {
         if (isPrintStation || printMode === 'test') {
+          if (!finalOrder.billNumber) {
+            try {
+              const printRes = await ordersApi.markBillPrinted(finalOrder._id);
+              if (printRes.data?.billNumber) {
+                finalOrder = { ...finalOrder, billNumber: printRes.data.billNumber, status: 'billed' as const, billPrinted: true };
+              }
+            } catch (e) {}
+          } else {
+            ordersApi.markBillPrinted(finalOrder._id).catch(() => {});
+          }
           handlePrintCustomerBill(finalOrder);
-          ordersApi.markBillPrinted(finalOrder._id).catch(() => {});
-          toast.success(`Printing customer bill for Table ${tableLabel}`);
+          toast.success(`Printing customer bill #${finalOrder.billNumber || ''} for Table ${tableLabel}`);
         } else {
           await ordersApi.queueBillPrint(finalOrder._id);
           const printMsg = `Customer bill for Table ${tableLabel} sent to Counter Printer 🖨️`;
@@ -4407,11 +4421,20 @@ export default function TablesPage() {
                     <button
                       onClick={async () => {
                         if (isPrintStation || printMode === 'test') {
-                          handlePrintCustomerBill();
                           try {
-                            await ordersApi.markBillPrinted(activeOrder._id);
-                          } catch (e) {}
-                          toast.success(`Printing customer bill for Table ${selectedTable?.tableNumber || ''}`);
+                            const printRes = await ordersApi.markBillPrinted(activeOrder._id);
+                            const allocatedBillNum = printRes.data?.billNumber || activeOrder.billNumber;
+                            const orderWithBill = {
+                              ...activeOrder,
+                              billNumber: allocatedBillNum,
+                              status: 'billed' as const,
+                              billPrinted: true,
+                            };
+                            handlePrintCustomerBill(orderWithBill);
+                            toast.success(`Printing customer bill #${allocatedBillNum || ''} for Table ${selectedTable?.tableNumber || ''}`);
+                          } catch (e: any) {
+                            handlePrintCustomerBill(activeOrder);
+                          }
                           await loadData();
                         } else {
                           try {

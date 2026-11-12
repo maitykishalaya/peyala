@@ -1522,5 +1522,15 @@ Whenever changes are made, run this validation suite before concluding:
       3. Settle Order #6184 as `paid` (`paymentMethod: 'cash'`, `settledAmount: 633`) and freed Table `Indoor 5`.
       4. Updated `SalesEntry` across both Local and Central DBs to **₹16,563.00** (Cash: ₹4,465, UPI: ₹10,234, Due: ₹1,864). All floor tables are now available/green.
 
+- **v12.1.1 Printed Bill Number Parity & Thermal Print Sequence Resolution (November 12, 2026)**:
+  - **Identified Operational Incident**:
+    1. On printed customer bills, the order number (e.g., `6265`) was getting printed as the "Bill Number" instead of the official system bill number (e.g., `1452`).
+    2. *Thermal Print Timing*: In `frontend/src/app/tables/page.tsx` (`handleQuickPrintFromTable`, modal "Print Bill" button, and `handleSaveOrder`), `handlePrintCustomerBill()` was being invoked in the browser *before* `ordersApi.markBillPrinted()` was completed on the backend. Because active dining orders acquire their official sequential quarterly `billNumber` only upon billing/printing, `data.billNumber` was `undefined` at the exact instant the HTML slip was rendered.
+    3. *Order Number Fallback in Thermal Template*: In `frontend/src/lib/thermal-print.ts`, line 656 fell back to `(data.orderNumber ? String(data.orderNumber).slice(-4) : '—')` when `data.billNumber` was absent, printing the order number (`6265`) on the customer slip while the server allocated `1452` a fraction of a second later.
+  - **Resolution & Architecture Safeguards (Zero Logic Changes)**:
+    1. *Strict Bill Number Rendering*: In `thermal-print.ts`, removed the orderNumber fallback from the "Bill Number" field: `${data.billNumber ? String(data.billNumber) : '—'}`. It strictly displays the official bill number.
+    2. *Pre-Allocation on Print*: In `tables/page.tsx`, `ordersApi.markBillPrinted()` is now awaited *before* rendering the thermal bill. The official sequential `billNumber` returned by the server is passed into `handlePrintCustomerBill()`, guaranteeing the printed slip always matches the system.
+    3. *Pending Bills Queue Invariant*: In `backend/src/routes/orders.js` (`GET /pending-bills`), added an automatic sweep ensuring every order returned in `pending-bills` has an official `billNumber` allocated via `ensureOrderBillNumber()`.
+
 ---
-*Last Updated: November 9, 2026 (Outdoor 1 & Outdoor 2 Settlement & Sales Parity) · Peyala v12.1 Engineering*
+*Last Updated: November 12, 2026 (v12.1.1 Bill Number Thermal Printing Parity) · Peyala v12.1 Engineering*
