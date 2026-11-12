@@ -49,6 +49,7 @@ router.post('/', managerOrAdmin, async (req, res) => {
       conversionFactor,
       packageSize,
       packageLabel,
+      convertExistingStock,
       notes,
     } = req.body;
 
@@ -68,10 +69,19 @@ router.post('/', managerOrAdmin, async (req, res) => {
     if (!normPurchase) {
       return res.status(400).json({ message: 'purchaseUnit is required' });
     }
+    if (!normCanonical) {
+      return res.status(400).json({ message: 'canonicalUnit (consumption unit) is required' });
+    }
 
     const factor = Number(conversionFactor);
     if (isNaN(factor) || factor <= 0) {
       return res.status(400).json({ message: 'conversionFactor must be a positive number' });
+    }
+
+    if (normPurchase === normCanonical && factor !== 1) {
+      return res.status(400).json({
+        message: `Purchase unit and consumption unit cannot be identical ('${normPurchase}') when conversion factor is ${factor}. Example: Purchase unit 'box' and consumption unit 'bottle'.`
+      });
     }
 
     // Upsert or update existing rule for this item + purchase unit
@@ -84,7 +94,7 @@ router.post('/', managerOrAdmin, async (req, res) => {
       rule.canonicalUnit = normCanonical;
       rule.conversionFactor = factor;
       rule.packageSize = Number(packageSize) || factor;
-      rule.packageLabel = packageLabel || rule.packageLabel;
+      rule.packageLabel = packageLabel || `1 ${normPurchase} = ${factor} ${normCanonical}`;
       rule.notes = notes !== undefined ? notes : rule.notes;
       rule.isActive = true;
       rule.updatedBy = req.user._id;
@@ -104,6 +114,41 @@ router.post('/', managerOrAdmin, async (req, res) => {
       });
     }
 
+    // Align linked inventory item stock and unit if requested or if item unit was purchase unit
+    let inventoryModified = false;
+    const shouldConvertStock = Boolean(convertExistingStock) || (inv.unit === normPurchase && factor > 1);
+
+    if (inv.unit !== normCanonical) {
+      inv.unit = normCanonical;
+      inventoryModified = true;
+    }
+
+    if (shouldConvertStock && factor > 1) {
+      inv.currentStock = Math.round((inv.currentStock * factor + Number.EPSILON) * 10000) / 10000;
+      if (inv.averageCost > 0) {
+        inv.averageCost = Math.round((inv.averageCost / factor + Number.EPSILON) * 10000) / 10000;
+      }
+      if (inv.lastPurchasePrice > 0) {
+        inv.lastPurchasePrice = Math.round((inv.lastPurchasePrice / factor + Number.EPSILON) * 10000) / 10000;
+      }
+      inventoryModified = true;
+    }
+
+    if (inventoryModified) {
+      await inv.save();
+      try {
+        const realtimeHub = require('../services/realtimeHub');
+        realtimeHub.broadcast('STOCK_LEVEL_UPDATED', {
+          itemId: inv._id,
+          currentStock: inv.currentStock,
+          unit: inv.unit,
+          averageCost: inv.averageCost,
+        });
+      } catch (err) {
+        console.warn('[UnitConversion] WebSocket broadcast warning:', err.message);
+      }
+    }
+
     await log({
       user: req.user,
       action: 'CREATE',
@@ -112,7 +157,7 @@ router.post('/', managerOrAdmin, async (req, res) => {
     });
 
     const populated = await UnitConversion.findById(rule._id)
-      .populate('inventoryItem', 'name unit currentStock averageCost');
+      .populate('inventoryItem', 'name unit currentStock averageCost lastPurchasePrice');
 
     res.status(201).json(populated);
   } catch (err) {
@@ -142,6 +187,13 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
     if (req.body.canonicalUnit !== undefined) {
       rule.canonicalUnit = normalizeUnit(req.body.canonicalUnit);
     }
+
+    if (rule.purchaseUnit === rule.canonicalUnit && rule.conversionFactor !== 1) {
+      return res.status(400).json({
+        message: `Purchase unit and consumption unit cannot be identical ('${rule.purchaseUnit}') when conversion factor is ${rule.conversionFactor}. Example: Purchase unit 'box' and consumption unit 'bottle'.`
+      });
+    }
+
     if (req.body.packageSize !== undefined) {
       rule.packageSize = Number(req.body.packageSize) || rule.conversionFactor;
     }
@@ -158,6 +210,44 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
 
     await rule.save();
 
+    // Check inventory item updates if convertExistingStock requested or canonical unit modified
+    const inv = await InventoryItem.findById(rule.inventoryItem);
+    if (inv) {
+      let inventoryModified = false;
+      const shouldConvertStock = Boolean(req.body.convertExistingStock);
+
+      if (inv.unit !== rule.canonicalUnit) {
+        inv.unit = rule.canonicalUnit;
+        inventoryModified = true;
+      }
+
+      if (shouldConvertStock && rule.conversionFactor > 1) {
+        inv.currentStock = Math.round((inv.currentStock * rule.conversionFactor + Number.EPSILON) * 10000) / 10000;
+        if (inv.averageCost > 0) {
+          inv.averageCost = Math.round((inv.averageCost / rule.conversionFactor + Number.EPSILON) * 10000) / 10000;
+        }
+        if (inv.lastPurchasePrice > 0) {
+          inv.lastPurchasePrice = Math.round((inv.lastPurchasePrice / rule.conversionFactor + Number.EPSILON) * 10000) / 10000;
+        }
+        inventoryModified = true;
+      }
+
+      if (inventoryModified) {
+        await inv.save();
+        try {
+          const realtimeHub = require('../services/realtimeHub');
+          realtimeHub.broadcast('STOCK_LEVEL_UPDATED', {
+            itemId: inv._id,
+            currentStock: inv.currentStock,
+            unit: inv.unit,
+            averageCost: inv.averageCost,
+          });
+        } catch (err) {
+          console.warn('[UnitConversion] WebSocket broadcast warning:', err.message);
+        }
+      }
+    }
+
     await log({
       user: req.user,
       action: 'UPDATE',
@@ -166,7 +256,7 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
     });
 
     const populated = await UnitConversion.findById(rule._id)
-      .populate('inventoryItem', 'name unit currentStock averageCost');
+      .populate('inventoryItem', 'name unit currentStock averageCost lastPurchasePrice');
 
     res.json(populated);
   } catch (err) {
@@ -201,8 +291,8 @@ router.delete('/:id', managerOrAdmin, async (req, res) => {
 
 // ── POST /api/unit-conversions/test: Live converter test ──────────
 router.post('/test', (req, res) => {
-  const { quantity, fromUnit, toUnit, customConversionFactor } = req.body;
-  const result = convertUnit(quantity, fromUnit, toUnit, customConversionFactor);
+  const { quantity, fromUnit, toUnit, customConversionFactor, rulePurchaseUnit, ruleCanonicalUnit } = req.body;
+  const result = convertUnit(quantity, fromUnit, toUnit, customConversionFactor, rulePurchaseUnit, ruleCanonicalUnit);
   res.json(result);
 });
 

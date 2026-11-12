@@ -641,8 +641,15 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   2. **Admin-Controlled Master Toggle (`POSSetting.recipeInventoryAutomationEnabled`)**: Default: `false`. When disabled, the POS operates in standard manual inventory mode. When enabled, only verified and activated recipes consume inventory.
   3. **Universal Unit Conversion Engine (`backend/src/utils/unitConverter.js` & `backend/src/models/UnitConversion.js`)**:
      - Standard built-in metric conversions: Weight (`kg` $\leftrightarrow$ `gram`), Volume (`litre` $\leftrightarrow$ `ml`), Count (`dozen` $\leftrightarrow$ `piece`).
-     - Item-specific packaging rules: e.g. 1 Packet = 25 pieces; 1 Bottle = 750 ml; 1 Carton = 12 Bottles = 9,000 ml.
-     - Backward-compatible procurement adapter in `backend/src/routes/purchases.js`: converts received purchase units into canonical stock units before calculating Weighted Average Cost (WAC).
+     - Item-specific packaging rules: e.g. 1 Box = 15 Bottles; 1 Packet = 25 pieces; 1 Bottle = 750 ml; 1 Carton = 12 Bottles = 9,000 ml.
+     - **Decoupled Purchase vs. Consumption Units**:
+       - Raw materials maintain inventory stock, weighted average cost (WAC), and recipe consumption in **canonical consumption units** (e.g. `bottle`, `piece`, `gram`, `ml`).
+       - Suppliers are billed in original **purchase units** (e.g. `box`, `carton`, `packet`).
+       - Dynamic conversion: purchasing 3 boxes of Mineral Water 1lt (with rule 1 Box = 15 Bottles) increases stock by 45 bottles ($15 \times 3$). Selling 1 Water (1 Lt) consumes 1 bottle, leaving remaining stock at 44 bottles ($15 \times 3 - 1 = 44$).
+       - Unit costs are accurately calculated per consumption unit (e.g. ₹224 / 15 = ₹14.93/bottle).
+     - Backward-compatible procurement adapter in `backend/src/routes/purchases.js`: converts received purchase units into canonical stock units before calculating Weighted Average Cost (WAC) and stores `lastPurchasePrice` in canonical stock units.
+     - Purchases UI (`frontend/src/app/purchases/page.tsx`) features unlocked unit selection, auto-defaults to configured purchase packaging units, and renders real-time stock multiplication previews.
+     - Recipes UI (`frontend/src/app/recipes/page.tsx`) provides dual-unit configuration (Purchase Unit $\rightarrow$ Consumption Unit) with interactive formula cards and 1-click existing stock/cost alignment.
   4. **Recipe Model (`backend/src/models/Recipe.js`)**:
      - Links to `menuItem` + optional `variantName`.
      - Supports versioning (`v1`, `v2`), yields, loss %, estimated cost calculated from current ingredient WAC, and confidence scores.

@@ -2,11 +2,12 @@ const router = require('express').Router();
 const Recipe = require('../models/Recipe');
 const MenuItem = require('../models/MenuItem');
 const InventoryItem = require('../models/InventoryItem');
+const UnitConversion = require('../models/UnitConversion');
 const InventoryMovement = require('../models/InventoryMovement');
 const { auth, managerOrAdmin, adminOnly } = require('../middleware/auth');
 const { log } = require('../utils/audit');
 const { generateRecipeSuggestions } = require('../services/recipeSuggestionEngine');
-const { convertUnit, roundPrecision } = require('../utils/unitConverter');
+const { convertUnit, normalizeUnit, roundPrecision } = require('../utils/unitConverter');
 
 router.use(auth);
 
@@ -158,7 +159,18 @@ router.post('/', managerOrAdmin, async (req, res) => {
 
       const recipeQty = Number(line.recipeQuantity) || 0;
       const recipeUnit = line.recipeUnit || inv.unit;
-      const conv = convertUnit(recipeQty, recipeUnit, inv.unit);
+      let customRule = null;
+      if (normalizeUnit(recipeUnit) !== normalizeUnit(inv.unit)) {
+        customRule = await UnitConversion.findOne({
+          inventoryItem: inv._id,
+          isActive: true,
+          $or: [
+            { purchaseUnit: normalizeUnit(recipeUnit) },
+            { canonicalUnit: normalizeUnit(recipeUnit) },
+          ],
+        }).lean();
+      }
+      const conv = convertUnit(recipeQty, recipeUnit, inv.unit, customRule?.conversionFactor, customRule?.purchaseUnit, customRule?.canonicalUnit);
       const canonicalQty = conv.success ? conv.quantity : recipeQty;
 
       processedIngredients.push({
@@ -250,7 +262,18 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
 
         const recipeQty = Number(line.recipeQuantity) || 0;
         const recipeUnit = line.recipeUnit || inv.unit;
-        const conv = convertUnit(recipeQty, recipeUnit, inv.unit);
+        let customRule = null;
+        if (normalizeUnit(recipeUnit) !== normalizeUnit(inv.unit)) {
+          customRule = await UnitConversion.findOne({
+            inventoryItem: inv._id,
+            isActive: true,
+            $or: [
+              { purchaseUnit: normalizeUnit(recipeUnit) },
+              { canonicalUnit: normalizeUnit(recipeUnit) },
+            ],
+          }).lean();
+        }
+        const conv = convertUnit(recipeQty, recipeUnit, inv.unit, customRule?.conversionFactor, customRule?.purchaseUnit, customRule?.canonicalUnit);
         const canonicalQty = conv.success ? conv.quantity : recipeQty;
 
         processed.push({

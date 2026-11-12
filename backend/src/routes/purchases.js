@@ -198,7 +198,7 @@ router.post('/', async (req, res) => {
         canonicalQuantities.push(line.quantity);
       } else {
         const customRule = conversionMap.get(`${line.item}_${normLineUnit}`);
-        const conv = convertUnit(line.quantity, line.unit, invUnit, customRule?.conversionFactor);
+        const conv = convertUnit(line.quantity, line.unit, invUnit, customRule?.conversionFactor, customRule?.purchaseUnit, customRule?.canonicalUnit);
         if (conv.success) {
           canonicalQuantities.push(conv.quantity);
         } else {
@@ -233,9 +233,10 @@ router.post('/', async (req, res) => {
         const oldTotal = inv.currentStock * inv.averageCost;
         const newQty = inv.currentStock + canonicalQty;
         const newAvg = newQty > 0 ? (oldTotal + item.totalPrice) / newQty : (item.totalPrice / (canonicalQty || 1));
+        const canonicalUnitPrice = roundPrecision(item.totalPrice / (canonicalQty || 1), 4);
         await InventoryItem.findByIdAndUpdate(item.item, {
           $inc: { currentStock: canonicalQty },
-          lastPurchasePrice: item.pricePerUnit,
+          lastPurchasePrice: canonicalUnitPrice,
           averageCost: roundPrecision(newAvg, 4),
         });
       }
@@ -573,7 +574,7 @@ router.delete('/:id', async (req, res) => {
           purchaseUnit: normalizeUnit(item.unit),
           isActive: true,
         }).lean();
-        const conv = convertUnit(item.quantity, item.unit, inv.unit, customRule?.conversionFactor);
+        const conv = convertUnit(item.quantity, item.unit, inv.unit, customRule?.conversionFactor, customRule?.purchaseUnit, customRule?.canonicalUnit);
         if (conv.success) reverseQty = conv.quantity;
       }
       await InventoryItem.findByIdAndUpdate(item.item, { $inc: { currentStock: -reverseQty } });

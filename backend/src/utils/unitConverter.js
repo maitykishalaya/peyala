@@ -128,15 +128,17 @@ function areDirectlyCompatible(fromUnit, toUnit) {
  * Supports:
  * 1. Identical units: returns same quantity
  * 2. Standard metric conversion (kg <-> gram, litre <-> ml, dozen <-> piece)
- * 3. Item-specific custom conversion factor (e.g. 1 packet = 25 pieces, 1 bottle = 750 ml)
+ * 3. Item-specific custom conversion factor (e.g. 1 box = 15 bottles, 1 packet = 25 pieces)
  *
  * @param {number} quantity - Quantity to convert
  * @param {string} fromUnit - Source unit
  * @param {string} toUnit - Target unit
- * @param {number|null} customConversionFactor - Multiplier if fromUnit is a package of toUnit (e.g. 25 pieces per packet)
+ * @param {number|null} customConversionFactor - Multiplier if 1 purchaseUnit = factor canonicalUnits
+ * @param {string|null} rulePurchaseUnit - Purchase unit of the custom rule (e.g. 'box')
+ * @param {string|null} ruleCanonicalUnit - Canonical consumption unit of the custom rule (e.g. 'bottle')
  * @returns {{ success: boolean, quantity: number, factor: number, error?: string }}
  */
-function convertUnit(quantity, fromUnit, toUnit, customConversionFactor = null) {
+function convertUnit(quantity, fromUnit, toUnit, customConversionFactor = null, rulePurchaseUnit = null, ruleCanonicalUnit = null) {
   const qty = Number(quantity);
   if (isNaN(qty)) {
     return { success: false, quantity: 0, factor: 0, error: `Invalid quantity: ${quantity}` };
@@ -175,10 +177,25 @@ function convertUnit(quantity, fromUnit, toUnit, customConversionFactor = null) 
   }
 
   // 5. Item-specific custom conversion
-  // e.g. 1 packet = 25 pieces -> factor = 25. Converting 2 packets to pieces -> 2 * 25 = 50 pieces.
-  // Converting 50 pieces to packets -> 50 / 25 = 2 packets.
+  // e.g. 1 box = 15 bottles -> factor = 15.
+  // Converting 3 boxes to bottles -> 3 * 15 = 45 bottles.
+  // Converting 45 bottles to boxes -> 45 / 15 = 3 boxes.
   if (customConversionFactor && typeof customConversionFactor === 'number' && customConversionFactor > 0) {
-    // If fromUnit is the package (e.g. packet) and toUnit is canonical (e.g. piece):
+    const normRulePurch = rulePurchaseUnit ? normalizeUnit(rulePurchaseUnit) : null;
+    const normRuleCanon = ruleCanonicalUnit ? normalizeUnit(ruleCanonicalUnit) : null;
+
+    if (normRulePurch && normRuleCanon) {
+      if (normFrom === normRulePurch && normTo === normRuleCanon) {
+        const targetQty = qty * customConversionFactor;
+        return { success: true, quantity: roundPrecision(targetQty, 6), factor: customConversionFactor };
+      }
+      if (normFrom === normRuleCanon && normTo === normRulePurch) {
+        const targetQty = qty / customConversionFactor;
+        return { success: true, quantity: roundPrecision(targetQty, 6), factor: roundPrecision(1 / customConversionFactor, 6) };
+      }
+    }
+
+    // Default: forward conversion (package -> canonical consumption unit)
     const targetQty = qty * customConversionFactor;
     return { success: true, quantity: roundPrecision(targetQty, 6), factor: customConversionFactor };
   }

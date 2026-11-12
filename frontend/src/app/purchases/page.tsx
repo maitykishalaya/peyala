@@ -23,7 +23,7 @@ import { useEffect, useState, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Modal from '@/components/ui/Modal';
 import PaymentModeSelect from '@/components/ui/PaymentModeSelect';
-import { purchasesApi, suppliersApi, inventoryApi, accountsApi } from '@/lib/api';
+import { purchasesApi, suppliersApi, inventoryApi, accountsApi, unitConversionsApi } from '@/lib/api';
 import { getModesForAccount, getLabelForMode, ALL_PAYMENT_MODES } from '@/lib/paymentModes';
 import { formatCurrency, formatDate, today, UNITS, cn, clearFinancialCaches } from '@/lib/utils';
 import { matchesSearch, sortBySearchRelevance, isExactMatch } from '@/lib/search';
@@ -159,6 +159,7 @@ export default function PurchasesPage() {
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [conversions, setConversions] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -201,9 +202,16 @@ export default function PurchasesPage() {
 
   const loadRefData = async () => {
     try {
-      const [s, i, a, c] = await Promise.all([suppliersApi.list(), inventoryApi.items(), accountsApi.list(), inventoryApi.categories()]);
+      const [s, i, a, c, convRes] = await Promise.all([
+        suppliersApi.list(),
+        inventoryApi.items(),
+        accountsApi.list(),
+        inventoryApi.categories(),
+        unitConversionsApi.list().catch(() => ({ data: [] })),
+      ]);
       setSuppliers(s.data); setItems(i.data); setAccounts(a.data); setCategories(c.data);
-      writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data });
+      setConversions(convRes.data || []);
+      writeCache(REFDATA_CACHE_KEY, { suppliers: s.data, items: i.data, accounts: a.data, categories: c.data, conversions: convRes.data });
     } catch (e) {
       console.error('Failed to load purchase ref data:', e);
     }
@@ -318,7 +326,12 @@ export default function PurchasesPage() {
   // ── Item selected from search ───────────────────────────────────
   const handleItemSelect = (idx: number, itemId: string, unit: string) => {
     const lines = [...form.lines];
-    lines[idx] = { ...lines[idx], item: itemId, unit };
+    const configuredConv = conversions?.find((c: any) => {
+      const cItemId = typeof c.inventoryItem === 'object' ? c.inventoryItem?._id : c.inventoryItem;
+      return String(cItemId) === String(itemId) && c.isActive;
+    });
+    const defaultUnit = configuredConv?.purchaseUnit || unit;
+    lines[idx] = { ...lines[idx], item: itemId, unit: defaultUnit };
     setForm({ ...form, lines });
   };
 
@@ -724,17 +737,13 @@ export default function PurchasesPage() {
                   <input type="number" step="0.1" className="input text-xs py-1 sm:py-1.5" value={line.quantity || ''} onChange={e => updateLine(idx, 'quantity', +e.target.value)} placeholder="Qty" />
                 </div>
                 <div className="col-span-6 sm:col-span-1">
-                  {line.item ? (
-                    <input
-                      className="input text-xs py-1 sm:py-1.5 bg-gray-100 dark:bg-gray-900"
-                      value={getInventoryUnit(line.item)}
-                      disabled
-                    />
-                  ) : (
-                    <select className="input text-xs py-1 sm:py-1.5" value={line.unit} onChange={e => updateLine(idx, 'unit', e.target.value)}>
-                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  )}
+                  <select
+                    className="input text-xs py-1 sm:py-1.5 font-medium uppercase"
+                    value={line.unit || (line.item ? getInventoryUnit(line.item) : 'kg')}
+                    onChange={e => updateLine(idx, 'unit', e.target.value)}
+                  >
+                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
                 </div>
                 <div className="col-span-6 sm:col-span-2">
                   <input type="number" className="input text-xs py-1 sm:py-1.5" value={line.pricePerUnit || ''} onChange={e => updateLine(idx, 'pricePerUnit', +e.target.value)} placeholder="₹/unit" />
@@ -751,6 +760,29 @@ export default function PurchasesPage() {
                 <div className="col-span-12 sm:col-span-1 flex justify-end">
                   {form.lines.length > 1 && <button onClick={() => removeLine(idx)} className="p-1 text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
                 </div>
+
+                {/* Packaging unit conversion helper */}
+                {(() => {
+                  if (!line.item) return null;
+                  const conv = conversions?.find((c: any) => {
+                    const cId = typeof c.inventoryItem === 'object' ? c.inventoryItem?._id : c.inventoryItem;
+                    return String(cId) === String(line.item) && c.isActive;
+                  });
+                  if (conv && line.unit && line.unit.toLowerCase() === conv.purchaseUnit.toLowerCase()) {
+                    const canonicalUnits = Math.round(((line.quantity || 0) * (conv.conversionFactor || 1)) * 1000) / 1000;
+                    return (
+                      <div className="col-span-12 -mt-1 mb-2 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between font-medium">
+                        <span>📦 Packaging Rule: 1 {conv.purchaseUnit} = {conv.conversionFactor} {conv.canonicalUnit}</span>
+                        {line.quantity > 0 && (
+                          <span className="font-bold text-amber-900 dark:text-amber-200">
+                            → Adds {canonicalUnits} {conv.canonicalUnit} to stock
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             ))}
             <button onClick={addLine} className="mt-1 mb-2 text-xs text-brand-600 font-medium flex items-center gap-1"><Plus className="w-3 h-3" /> Add Item</button>

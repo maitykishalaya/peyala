@@ -12,7 +12,7 @@ import {
   POSSetting,
 } from '@/lib/api';
 import { menuApi } from '@/lib/pos-api';
-import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, cn, UNITS } from '@/lib/utils';
 import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
@@ -96,12 +96,13 @@ export default function RecipesPage() {
   const [savingConversion, setSavingConversion] = useState(false);
   const [conversionForm, setConversionForm] = useState({
     inventoryItemId: '',
-    canonicalUnit: 'piece',
-    purchaseUnit: 'packet',
+    canonicalUnit: 'bottle',
+    purchaseUnit: 'box',
     conversionFactor: 1,
     packageSize: 1,
     packageLabel: '',
     notes: '',
+    convertExistingStock: false,
   });
 
   // Auto-suggestion generator state
@@ -352,18 +353,20 @@ export default function RecipesPage() {
         packageSize: conv.packageSize || conv.conversionFactor,
         packageLabel: conv.packageLabel || '',
         notes: conv.notes || '',
+        convertExistingStock: false,
       });
     } else {
       setEditingConversion(null);
       const defaultItem = inventoryItems[0];
       setConversionForm({
         inventoryItemId: defaultItem?._id || '',
-        canonicalUnit: defaultItem?.unit || 'piece',
-        purchaseUnit: 'packet',
+        canonicalUnit: defaultItem?.unit || 'bottle',
+        purchaseUnit: 'box',
         conversionFactor: 1,
         packageSize: 1,
         packageLabel: '',
         notes: '',
+        convertExistingStock: false,
       });
     }
     setConversionModalOpen(true);
@@ -376,11 +379,22 @@ export default function RecipesPage() {
       return;
     }
     if (!conversionForm.purchaseUnit.trim()) {
-      toast.error('Purchase unit is required.');
+      toast.error('Purchase package unit is required.');
+      return;
+    }
+    if (!conversionForm.canonicalUnit.trim()) {
+      toast.error('Consumption / Recipe unit is required.');
       return;
     }
     if (conversionForm.conversionFactor <= 0) {
       toast.error('Conversion factor must be greater than zero.');
+      return;
+    }
+    if (
+      conversionForm.conversionFactor !== 1 &&
+      conversionForm.purchaseUnit.trim().toLowerCase() === conversionForm.canonicalUnit.trim().toLowerCase()
+    ) {
+      toast.error('Purchase unit and consumption unit cannot be the same when factor is not 1.');
       return;
     }
 
@@ -399,6 +413,18 @@ export default function RecipesPage() {
       toast.error(err.response?.data?.message || 'Failed to save conversion');
     } finally {
       setSavingConversion(false);
+    }
+  };
+
+  // Delete / Deactivate Conversion
+  const handleDeleteConversion = async (conv: UnitConversionRule) => {
+    if (!confirm(`Are you sure you want to deactivate conversion rule: 1 ${conv.purchaseUnit} = ${conv.conversionFactor} ${conv.canonicalUnit}?`)) return;
+    try {
+      await unitConversionsApi.delete(conv._id);
+      toast.success('Unit conversion deactivated');
+      loadData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to deactivate conversion');
     }
   };
 
@@ -876,7 +902,7 @@ export default function RecipesPage() {
                       <th className="py-3 px-4">Inventory Ingredient</th>
                       <th className="py-3 px-4">Purchase Unit</th>
                       <th className="py-3 px-4">Formula / Factor</th>
-                      <th className="py-3 px-4">Canonical Stock Unit</th>
+                      <th className="py-3 px-4">Consumption / Recipe Unit</th>
                       <th className="py-3 px-4">Package Label</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
@@ -917,9 +943,19 @@ export default function RecipesPage() {
                                 <button
                                   onClick={() => openConversionModal(conv)}
                                   className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Edit Rule"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </button>
+                                {isManagerOrAdmin && (
+                                  <button
+                                    onClick={() => handleDeleteConversion(conv)}
+                                    className="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                    title="Deactivate Rule"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1300,12 +1336,12 @@ export default function RecipesPage() {
           open={conversionModalOpen}
           onClose={() => setConversionModalOpen(false)}
           title={editingConversion ? 'Edit Unit Conversion Rule' : 'New Packaging Unit Rule'}
-          size="md"
+          size="lg"
         >
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                Inventory Item *
+                Inventory Raw Material *
               </label>
               <select
                 value={conversionForm.inventoryItemId}
@@ -1317,28 +1353,41 @@ export default function RecipesPage() {
                     canonicalUnit: inv?.unit || prev.canonicalUnit,
                   }));
                 }}
-                className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"
+                className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-medium"
               >
                 {inventoryItems.map(inv => (
                   <option key={inv._id} value={inv._id}>
-                    {inv.name} (Canonical stock unit: {inv.unit})
+                    {inv.name} (Current: {inv.currentStock} {inv.unit} · ₹{inv.averageCost || inv.lastPurchasePrice || 0}/{inv.unit})
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Current Item Status */}
+            {(() => {
+              const selectedInv = inventoryItems.find(i => i._id === conversionForm.inventoryItemId);
+              if (!selectedInv) return null;
+              return (
+                <div className="text-xs px-3 py-2 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2 text-gray-600 dark:text-gray-300">
+                  <span>Current Stock: <strong className="text-gray-900 dark:text-white">{selectedInv.currentStock} {selectedInv.unit}</strong></span>
+                  <span>Average Cost: <strong className="text-gray-900 dark:text-white">₹{selectedInv.averageCost || selectedInv.lastPurchasePrice || 0}/{selectedInv.unit}</strong></span>
+                </div>
+              );
+            })()}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                   Purchase Package Unit *
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. packet, bottle, box, carton"
+                  placeholder="e.g. box, packet, carton"
                   value={conversionForm.purchaseUnit}
                   onChange={e => setConversionForm(prev => ({ ...prev, purchaseUnit: e.target.value }))}
-                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-semibold"
+                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-semibold uppercase"
                 />
+                <span className="text-[11px] text-gray-400 mt-0.5 block">What you buy from suppliers</span>
               </div>
 
               <div>
@@ -1351,15 +1400,66 @@ export default function RecipesPage() {
                   min="0.000001"
                   value={conversionForm.conversionFactor}
                   onChange={e => setConversionForm(prev => ({ ...prev, conversionFactor: Number(e.target.value) || 1 }))}
-                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-mono text-right"
+                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-mono font-bold text-right text-amber-600"
                 />
+                <span className="text-[11px] text-gray-400 mt-0.5 block">Units per package</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                  Consumption / Recipe Unit *
+                </label>
+                <select
+                  value={conversionForm.canonicalUnit}
+                  onChange={e => setConversionForm(prev => ({ ...prev, canonicalUnit: e.target.value }))}
+                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-semibold uppercase"
+                >
+                  {UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-gray-400 mt-0.5 block">Used in recipes & stock</span>
               </div>
             </div>
 
-            {/* Live conversion summary helper */}
-            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 font-medium">
-              💡 Formula: 1 {conversionForm.purchaseUnit || 'package'} = {conversionForm.conversionFactor} {conversionForm.canonicalUnit}
+            {/* Dynamic Formula Banner */}
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-sm text-amber-800 dark:text-amber-300">
+                📦 1 {conversionForm.purchaseUnit || 'package'} = {conversionForm.conversionFactor} {conversionForm.canonicalUnit}
+              </div>
+              <p className="text-[11px] text-amber-700/90 dark:text-amber-300/80">
+                Purchasing 1 {conversionForm.purchaseUnit || 'package'} adds {conversionForm.conversionFactor} {conversionForm.canonicalUnit} to inventory stock. In recipes, deduction happens in {conversionForm.canonicalUnit}.
+              </p>
             </div>
+
+            {/* Checkbox for updating existing inventory stock and unit costs */}
+            {(() => {
+              const selectedInv = inventoryItems.find(i => i._id === conversionForm.inventoryItemId);
+              if (!selectedInv) return null;
+              const factor = conversionForm.conversionFactor || 1;
+              const convertedStock = (selectedInv.currentStock * factor).toFixed(2);
+              const convertedCost = factor > 0 ? (selectedInv.averageCost / factor).toFixed(2) : '0';
+              return (
+                <div className="p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200/80 dark:border-blue-800/80 space-y-1.5">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(conversionForm.convertExistingStock)}
+                      onChange={e => setConversionForm(prev => ({ ...prev, convertExistingStock: e.target.checked }))}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="text-xs text-gray-800 dark:text-gray-200 font-medium">
+                      Update existing inventory stock and unit costs to <strong>{conversionForm.canonicalUnit}</strong>
+                    </div>
+                  </label>
+                  {conversionForm.convertExistingStock && (
+                    <div className="ml-5 text-[11px] text-blue-800 dark:text-blue-300 bg-white/70 dark:bg-gray-900/70 p-2 rounded-lg border border-blue-100 dark:border-blue-900">
+                      Preview: <strong>{selectedInv.currentStock} {selectedInv.unit}</strong> will become <strong>{convertedStock} {conversionForm.canonicalUnit}</strong> · Cost: <strong>₹{selectedInv.averageCost}/{selectedInv.unit}</strong> will become <strong>₹{convertedCost}/{conversionForm.canonicalUnit}</strong>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
@@ -1367,7 +1467,7 @@ export default function RecipesPage() {
               </label>
               <input
                 type="text"
-                placeholder="e.g. Pack of 25 patties, 750ml Bottle"
+                placeholder={`e.g. 1 ${conversionForm.purchaseUnit} of ${conversionForm.conversionFactor} ${conversionForm.canonicalUnit}`}
                 value={conversionForm.packageLabel}
                 onChange={e => setConversionForm(prev => ({ ...prev, packageLabel: e.target.value }))}
                 className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"

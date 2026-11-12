@@ -428,6 +428,7 @@ export interface UnitConversionRule {
   packageLabel?: string;
   notes?: string;
   isActive: boolean;
+  convertExistingStock?: boolean;
 }
 
 export const recipesApi = {
