@@ -1,6 +1,6 @@
 // Expand libuv thread pool so bcrypt/crypto cannot starve async I/O under concurrent logins
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 // Windows DNS Fallback for MongoDB Atlas SRV resolution
 const dns = require('dns');

@@ -16,6 +16,7 @@ import { formatCurrency, formatDate, cn, UNITS } from '@/lib/utils';
 import { matchesSearch } from '@/lib/search';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/lib/auth';
+import { realtime } from '@/lib/realtime';
 import {
   CookingPot,
   Plus,
@@ -148,6 +149,34 @@ export default function RecipesPage() {
 
   useEffect(() => {
     loadData();
+
+    // Realtime local WebSocket event listeners
+    const unsubRecipe = realtime.on('RECIPE_UPDATED', () => loadData(false));
+    const unsubConversion = realtime.on('UNITCONVERSION_UPDATED', () => loadData(false));
+    const unsubMovement = realtime.on('INVENTORYMOVEMENT_UPDATED', () => loadData(false));
+
+    // Listen to background cloud sync completion
+    const handleSyncComplete = () => loadData(false);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('peyala_data_synced', handleSyncComplete);
+    }
+
+    // Periodic auto-refresh every 20 seconds to guarantee cross-laptop synchronization
+    const autoRefreshInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        loadData(false);
+      }
+    }, 20000);
+
+    return () => {
+      unsubRecipe();
+      unsubConversion();
+      unsubMovement();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('peyala_data_synced', handleSyncComplete);
+      }
+      clearInterval(autoRefreshInterval);
+    };
   }, []);
 
   // Master Toggle Handler (Admin only)

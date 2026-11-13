@@ -727,6 +727,9 @@ class SyncEngine {
         'ordersequences',
         'users',
         'auditlogs',
+        'recipes',
+        'unitconversions',
+        'inventorymovements',
       ];
 
       let pulledCount = 0;
@@ -754,8 +757,15 @@ class SyncEngine {
           const localCount = await localCol.countDocuments().catch(() => 0);
 
           // If local collection is completely empty, ALWAYS pull ALL documents to hydrate/clone properly!
-          if (localCount === 0 || ['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories', 'balancesheets', 'billsequences', 'ordersequences', 'users', 'staffs', 'suppliers'].includes(colName) || !this.lastInboundSync) {
+          if (localCount === 0 || ['accounts', 'tables', 'tablecategories', 'menucategories', 'ownernotes', 'addons', 'possettings', 'paymentcategories', 'inventorycategories', 'balancesheets', 'billsequences', 'ordersequences', 'users', 'staffs', 'suppliers', 'recipes', 'unitconversions'].includes(colName) || !this.lastInboundSync) {
             query = {};
+          } else if (colName === 'inventorymovements') {
+            query = {
+              $or: [
+                { createdAt: { $gte: twoDaysAgo } },
+                { updatedAt: { $gte: twoDaysAgo } },
+              ],
+            };
           } else if (colName === 'orders') {
             // Always pull any open/preparing/served order, plus recent orders
             query = {
@@ -807,6 +817,28 @@ class SyncEngine {
                     { _id: centralSeqDoc._id },
                     { $set: { seq: maxSeq, updatedAt: new Date() } }
                   );
+                }
+              }
+              continue;
+            }
+
+            // Special inbound handling for singleton POSSetting
+            if (colName === 'possettings') {
+              const centralDoc = docs.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0];
+              if (centralDoc) {
+                const localDocs = await localCol.find({}).sort({ updatedAt: -1 }).limit(1).toArray();
+                const localDoc = localDocs[0];
+                if (!localDoc) {
+                  await localCol.insertOne(centralDoc);
+                } else {
+                  const lTime = new Date(localDoc.updatedAt || 0).getTime();
+                  const cTime = new Date(centralDoc.updatedAt || 0).getTime();
+                  if (cTime >= lTime) {
+                    await localCol.deleteMany({ _id: { $ne: centralDoc._id } });
+                    await localCol.replaceOne({ _id: centralDoc._id }, centralDoc, { upsert: true });
+                  } else {
+                    this.recordMutation('possettings', localDoc._id, 'update', localDoc).catch(() => {});
+                  }
                 }
               }
               continue;
@@ -993,6 +1025,40 @@ class SyncEngine {
                 } else {
                   this.recordMutation(colName, localDoc._id, 'update', localDoc).catch(() => {});
                 }
+              } else if (colName === 'unitconversions' && doc.inventoryItem && doc.purchaseUnit) {
+                const { _id, ...docWithoutId } = doc;
+                ops.push({
+                  updateOne: {
+                    filter: {
+                      $or: [
+                        { _id: doc._id },
+                        { inventoryItem: doc.inventoryItem, purchaseUnit: doc.purchaseUnit }
+                      ]
+                    },
+                    update: {
+                      $set: docWithoutId,
+                      $setOnInsert: { _id: doc._id }
+                    },
+                    upsert: true,
+                  },
+                });
+              } else if (colName === 'attendances' && doc.staff && doc.date) {
+                const { _id, ...docWithoutId } = doc;
+                ops.push({
+                  updateOne: {
+                    filter: {
+                      $or: [
+                        { _id: doc._id },
+                        { staff: doc.staff, date: doc.date }
+                      ]
+                    },
+                    update: {
+                      $set: docWithoutId,
+                      $setOnInsert: { _id: doc._id }
+                    },
+                    upsert: true,
+                  },
+                });
               } else {
                 ops.push({
                   replaceOne: {
@@ -1022,6 +1088,24 @@ class SyncEngine {
             if (colName === 'auditlogs') {
               try {
                 realtimeHub.broadcast('AUDITLOG_UPDATED', { count: ops.length, updatedAt: new Date() });
+              } catch (_) {}
+            }
+
+            if (colName === 'recipes') {
+              try {
+                realtimeHub.broadcast('RECIPE_UPDATED', { count: ops.length, updatedAt: new Date() });
+              } catch (_) {}
+            }
+
+            if (colName === 'unitconversions') {
+              try {
+                realtimeHub.broadcast('UNITCONVERSION_UPDATED', { count: ops.length, updatedAt: new Date() });
+              } catch (_) {}
+            }
+
+            if (colName === 'inventorymovements') {
+              try {
+                realtimeHub.broadcast('INVENTORYMOVEMENT_UPDATED', { count: ops.length, updatedAt: new Date() });
               } catch (_) {}
             }
           }
@@ -1200,7 +1284,7 @@ class SyncEngine {
         'accounts', 'orders', 'orderitems', 'shifts', 'inventoryitems',
         'inventorycategories', 'suppliers', 'expenses', 'customers',
         'reservations', 'kitchenstations', 'paymentmethods', 'printers',
-        'taxsettings'
+        'taxsettings', 'recipes', 'unitconversions', 'inventorymovements'
       ];
 
       // Sort collections: priority operational collections first, then the rest

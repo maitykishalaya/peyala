@@ -634,6 +634,14 @@ Peyala v8 is a production-grade restaurant operations and management system buil
 
 ---
 
+### 3.31 Bidirectional Cloud Recipe Sync & Multi-Terminal Realtime Engine (`backend/src/services/syncEngine.js` & `frontend/src/app/recipes/page.tsx`)
+- **Multi-Laptop Operational Architecture**:
+  - Connects floor/billing laptops with central station and MongoDB Atlas by adding `recipes`, `unitconversions`, and `inventorymovements` to `inboundCollections`.
+  - Fixes missing recipe data on cashier/billing laptops, ensuring that orders placed on secondary laptops immediately find active recipes and deduct ingredient stock.
+  - Real-time WebSocket broadcasting for `RECIPE_UPDATED`, `UNITCONVERSION_UPDATED`, and `INVENTORYMOVEMENT_UPDATED` automatically keeps open browser sessions in sync.
+  - Safe compound key upsert pattern (`$set` + `$setOnInsert`) prevents `E11000 duplicate key` errors for collections with compound unique indices (`unitconversions` on `inventoryItem + purchaseUnit`, `attendances` on `staff + date`).
+  - Resilient `dotenv` configuration path resolution (`path.join(__dirname, '../.env')`) guarantees environmental stability regardless of invocation working directory.
+
 ### 3.30 Recipe Management, Universal Unit Conversion & Automated Inventory Consumption Engine (`/recipes`)
 - **Operational Need**: Automatically deduct raw materials from inventory upon selling menu items, eliminate manual stock entry drift, and allow purchasing in bulk packaging (packets, cartons, bottles, boxes, kg) while maintaining canonical stock in usable kitchen units (grams, ml, pieces).
 - **Core Principles & Architecture**:

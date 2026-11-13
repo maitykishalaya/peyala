@@ -1166,6 +1166,19 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   2. Pre-allocated `billNumber` via `markBillPrinted()` in `tables/page.tsx` before dispatching thermal bills to the physical printer.
   3. Added queue invariant in `backend/src/routes/orders.js` (`GET /pending-bills`) ensuring all mobile-queued print jobs have official bill numbers allocated before reaching the counter printer.
 
+### 22. Bidirectional Cloud Recipe Sync, Realtime WebSocket Hub & Today's Sales Reconciler (November 13, 2026)
+- **Bidirectional Cloud Sync for Recipe Management (`backend/src/services/syncEngine.js`)**:
+  - Added `recipes`, `unitconversions`, and `inventorymovements` to `inboundCollections` and full database hydration priority list.
+  - Solved the multi-laptop disconnect where business/billing laptops could not pull active recipes or unit conversions from Central MongoDB Atlas, enabling accurate offline-first inventory deductions across all counter laptops.
+  - Hardened singleton `POSSetting` synchronization to unify settings documents and prevent configuration branching across terminals.
+  - Compound unique key protection for `unitconversions` and `attendances` via `$set` + `$setOnInsert` update queries, eliminating `E11000 duplicate key` collision errors during bidirectional cloud replication.
+- **Frontend Real-Time Synchronization (`frontend/src/app/recipes/page.tsx`)**:
+  - Integrated `RealtimeClient` WebSocket event listeners for `RECIPE_UPDATED`, `UNITCONVERSION_UPDATED`, and `INVENTORYMOVEMENT_UPDATED`.
+  - Added listener for `peyala_data_synced` cloud inbound events and a 20-second active-tab polling safety net to keep the Recipe Builder, Unit Conversions, and Movements Ledger synchronized across all floor laptops and tablets without manual refreshes.
+- **Today's Applied Recipe Reconciliation**:
+  - Reconciled sales for November 13, 2026 across active recipes: Water (500 ml), Thumsup, and Masala Cold Drinks.
+  - Recorded 7 immutable `InventoryMovement` records with deterministic idempotency keys, accurately decrementing `Mineral Water 500ml` (72 -> 71), `Thumsup Crate` (116 -> 110), and `Chat Masala 50g` (100 -> 95g) while maintaining local and Central Atlas database consistency.
+
 ### 21. Universal Unit Conversion & Mandatory Recipe Variants Engine (November 13, 2026)
 - **Decoupled Purchase Package Units vs. Consumption Stock Units**:
   - Raw materials can be procured in supplier packaging units (e.g. `Box`, `Carton`, `Packet`) while maintaining inventory stock, weighted average cost (WAC), and recipe consumption in canonical consumption units (e.g. `Bottle`, `Piece`, `ml`, `gram`).
