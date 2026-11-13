@@ -452,8 +452,30 @@ export default function PurchasesPage() {
         }
         if (line.item) {
           const expectedUnit = getInventoryUnit(line.item);
-          if (expectedUnit && line.unit !== expectedUnit) {
-            errors.push(`Line ${lineNumber}: unit must match saved inventory unit '${expectedUnit}'.`);
+          if (expectedUnit && line.unit && line.unit.toLowerCase() !== expectedUnit.toLowerCase()) {
+            // Check if there is an active custom conversion rule
+            const hasConv = conversions?.some((c: any) => {
+              const cId = typeof c.inventoryItem === 'object' ? c.inventoryItem?._id : c.inventoryItem;
+              return String(cId) === String(line.item) &&
+                c.isActive &&
+                c.purchaseUnit?.toLowerCase() === line.unit.toLowerCase();
+            });
+
+            // Standard compatible units
+            const normLine = line.unit.toLowerCase();
+            const normExp = expectedUnit.toLowerCase();
+            const standardCompatible = (
+              (['kg', 'kgs', 'kilo', 'kilogram', 'g', 'gm', 'gram', 'grams', 'mg'].includes(normLine) &&
+               ['kg', 'kgs', 'kilo', 'kilogram', 'g', 'gm', 'gram', 'grams', 'mg'].includes(normExp)) ||
+              (['l', 'ltr', 'liter', 'litre', 'ml', 'millilitre'].includes(normLine) &&
+               ['l', 'ltr', 'liter', 'litre', 'ml', 'millilitre'].includes(normExp)) ||
+              (['dozen', 'piece', 'pc', 'pcs'].includes(normLine) &&
+               ['dozen', 'piece', 'pc', 'pcs'].includes(normExp))
+            );
+
+            if (!hasConv && !standardCompatible) {
+              errors.push(`Line ${lineNumber}: unit '${line.unit}' differs from inventory stock unit '${expectedUnit}'. Please configure a packaging conversion rule in Recipe Management or purchase in '${expectedUnit}'.`);
+            }
           }
         }
       });
@@ -737,13 +759,37 @@ export default function PurchasesPage() {
                   <input type="number" step="0.1" className="input text-xs py-1 sm:py-1.5" value={line.quantity || ''} onChange={e => updateLine(idx, 'quantity', +e.target.value)} placeholder="Qty" />
                 </div>
                 <div className="col-span-6 sm:col-span-1">
-                  <select
-                    className="input text-xs py-1 sm:py-1.5 font-medium uppercase"
-                    value={line.unit || (line.item ? getInventoryUnit(line.item) : 'kg')}
-                    onChange={e => updateLine(idx, 'unit', e.target.value)}
-                  >
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                  {(() => {
+                    const stockUnit = line.item ? getInventoryUnit(line.item) : '';
+                    const itemConvs = conversions?.filter((c: any) => {
+                      const cId = typeof c.inventoryItem === 'object' ? c.inventoryItem?._id : c.inventoryItem;
+                      return String(cId) === String(line.item) && c.isActive;
+                    }) || [];
+
+                    return (
+                      <select
+                        className="input text-xs py-1 sm:py-1.5 font-medium uppercase"
+                        value={line.unit || stockUnit || 'kg'}
+                        onChange={e => updateLine(idx, 'unit', e.target.value)}
+                      >
+                        {itemConvs.map((c: any) => (
+                          <option key={`conv-${c._id || c.purchaseUnit}`} value={c.purchaseUnit}>
+                            📦 {c.purchaseUnit.toUpperCase()} ({c.conversionFactor} {c.canonicalUnit})
+                          </option>
+                        ))}
+                        {stockUnit && (
+                          <option value={stockUnit}>
+                            🥄 {stockUnit.toUpperCase()} (STOCK)
+                          </option>
+                        )}
+                        <optgroup label="Standard Units">
+                          {UNITS.filter(u => u !== stockUnit && !itemConvs.some((c: any) => c.purchaseUnit.toLowerCase() === u.toLowerCase())).map(u => (
+                            <option key={u} value={u}>{u.toUpperCase()}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    );
+                  })()}
                 </div>
                 <div className="col-span-6 sm:col-span-2">
                   <input type="number" className="input text-xs py-1 sm:py-1.5" value={line.pricePerUnit || ''} onChange={e => updateLine(idx, 'pricePerUnit', +e.target.value)} placeholder="₹/unit" />

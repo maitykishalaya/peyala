@@ -1539,5 +1539,28 @@ Whenever changes are made, run this validation suite before concluding:
     2. *Pre-Allocation on Print*: In `tables/page.tsx`, `ordersApi.markBillPrinted()` is now awaited *before* rendering the thermal bill. The official sequential `billNumber` returned by the server is passed into `handlePrintCustomerBill()`, guaranteeing the printed slip always matches the system.
     3. *Pending Bills Queue Invariant*: In `backend/src/routes/orders.js` (`GET /pending-bills`), added an automatic sweep ensuring every order returned in `pending-bills` has an official `billNumber` allocated via `ensureOrderBillNumber()`.
 
+- **v12.1.2 Recipe Management: Universal Unit Conversion Engine & Mandatory Menu Variants (November 13, 2026)**:
+  - **Identified Operational Requirements**:
+    1. *Purchases in Packaging Units vs. Storage in Consumption Units*: Raw materials (such as Mineral Water 1lt) are procured from suppliers in packaging units (e.g., `Box` of 15 bottles), but consumed in recipes and tracked in inventory in consumption units (`Bottle`). When entering purchases, managers record 3 boxes, which must automatically increase inventory stock by 45 bottles and calculate weighted average cost (WAC) per bottle.
+    2. *Mandatory Menu Item Variants in Recipe Builder*: Menu items with variants (such as Water 1lt / 500ml, Chicken Burger Regular / Large) require distinct ingredient quantities per portion. Previously, variants were optional text inputs, risking ambiguous portioning and erroneous stock deductions.
+  - **Architectural Safeguards & Features Implemented (Zero Logic Changes)**:
+    1. *Universal Packaging Unit Conversion in Purchases*:
+       - In `frontend/src/app/purchases/page.tsx`: Line validator updated to permit configured packaging units (`box`, `carton`, `packet`) and standard units, eliminating false validation errors when buying in package units.
+       - The purchase line unit dropdown dynamically surfaces the item's configured packaging unit with its multiplier badge (e.g., `📦 BOX (15 BOTTLE)`), the canonical stock unit (`🥄 BOTTLE (STOCK)`), and standard units.
+       - A live conversion banner displays: `📦 Packaging Rule: 1 box = 15 bottle → Adds 45 bottle to stock (Stored in Inventory)`.
+       - In `backend/src/routes/purchases.js`: Upgraded both `POST /` and `PUT /:id` to convert packaging units to canonical consumption units via `convertUnit` and `UnitConversion` rules before mutating stock, accurately adjusting `currentStock` and canonical `averageCost` per consumption unit.
+    2. *Mandatory Variant Selection in Recipe Builder*:
+       - In `frontend/src/app/recipes/page.tsx`: In the Recipe Editor modal, selecting a menu item dynamically checks if variants exist. If `variants.length > 0`, renders a mandatory, highlighted `<select>` dropdown populated directly with `selectedMenuItem.variants`.
+       - Blocks saving recipes without a chosen variant with toast alert: `"Please select a variant for [Menu Item]. Different variants require different ingredient amounts."`
+       - If the menu item has no variants, renders a disabled indicator: `"Base Item (No Variants Configured)"`.
+       - In `backend/src/routes/recipes.js`: `POST /` and `PUT /:id` strictly reject saving or updating recipes for variant-enabled menu items if `variantName` is omitted or invalid.
+    3. *Unit Conversion Management UX Clarity*:
+       - Explicit labels: `"Purchase Package Unit (Used when adding Purchases) *"`, `"Conversion Factor *"`, and `"Consumption Unit (Stored in Inventory & Recipes) *"`.
+       - Live preview card: `📦 Formula: 1 box = 15 bottle. When you purchase 3 box, inventory will add 45 bottle to stock.`
+    4. *Verification & Production Kiosk Synchronization*:
+       - Validated with automated tests (`test-unit-conversion-and-variants.js`): purchasing 3 boxes @ 15 bottles adds 45 bottles; selling 1 Water (1lt) leaves closing stock of exactly 44 bottles (`15 * 3 - 1 = 44`).
+       - Robocopy-synced all backend and frontend assets and Next.js `.next` production build to `C:\Peyala`.
+       - Restarted local POS server; verified `/recipes` and `/purchases` return HTTP 200 OK.
+
 ---
-*Last Updated: November 12, 2026 (v12.1.1 Bill Number Thermal Printing Parity) · Peyala v12.1 Engineering*
+*Last Updated: November 13, 2026 (v12.1.2 Recipe Management Unit Conversion & Mandatory Variants) · Peyala v12.1 Engineering*

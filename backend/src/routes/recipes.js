@@ -148,6 +148,22 @@ router.post('/', managerOrAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Menu item not found' });
     }
 
+    // Variants are strictly mandatory for menu items configured with variants
+    const hasVariants = Array.isArray(menuItem.variants) && menuItem.variants.length > 0;
+    if (hasVariants) {
+      if (!variantName || !String(variantName).trim()) {
+        return res.status(400).json({
+          message: `Menu item "${menuItem.name}" has ${menuItem.variants.length} variant(s). A specific variant must be selected because different variants require different ingredient amounts.`
+        });
+      }
+      const matched = menuItem.variants.find(v => v.name.toLowerCase() === String(variantName).trim().toLowerCase());
+      if (!matched) {
+        return res.status(400).json({
+          message: `Variant "${variantName}" is invalid for "${menuItem.name}". Available variants: ${menuItem.variants.map(v => v.name).join(', ')}`
+        });
+      }
+    }
+
     const recipeName = name && name.trim() ? name.trim() : (variantName ? `${menuItem.name} (${variantName})` : menuItem.name);
 
     // Validate and normalize ingredients
@@ -249,6 +265,16 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
 
     if (name !== undefined) recipe.name = String(name).trim();
     if (variantName !== undefined) recipe.variantName = variantName ? String(variantName).trim() : null;
+
+    const menuItem = await MenuItem.findById(recipe.menuItem);
+    const hasVariants = menuItem && Array.isArray(menuItem.variants) && menuItem.variants.length > 0;
+    if (hasVariants) {
+      if (!recipe.variantName) {
+        return res.status(400).json({
+          message: `Menu item "${menuItem.name}" has ${menuItem.variants.length} variant(s). A specific variant is required because different variants use different ingredient amounts.`
+        });
+      }
+    }
     if (prepYield !== undefined) recipe.prepYield = Math.max(0.001, Number(prepYield) || 1);
     if (preparationLossPercent !== undefined) recipe.preparationLossPercent = Math.max(0, Number(preparationLossPercent) || 0);
     if (notes !== undefined) recipe.notes = String(notes).trim();

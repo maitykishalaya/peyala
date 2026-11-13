@@ -1166,5 +1166,17 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   2. Pre-allocated `billNumber` via `markBillPrinted()` in `tables/page.tsx` before dispatching thermal bills to the physical printer.
   3. Added queue invariant in `backend/src/routes/orders.js` (`GET /pending-bills`) ensuring all mobile-queued print jobs have official bill numbers allocated before reaching the counter printer.
 
+### 21. Universal Unit Conversion & Mandatory Recipe Variants Engine (November 13, 2026)
+- **Decoupled Purchase Package Units vs. Consumption Stock Units**:
+  - Raw materials can be procured in supplier packaging units (e.g. `Box`, `Carton`, `Packet`) while maintaining inventory stock, weighted average cost (WAC), and recipe consumption in canonical consumption units (e.g. `Bottle`, `Piece`, `ml`, `gram`).
+  - Example: Mineral Water 1lt has a packaging rule `1 Box = 15 Bottles`. Purchasing 3 boxes records the supplier bill as 3 boxes, adds 45 bottles to stock, and calculates unit cost per bottle. Selling 1 Water (1lt) deducts 1 bottle, leaving exactly 44 bottles ($15 \times 3 - 1 = 44$).
+  - Upgraded `/purchases` form validator and line item selector to display configured packaging units with multiplier badges (e.g. `📦 BOX (15 BOTTLE)`), canonical stock units (`🥄 BOTTLE (STOCK)`), and live conversion helper banners (`→ Adds 45 bottle to stock`).
+  - Upgraded `backend/src/routes/purchases.js` `POST /` and `PUT /:id` to convert packaging units to canonical consumption units before stock and average cost mutations.
+- **Mandatory Menu Item Variants in Recipe Builder**:
+  - In `/recipes`, the Recipe Editor modal dynamically inspects whether the selected menu item has variants.
+  - If variants exist, renders a mandatory, highlighted `<select>` dropdown containing all configured variants (e.g. *1 Lt*, *500 ml*, *Regular*, *Large*).
+  - Saving a recipe without selecting a variant is strictly blocked on both frontend and backend (`POST /api/recipes` and `PUT /api/recipes/:id`) with actionable error messages: `"Please select a variant for [Menu Item]. Different variants require different ingredient amounts."`
+  - Items without variants show a clear, disabled indicator: `"Base Item (No Variants Configured)"`.
+
 - **Recipe Management & Automated Inventory Consumption (`/recipes`)**: Connects menu items to raw materials, decimal-safe unit conversion adapter for bulk procurement (packets, bottles, boxes, cartons, kg) into canonical consumption units (grams, ml, bottles, pieces), multi-round KOT auto-consumption, idempotency protection, item & order cancellation reversals, heuristic auto-recipe generator (289 draft recipes pre-seeded), and admin-controlled master toggle (`POSSetting.recipeInventoryAutomationEnabled`).
 - **Decoupled Purchase vs. Consumption Unit Architecture**: Supports purchasing goods in supplier packages (e.g., Box of 15 Bottles) while tracking stock, recipes, and weighted average cost in granular consumption units (e.g., Bottle). Purchasing 3 boxes automatically yields 45 bottles (+45), while selling 1 water deducts 1 bottle, bringing remaining stock to 44 ($15 \times 3 - 1 = 44$) with automatic unit price scaling in stock and purchase records. Unlocked purchase line unit selection in `/purchases` with real-time conversion badges.

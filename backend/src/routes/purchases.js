@@ -313,20 +313,49 @@ router.put('/:id', async (req, res) => {
       const { date, supplier, items, paidFrom, paymentMode, notes, referenceNumber } = req.body;
       const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
 
-      const itemIds = items.filter(i => i.item).map(i => i.item);
-      const inventoryItems = await InventoryItem.find({ _id: { $in: itemIds } }).select('unit name');
+      const allItemIds = [
+        ...purchase.items.filter(i => i.item).map(i => i.item.toString()),
+        ...items.filter(i => i.item).map(i => i.item.toString()),
+      ];
+      const inventoryItems = await InventoryItem.find({ _id: { $in: allItemIds } }).select('unit name');
       const unitMap = inventoryItems.reduce((map, inv) => {
         map[inv._id.toString()] = inv.unit;
         return map;
       }, {});
 
-      items.forEach((line, idx) => {
-        if (line.item && unitMap[line.item.toString()] && line.unit !== unitMap[line.item.toString()]) {
-          const error = new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory item unit '${unitMap[line.item.toString()]}'.`);
-          error.statusCode = 400;
-          throw error;
+      const customConversions = await UnitConversion.find({
+        inventoryItem: { $in: allItemIds },
+        isActive: true,
+      }).lean();
+
+      const convMap = new Map();
+      for (const rule of customConversions) {
+        convMap.set(`${rule.inventoryItem}_${normalizeUnit(rule.purchaseUnit)}`, rule);
+      }
+
+      const getCanonicalQty = (itemId, qty, unit, invUnit) => {
+        if (!itemId || !qty) return 0;
+        const normUnit = normalizeUnit(unit);
+        const normInvUnit = normalizeUnit(invUnit);
+        if (normUnit === normInvUnit) return qty;
+        const customRule = convMap.get(`${itemId}_${normUnit}`);
+        const conv = convertUnit(qty, unit, invUnit, customRule?.conversionFactor, customRule?.purchaseUnit, customRule?.canonicalUnit);
+        if (conv.success) return conv.quantity;
+        return null;
+      };
+
+      for (let idx = 0; idx < items.length; idx++) {
+        const line = items[idx];
+        if (line.item && unitMap[line.item.toString()]) {
+          const invUnit = unitMap[line.item.toString()];
+          const canonical = getCanonicalQty(line.item.toString(), line.quantity, line.unit, invUnit);
+          if (canonical === null) {
+            const error = new Error(`Line ${idx + 1}: unit '${line.unit}' does not match inventory stock unit '${invUnit}' and no conversion rule is configured.`);
+            error.statusCode = 400;
+            throw error;
+          }
         }
-      });
+      }
 
       const isDue = paymentMode === 'due';
       if (!isDue && !paidFrom) {
@@ -342,16 +371,21 @@ router.put('/:id', async (req, res) => {
 
       const oldItemMap = purchase.items.reduce((map, item) => {
         const id = item.item.toString();
+        const invUnit = unitMap[id];
+        const canonicalQty = getCanonicalQty(id, item.quantity, item.unit, invUnit) ?? item.quantity;
         if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
-        map[id].qty += item.quantity;
+        map[id].qty += canonicalQty;
         map[id].totalPrice += item.totalPrice;
         return map;
       }, {});
 
       const newItemMap = items.reduce((map, item) => {
         const id = item.item.toString();
-        if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: item.pricePerUnit, unit: item.unit };
-        map[id].qty += item.quantity;
+        const invUnit = unitMap[id];
+        const canonicalQty = getCanonicalQty(id, item.quantity, item.unit, invUnit) ?? item.quantity;
+        const canonicalUnitPrice = canonicalQty > 0 ? roundPrecision(item.totalPrice / canonicalQty, 4) : item.pricePerUnit;
+        if (!map[id]) map[id] = { qty: 0, totalPrice: 0, pricePerUnit: canonicalUnitPrice, unit: item.unit };
+        map[id].qty += canonicalQty;
         map[id].totalPrice += item.totalPrice;
         return map;
       }, {});
@@ -380,7 +414,7 @@ router.put('/:id', async (req, res) => {
 
           await InventoryItem.findByIdAndUpdate(itemId, {
             $inc: { currentStock: newLine.qty },
-            averageCost: newAverageCost,
+            averageCost: roundPrecision(newAverageCost, 4),
             lastPurchasePrice: newLine.pricePerUnit,
           }, opts);
         }

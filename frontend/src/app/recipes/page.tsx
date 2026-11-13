@@ -307,6 +307,13 @@ export default function RecipesPage() {
       toast.error('Please select a menu item.');
       return;
     }
+
+    const selectedItem = menuItems.find(m => m._id === recipeForm.menuItemId);
+    if (selectedItem?.variants && selectedItem.variants.length > 0 && !recipeForm.variantName) {
+      toast.error(`Please select a variant for "${selectedItem.name}". Different variants require different ingredient amounts.`);
+      return;
+    }
+
     if (recipeForm.ingredients.length === 0) {
       toast.error('At least one ingredient is required.');
       return;
@@ -1145,45 +1152,88 @@ export default function RecipesPage() {
           size="lg"
         >
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                  Menu Item *
-                </label>
-                <select
-                  value={recipeForm.menuItemId}
-                  onChange={e => {
-                    const selected = menuItems.find(m => m._id === e.target.value);
-                    setRecipeForm(prev => ({
-                      ...prev,
-                      menuItemId: e.target.value,
-                      name: selected ? selected.name : prev.name,
-                    }));
-                  }}
-                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"
-                >
-                  <option value="">Select Menu Item...</option>
-                  {menuItems.map(m => (
-                    <option key={m._id} value={m._id}>
-                      {m.name} ({formatCurrency(m.price)})
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {(() => {
+              const selectedItem = menuItems.find(m => m._id === recipeForm.menuItemId);
+              const hasItemVariants = Array.isArray(selectedItem?.variants) && selectedItem.variants.length > 0;
 
-              <div>
-                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                  Variant (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Regular, Large, 6pc"
-                  value={recipeForm.variantName}
-                  onChange={e => setRecipeForm(prev => ({ ...prev, variantName: e.target.value }))}
-                  className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"
-                />
-              </div>
-            </div>
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Menu Item *
+                    </label>
+                    <select
+                      value={recipeForm.menuItemId}
+                      onChange={e => {
+                        const selId = e.target.value;
+                        const selected = menuItems.find(m => m._id === selId);
+                        setRecipeForm(prev => ({
+                          ...prev,
+                          menuItemId: selId,
+                          variantName: '',
+                          name: selected ? selected.name : '',
+                        }));
+                      }}
+                      className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"
+                    >
+                      <option value="">Select Menu Item...</option>
+                      {menuItems.map(m => (
+                        <option key={m._id} value={m._id}>
+                          {m.name} ({formatCurrency(m.price)}) {m.variants?.length ? `· ${m.variants.length} variants` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    {hasItemVariants ? (
+                      <div>
+                        <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 mb-1 flex items-center justify-between">
+                          <span>Variant * (Required)</span>
+                          <span className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                            {selectedItem.variants.length} variant{selectedItem.variants.length > 1 ? 's' : ''} available
+                          </span>
+                        </label>
+                        <select
+                          value={recipeForm.variantName}
+                          onChange={e => {
+                            const vName = e.target.value;
+                            setRecipeForm(prev => ({
+                              ...prev,
+                              variantName: vName,
+                              name: vName ? `${selectedItem.name} (${vName})` : selectedItem.name,
+                            }));
+                          }}
+                          className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border-2 border-amber-500/60 dark:border-amber-500/60 rounded-xl font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500"
+                        >
+                          <option value="">-- Select Variant (Required) --</option>
+                          {selectedItem.variants.map((v: any, vIdx: number) => (
+                            <option key={vIdx} value={v.name}>
+                              {v.name} ({formatCurrency(v.price)}) {v.isVeg ? '🌱 Veg' : '🍗 Non-Veg'}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 block">
+                          Variants require distinct ingredient amounts.
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">
+                          Variant
+                        </label>
+                        <input
+                          type="text"
+                          disabled
+                          value={recipeForm.menuItemId ? 'Base Item (No Variants Configured)' : 'Select menu item first'}
+                          className="w-full text-sm p-2.5 bg-gray-100 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-400 dark:text-gray-500 italic cursor-not-allowed"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
@@ -1387,7 +1437,7 @@ export default function RecipesPage() {
                   onChange={e => setConversionForm(prev => ({ ...prev, purchaseUnit: e.target.value }))}
                   className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-semibold uppercase"
                 />
-                <span className="text-[11px] text-gray-400 mt-0.5 block">What you buy from suppliers</span>
+                <span className="text-[11px] text-gray-400 mt-0.5 block">Used when adding Purchases</span>
               </div>
 
               <div>
@@ -1402,12 +1452,12 @@ export default function RecipesPage() {
                   onChange={e => setConversionForm(prev => ({ ...prev, conversionFactor: Number(e.target.value) || 1 }))}
                   className="w-full text-sm p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-mono font-bold text-right text-amber-600"
                 />
-                <span className="text-[11px] text-gray-400 mt-0.5 block">Units per package</span>
+                <span className="text-[11px] text-gray-400 mt-0.5 block">How many consumption units per package</span>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                  Consumption / Recipe Unit *
+                  Consumption Unit *
                 </label>
                 <select
                   value={conversionForm.canonicalUnit}
@@ -1418,7 +1468,7 @@ export default function RecipesPage() {
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
-                <span className="text-[11px] text-gray-400 mt-0.5 block">Used in recipes & stock</span>
+                <span className="text-[11px] text-gray-400 mt-0.5 block">Stored in Inventory & used in Recipes</span>
               </div>
             </div>
 
