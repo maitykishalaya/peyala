@@ -148,15 +148,17 @@ router.post('/', managerOrAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Menu item not found' });
     }
 
-    // Variants are strictly mandatory for menu items configured with variants
-    const hasVariants = Array.isArray(menuItem.variants) && menuItem.variants.length > 0;
+    // Variants are strictly mandatory ONLY for menu items configured with hasVariants: true
+    const hasVariants = Boolean(menuItem && menuItem.hasVariants && Array.isArray(menuItem.variants) && menuItem.variants.length > 0);
+    const resolvedVariantName = hasVariants && variantName && String(variantName).trim() ? String(variantName).trim() : null;
+
     if (hasVariants) {
-      if (!variantName || !String(variantName).trim()) {
+      if (!resolvedVariantName) {
         return res.status(400).json({
           message: `Menu item "${menuItem.name}" has ${menuItem.variants.length} variant(s). A specific variant must be selected because different variants require different ingredient amounts.`
         });
       }
-      const matched = menuItem.variants.find(v => v.name.toLowerCase() === String(variantName).trim().toLowerCase());
+      const matched = menuItem.variants.find(v => v.name.toLowerCase() === resolvedVariantName.toLowerCase());
       if (!matched) {
         return res.status(400).json({
           message: `Variant "${variantName}" is invalid for "${menuItem.name}". Available variants: ${menuItem.variants.map(v => v.name).join(', ')}`
@@ -164,7 +166,7 @@ router.post('/', managerOrAdmin, async (req, res) => {
       }
     }
 
-    const recipeName = name && name.trim() ? name.trim() : (variantName ? `${menuItem.name} (${variantName})` : menuItem.name);
+    const recipeName = name && name.trim() ? name.trim() : (resolvedVariantName ? `${menuItem.name} (${resolvedVariantName})` : menuItem.name);
 
     // Validate and normalize ingredients
     const processedIngredients = [];
@@ -267,13 +269,15 @@ router.put('/:id', managerOrAdmin, async (req, res) => {
     if (variantName !== undefined) recipe.variantName = variantName ? String(variantName).trim() : null;
 
     const menuItem = await MenuItem.findById(recipe.menuItem);
-    const hasVariants = menuItem && Array.isArray(menuItem.variants) && menuItem.variants.length > 0;
+    const hasVariants = Boolean(menuItem && menuItem.hasVariants && Array.isArray(menuItem.variants) && menuItem.variants.length > 0);
     if (hasVariants) {
       if (!recipe.variantName) {
         return res.status(400).json({
           message: `Menu item "${menuItem.name}" has ${menuItem.variants.length} variant(s). A specific variant is required because different variants use different ingredient amounts.`
         });
       }
+    } else {
+      recipe.variantName = null;
     }
     if (prepYield !== undefined) recipe.prepYield = Math.max(0.001, Number(prepYield) || 1);
     if (preparationLossPercent !== undefined) recipe.preparationLossPercent = Math.max(0, Number(preparationLossPercent) || 0);

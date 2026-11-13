@@ -103,8 +103,9 @@ async function generateRecipeSuggestions({ menuItemId = null, userId = null } = 
   let skippedCount = 0;
 
   for (const menuItem of menuItems) {
-    // Check variants or generate for base item
-    const variants = (menuItem.variants && menuItem.variants.length > 0)
+    // Check variants or generate for base item (only items with hasVariants === true have true portion variants)
+    const hasVariants = Boolean(menuItem.hasVariants && Array.isArray(menuItem.variants) && menuItem.variants.length > 0);
+    const variants = hasVariants
       ? menuItem.variants
       : [{ name: null, price: menuItem.price }];
 

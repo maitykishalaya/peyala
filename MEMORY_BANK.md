@@ -650,10 +650,11 @@ Peyala v8 is a production-grade restaurant operations and management system buil
      - Backward-compatible procurement adapter in `backend/src/routes/purchases.js`: converts received purchase units into canonical stock units before calculating Weighted Average Cost (WAC) and stores `lastPurchasePrice` in canonical stock units.
      - Purchases UI (`frontend/src/app/purchases/page.tsx`) features unlocked unit selection, auto-defaults to configured purchase packaging units, and renders real-time stock multiplication previews.
      - Recipes UI (`frontend/src/app/recipes/page.tsx`) provides dual-unit configuration (Purchase Unit $\rightarrow$ Consumption Unit) with interactive formula cards and 1-click existing stock/cost alignment.
-  4. **Recipe Model (`backend/src/models/Recipe.js`)**:
-     - Links to `menuItem` + optional `variantName`.
-     - Supports versioning (`v1`, `v2`), yields, loss %, estimated cost calculated from current ingredient WAC, and confidence scores.
-     - Status: `draft`, `active`, `inactive`.
+  4. **Recipe Model (ackend/src/models/Recipe.js)**:
+     - Links to menuItem + optional ariantName.
+     - **Strict Variant Validation Guard**: Only menu items where item.hasVariants === true && item.variants.length > 0 require portion variants (e.g. Water 1lt / 500ml, Cold Coffee, Pizzas, Noodles). Base items where hasVariants: false (e.g. Masala Cold Drinks) strictly enforce ariantName: null, preventing legacy or dummy variant records from prompting for portion choices.
+     - Supports versioning (1, 2), yields, loss %, estimated cost calculated from current ingredient WAC, and confidence scores.
+     - Status: draft, ctive, inactive.
   5. **Automated Recipe Generation Engine (`backend/src/services/recipeSuggestionEngine.js`)**:
      - Evaluates all active menu items against inventory items using culinary taxonomy.
      - Generated 289 initial draft recipes tagged strictly as `DRAFT — NOT ACTIVE` with confidence scores and requiring explicit admin review and approval before activation.

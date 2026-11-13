@@ -309,7 +309,8 @@ export default function RecipesPage() {
     }
 
     const selectedItem = menuItems.find(m => m._id === recipeForm.menuItemId);
-    if (selectedItem?.variants && selectedItem.variants.length > 0 && !recipeForm.variantName) {
+    const hasItemVariants = Boolean(selectedItem?.hasVariants && Array.isArray(selectedItem?.variants) && selectedItem.variants.length > 0);
+    if (hasItemVariants && !recipeForm.variantName) {
       toast.error(`Please select a variant for "${selectedItem.name}". Different variants require different ingredient amounts.`);
       return;
     }
@@ -323,7 +324,7 @@ export default function RecipesPage() {
     try {
       const payload: any = {
         menuItemId: recipeForm.menuItemId,
-        variantName: recipeForm.variantName || null,
+        variantName: hasItemVariants ? (recipeForm.variantName || null) : null,
         name: recipeForm.name,
         status: targetStatus || recipeForm.status,
         prepYield: Number(recipeForm.prepYield) || 1,
@@ -1154,7 +1155,7 @@ export default function RecipesPage() {
           <div className="space-y-4">
             {(() => {
               const selectedItem = menuItems.find(m => m._id === recipeForm.menuItemId);
-              const hasItemVariants = Array.isArray(selectedItem?.variants) && selectedItem.variants.length > 0;
+              const hasItemVariants = Boolean(selectedItem?.hasVariants && Array.isArray(selectedItem?.variants) && selectedItem.variants.length > 0);
 
               return (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1179,7 +1180,7 @@ export default function RecipesPage() {
                       <option value="">Select Menu Item...</option>
                       {menuItems.map(m => (
                         <option key={m._id} value={m._id}>
-                          {m.name} ({formatCurrency(m.price)}) {m.variants?.length ? `· ${m.variants.length} variants` : ''}
+                          {m.name} ({formatCurrency(m.price)}) {m.hasVariants && m.variants?.length ? `· ${m.variants.length} variants` : ''}
                         </option>
                       ))}
                     </select>
