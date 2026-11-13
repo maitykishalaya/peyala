@@ -8,12 +8,16 @@ const os = require('os');
 // ── Critical Windows OS & Chromium Engine Stability Tuning ──────────
 // 1. Disable hardware acceleration: Eliminates Chromium D3D11/DirectComposition swapchain stalls on Windows
 //    which cause keyboard keystrokes to queue up and freeze textboxes until an OS DWM paint event (Alt+Tab).
-app.disableHardwareAcceleration();
+if (app && typeof app.disableHardwareAcceleration === 'function') {
+  app.disableHardwareAcceleration();
+}
 
 // 2. Prevent Chromium from throttling rendering, timers, or input event loops on Windows
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+if (app && app.commandLine) {
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+}
 
 let mainWindow = null;
 let tray = null;
