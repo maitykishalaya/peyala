@@ -127,13 +127,16 @@ router.get('/:id/ledger', async (req, res) => {
           }
         }
 
-        if (s.zomato?.netSettlement > 0 && s.zomato?.receivedIn?.toString() === accountId) {
+        const zomatoRec = (s.zomato?.receivedIn?._id || s.zomato?.receivedIn)?.toString();
+        if (s.zomato?.netSettlement > 0 && zomatoRec === accountId) {
           salesCredits.push({ _id: s._id, date: s.date, amount: s.zomato.netSettlement, description: 'Zomato Net Settlement', type: 'sale_credit', paymentMode: 'platform' });
         }
-        if (s.fatafat?.netSettlement > 0 && s.fatafat?.receivedIn?.toString() === accountId) {
+        const fatafatRec = (s.fatafat?.receivedIn?._id || s.fatafat?.receivedIn)?.toString();
+        if (s.fatafat?.netSettlement > 0 && fatafatRec === accountId) {
           salesCredits.push({ _id: s._id, date: s.date, amount: s.fatafat.netSettlement, description: 'Fatafat Net Settlement', type: 'sale_credit', paymentMode: 'platform' });
         }
-        if ((s.otherSales || 0) > 0 && s.otherSalesReceivedIn?.toString() === accountId) {
+        const otherRec = (s.otherSalesReceivedIn?._id || s.otherSalesReceivedIn)?.toString();
+        if ((s.otherSales || 0) > 0 && otherRec === accountId) {
           salesCredits.push({ _id: s._id, date: s.date, amount: s.otherSales, description: 'Other Sales', type: 'sale_credit', paymentMode: 'platform' });
         }
       });

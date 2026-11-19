@@ -36,9 +36,11 @@ router.use(auth);
 async function applyNonOutletCredits(sale, multiplier) {
   if (!sale) return;
 
+  const getAccId = (acc) => (acc && acc._id ? acc._id : acc);
+
   const platformCredits = [
-    { amount: sale.zomato?.netSettlement || 0, accountId: sale.zomato?.receivedIn },
-    { amount: sale.fatafat?.netSettlement || 0, accountId: sale.fatafat?.receivedIn },
+    { amount: sale.zomato?.netSettlement || 0, accountId: getAccId(sale.zomato?.receivedIn) },
+    { amount: sale.fatafat?.netSettlement || 0, accountId: getAccId(sale.fatafat?.receivedIn) },
   ];
 
   for (const credit of platformCredits) {
@@ -57,8 +59,9 @@ async function applyNonOutletCredits(sale, multiplier) {
     }
   }
 
-  if ((sale.otherSales || 0) !== 0 && sale.otherSalesReceivedIn) {
-    const updated = await Account.findByIdAndUpdate(sale.otherSalesReceivedIn, {
+  const otherAccId = getAccId(sale.otherSalesReceivedIn);
+  if ((sale.otherSales || 0) !== 0 && otherAccId) {
+    const updated = await Account.findByIdAndUpdate(otherAccId, {
       $inc: { currentBalance: (sale.otherSales || 0) * multiplier },
     }, { new: true });
     if (updated) {
@@ -223,6 +226,11 @@ router.post('/', async (req, res) => {
       // Apply new non-outlet credits
       await applyNonOutletCredits(payload, +1);
 
+      try {
+        const { recalculateAccountBalances } = require('../utils/accountLedger');
+        await recalculateAccountBalances();
+      } catch (_) {}
+
       await log({
         user: req.user,
         action: 'UPDATE',
@@ -255,6 +263,11 @@ router.post('/', async (req, res) => {
     });
 
     await applyNonOutletCredits(payload, +1);
+
+    try {
+      const { recalculateAccountBalances } = require('../utils/accountLedger');
+      await recalculateAccountBalances();
+    } catch (_) {}
 
     await log({
       user: req.user,
@@ -317,6 +330,11 @@ router.put('/:id', async (req, res) => {
     // Apply new non-outlet credits
     await applyNonOutletCredits(payload, +1);
 
+    try {
+      const { recalculateAccountBalances } = require('../utils/accountLedger');
+      await recalculateAccountBalances();
+    } catch (_) {}
+
     await log({
       user: req.user,
       action: 'UPDATE',
@@ -366,6 +384,11 @@ router.delete('/:id', async (req, res) => {
     } else {
       await SalesEntry.findByIdAndDelete(req.params.id);
     }
+
+    try {
+      const { recalculateAccountBalances } = require('../utils/accountLedger');
+      await recalculateAccountBalances();
+    } catch (_) {}
 
     await log({
       user: req.user,

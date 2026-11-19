@@ -131,23 +131,41 @@ async function recalculateAccountBalances(customConn = null) {
     ]).toArray();
     const totalDuesIn = duesIn[0]?.total || 0;
 
-    // 7. Inflows: POS Sales (Strictly isolated: Cash -> Cash Counter, Digital -> Current Account, Zero for others)
+    // 7. Inflows: Sales & Platform Settlements
+    // Strictly account-isolated:
+    // - Cash Counter: POS Cash sales
+    // - Current Account: POS Digital (UPI/Card/Bank/Other) sales
+    // - Platform Settlements (Fatafat, Zomato) & Other Sales: Credited to designated receivedIn account
     let totalSalesIn = 0;
-    const isCashCounter = /cash counter/i.test(acc.name) && acc.type === 'cash';
-    const isCurrentAccount = /current account/i.test(acc.name) && ['bank', 'digital'].includes(acc.type);
+    const isCashCounter = (/cash counter/i.test(acc.name) || accIdStr === '6a45128e43474cf64bb06ee6') && acc.type === 'cash';
+    const isCurrentAccount = (/current account/i.test(acc.name) || accIdStr === '6a4512dd43474cf64bb06eef') && ['bank', 'digital'].includes(acc.type);
 
-    if (isCashCounter || isCurrentAccount) {
-      const salesEntries = await salesCol.find(dateQuery).toArray();
-      for (const s of salesEntries) {
-        const pb = s.paymentBreakdown || {};
-        if (isCashCounter) {
-          totalSalesIn += (Number(pb.cash) || Number(s.cash) || 0);
-        } else if (isCurrentAccount) {
-          totalSalesIn += (Number(pb.upi) || Number(s.upi) || 0) +
-                          (Number(pb.card) || Number(s.card) || 0) +
-                          (Number(pb.bankTransfer) || Number(s.online) || 0) +
-                          (Number(pb.other) || Number(s.other) || 0);
-        }
+    const salesEntries = await salesCol.find(dateQuery).toArray();
+    for (const s of salesEntries) {
+      const pb = s.paymentBreakdown || {};
+      if (isCashCounter) {
+        totalSalesIn += (Number(pb.cash) || Number(s.cash) || 0);
+      } else if (isCurrentAccount) {
+        totalSalesIn += (Number(pb.upi) || Number(s.upi) || 0) +
+                        (Number(pb.card) || Number(s.card) || 0) +
+                        (Number(pb.bankTransfer) || Number(s.online) || 0) +
+                        (Number(pb.other) || Number(s.other) || 0);
+      }
+
+      // Platform Settlements (Fatafat, Zomato) & Other Sales credited to this specific receivedIn account
+      const fatafatRecIn = s.fatafat?.receivedIn ? (s.fatafat.receivedIn._id || s.fatafat.receivedIn).toString() : null;
+      if (fatafatRecIn === accIdStr) {
+        totalSalesIn += (Number(s.fatafat?.netSettlement) || 0);
+      }
+
+      const zomatoRecIn = s.zomato?.receivedIn ? (s.zomato.receivedIn._id || s.zomato.receivedIn).toString() : null;
+      if (zomatoRecIn === accIdStr) {
+        totalSalesIn += (Number(s.zomato?.netSettlement) || 0);
+      }
+
+      const otherRecIn = s.otherSalesReceivedIn ? (s.otherSalesReceivedIn._id || s.otherSalesReceivedIn).toString() : null;
+      if (otherRecIn === accIdStr) {
+        totalSalesIn += (Number(s.otherSales) || 0);
       }
     }
 

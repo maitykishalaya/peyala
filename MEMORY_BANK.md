@@ -1571,5 +1571,26 @@ Whenever changes are made, run this validation suite before concluding:
        - Robocopy-synced all backend and frontend assets and Next.js `.next` production build to `C:\Peyala`.
        - Restarted local POS server; verified `/recipes` and `/purchases` return HTTP 200 OK.
 
+- **v12.1.3 Non-Outlet Platform Settlements (Fatafat, Zomato, Other Sales) Account Balance Ledger Fix (November 19, 2026)**:
+  - **Identified Operational Incident**:
+    1. When adding a Fatafat payout (or Zomato net settlement / Other Sales) in the Sales page (`/sales`), the daily total sales amount and Dashboard P&L metrics were updated accurately, but the destination account balance did not reflect the payout.
+    2. *Root Cause*: In `backend/src/utils/accountLedger.js`, `recalculateAccountBalances()` serves as the single source of deterministic truth for live account balances. It is executed on every `GET /api/accounts` (polled every 20s and upon navigating to `/accounts`), during background sync reconciliation cycles (`syncEngine.js`), on customer due collections, and nightly snapshots.
+    3. Previously, section 7 (`totalSalesIn`) strictly queried `salesCol` only if `isCashCounter || isCurrentAccount`, and inside the loop it *only* factored in POS outlet sales (`pb.cash` for Cash Counter and `pb.upi/card/bankTransfer/other` for Current Account). Platform settlements (`s.fatafat?.netSettlement`, `s.zomato?.netSettlement`, and `s.otherSales`) were completely omitted.
+    4. Consequently, any ad-hoc `$inc` applied by `applyNonOutletCredits()` was immediately overwritten and wiped out by `recalculateAccountBalances()`. Furthermore, if a non-outlet payout was received into any other account, `totalSalesIn` evaluated to `0`.
+  - **Architectural Safeguards & Resolution (Zero Logic Changes)**:
+    1. *Deterministic Multi-Account Ledger Recalculation Engine (`backend/src/utils/accountLedger.js`)*:
+       - Updated `recalculateAccountBalances()` to query all `salesEntries` within the account's milestone `dateQuery`.
+       - Kept existing outlet sales isolation 100% intact: POS Cash sales strictly credit Cash Counter; POS Digital sales strictly credit Current Account.
+       - Added platform settlement crediting: for any account, if `s.fatafat?.receivedIn` matches the account ID, adds `Number(s.fatafat.netSettlement) || 0`. If `s.zomato?.receivedIn` matches the account ID, adds `Number(s.zomato.netSettlement) || 0`. If `s.otherSalesReceivedIn` matches the account ID, adds `Number(s.otherSales) || 0`.
+    2. *Sales Route Balance Re-anchoring (`backend/src/routes/sales.js`)*:
+       - Hardened `applyNonOutletCredits` helper with safe ID unboxing (`getAccId`) to support both raw ID strings and populated account objects.
+       - In `POST /api/sales`, `PUT /api/sales/:id`, and `DELETE /api/sales/:id`, added automatic calls to `await recalculateAccountBalances()` immediately following credit application/reversals, guaranteeing account balances are instantly re-anchored and real-time events broadcast without delay.
+    3. *Accounts Ledger Transaction Sync (`backend/src/routes/accounts.js`)*:
+       - Hardened `GET /api/accounts/:id/ledger` platform ID matching to handle both populated and unpopulated account IDs uniformly.
+    4. *Verification & Production Kiosk Synchronization*:
+       - Validated with isolated in-memory unit tests (`test_ledger.js` using both string IDs and BSON `ObjectId` instances): verified Cash Counter, Current Account, and external accounts accurately reflect outlet sales and platform payouts.
+       - Strictly zero testing or mutations executed on the user's active local MongoDB or Central Atlas databases.
+       - Robocopy-synced all backend updates (`accountLedger.js`, `sales.js`, `accounts.js`) to `C:\Peyala\backend\src`.
+
 ---
-*Last Updated: November 13, 2026 (v12.1.2 Recipe Management Unit Conversion & Mandatory Variants) · Peyala v12.1 Engineering*
+*Last Updated: November 19, 2026 (v12.1.3 Non-Outlet Platform Settlements Account Balance Fix) · Peyala v12.1 Engineering*
