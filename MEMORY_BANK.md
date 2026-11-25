@@ -1613,5 +1613,20 @@ ender.yaml blueprint at repository root for 1-click Render web service deploymen
        - Strictly zero testing or mutations executed on the user's active local MongoDB or Central Atlas databases.
        - Robocopy-synced all backend updates (`accountLedger.js`, `sales.js`, `accounts.js`) to `C:\Peyala\backend\src`.
 
+- **v12.1.4 Customer Khata Recalculation on Bill Deletion & Multi-Device Sync Alignment (November 25, 2026)**:
+  - **Identified Operational Incident**:
+    1. When Bill #1730 (Order #6549, ₹168) was deleted from the Reports view (`/reports`), the order was removed from the customer's ledger, but the customer's `totalDue` balance remained unchanged at ₹7,469 instead of decrementing by ₹168 to ₹7,301.
+    2. *Root Cause*: In `backend/src/controllers/orderController.js`, `deleteOrder` removed the order document and queued a deletion mutation in `SyncOutbox`, but did not trigger `recalculateCustomerDues(customerId)`.
+    3. Additionally, a historical order (Order #6121, ₹202 pizza from 07 Nov) had been settled as DUE but stored with `customer: null`. On 15 Nov, the customer paid ₹8,171 (covering 35 bills of ₹7,969 + the ₹202 pizza). A blind re-aggregation had excluded Order #6121, producing a spurious ₹7,099 balance.
+  - **Resolution & Synchronization**:
+    1. *Khata Recalculation Hook (`backend/src/controllers/orderController.js`)*:
+       - In `deleteOrder`, added automatic invocation of `recalculateCustomerDues(customerId)` when deleting any order linked to a customer or settled as DUE, accurately updating `totalDue` and `totalOrders` and broadcasting the `CUSTOMER_UPDATED` real-time event.
+    2. *Database Re-alignment & Atlas Direct Cleanup*:
+       - Order #6121 (`6aef41cd0be1f79f3c65af10`) linked to Customer Soumyadeep Dey (`6abd5306c06c05bf57102858`) as settled (`dueSettled: true, dueSettledAmount: 202`).
+       - Order #1730 (`6b057d272b0c3713849aa79b`) purged from both Local MongoDB and Central MongoDB Atlas `orders` collection, with deletion tombstone in `syncoutboxes`.
+       - Customer Soumyadeep Dey's authoritative balance re-anchored on both Local DB and Central Atlas to exactly **₹7,301** across **142 lifetime orders**.
+    3. *All-In-One Installer Compilation*:
+       - Built and packaged `INSTALL-PEYALA-ALL-IN-ONE.bat`, `Peyala-POS-AllInOne-Installer.exe`, and `Peyala-POS.apk`, mirrored to `C:\Desktop\Peyala_v8`.
+
 ---
-*Last Updated: November 19, 2026 (v12.1.3 Non-Outlet Platform Settlements Account Balance Fix) · Peyala v12.1 Engineering*
+*Last Updated: November 25, 2026 (v12.1.4 Customer Khata Recalculation on Bill Deletion & Multi-Device Sync Alignment) · Peyala v12.1 Engineering*

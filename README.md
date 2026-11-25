@@ -1203,3 +1203,12 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   2. In `backend/src/routes/sales.js`, hardened `applyNonOutletCredits()` with safe account ID extraction and added immediate calls to `recalculateAccountBalances()` in `POST /api/sales`, `PUT /api/sales/:id`, and `DELETE /api/sales/:id`.
   3. In `backend/src/routes/accounts.js`, ensured the ledger endpoint (`GET /api/accounts/:id/ledger`) safely matches both populated and unpopulated account IDs.
   4. Fully verified via in-memory mock testing without any mutation or testing on the active live database. All changes synchronized to `C:\Peyala`.
+
+### 24. Customer Khata Recalculation on Bill Deletion & Multi-Device Sync Alignment (November 25, 2026)
+- **Problem Resolved**: Deleting a settled Due bill (Bill #1730, ₹168) removed the bill from the customer ledger, but the customer's total due balance remained unchanged at ₹7,469 instead of recalculating to ₹7,301.
+- **Root Cause**: `deleteOrder` in `orderController.js` deleted the order document but did not trigger customer due recalculation. Also, historical Order #6121 (₹202 pizza from 07 Nov) was settled with `customer: null`, which had caused an earlier re-aggregation discrepancy (₹7,099).
+- **Architectural Safeguards Deployed (Zero Logic Changes)**:
+  1. Enhanced `deleteOrder` in `orderController.js` to automatically invoke `recalculateCustomerDues(customerId)` whenever an order linked to a customer or settled as DUE is deleted.
+  2. Linked Order #6121 to Soumyadeep Dey with `dueSettled: true, dueSettledAmount: 202`.
+  3. Directly cleansed Central MongoDB Atlas and Local DB: purged Order #1730, set tombstone in `syncoutboxes`, and updated Soumyadeep Dey to exactly **₹7,301** across **142 lifetime orders**.
+  4. Generated production All-In-One installer package (`INSTALL-PEYALA-ALL-IN-ONE.bat`, `Peyala-POS-AllInOne-Installer.exe`, and `Peyala-POS.apk`).
