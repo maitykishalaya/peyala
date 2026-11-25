@@ -245,6 +245,16 @@ class SyncEngine {
         const isCentralTerminal = cStatus === 'paid' || cStatus === 'cancelled';
 
         if (!isCentralTerminal) {
+          // Check if this local order was deleted via SyncOutbox
+          const isDeletedLocally = await mongoose.connection.db.collection('syncoutboxes').findOne({
+            collectionName: 'Order',
+            documentId: localOrd._id,
+            operation: 'delete',
+          }).catch(() => null);
+          if (isDeletedLocally) {
+            continue;
+          }
+
           console.log(`[SyncEngine] Proactive Healing: Local Order #${localOrd.orderNumber} is "${localOrd.status}" but Central is "${cStatus || 'missing'}". Pushing to Central...`);
           await centralOrdersCol.replaceOne(
             { _id: localOrd._id },
@@ -923,6 +933,20 @@ class SyncEngine {
             const ops = [];
             for (const doc of docs) {
               const localDoc = localMap.get(String(doc._id));
+
+              // If order is missing locally, check if it was deleted locally via SyncOutbox
+              if (colName === 'orders' && !localDoc) {
+                const isDeletedLocally = await mongoose.connection.db.collection('syncoutboxes').findOne({
+                  collectionName: 'Order',
+                  documentId: doc._id,
+                  operation: 'delete',
+                }).catch(() => null);
+                if (isDeletedLocally) {
+                  // Propagate deletion to Central DB to prevent zombie resurrects
+                  await centralCol.deleteOne({ _id: doc._id }).catch(() => {});
+                  continue;
+                }
+              }
 
               // ── Orders Protection: Terminal Status & Additive Rounds ──
               if (colName === 'orders' && localDoc) {

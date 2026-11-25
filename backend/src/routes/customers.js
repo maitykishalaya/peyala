@@ -6,6 +6,7 @@ const Account = require('../models/Account');
 const { auth } = require('../middleware/auth');
 const { getIstDayRange } = require('../utils/date');
 const { matchesSearch, sortBySearchRelevance } = require('../utils/search');
+const { recalculateCustomerKhata, recalculateAllCustomersKhata } = require('../utils/khataLedger');
 
 router.use(auth);
 
@@ -240,9 +241,19 @@ router.get('/due-report', async (req, res) => {
 // ── 3. Customer Details with Full Khata Ledger & Bill History ────
 router.get('/:id', async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
+    let customer = await Customer.findById(req.params.id);
     if (!customer) {
       return res.status(404).json({ message: 'Customer not found' });
+    }
+
+    // Self-healing Khata recalculation to ensure header & bills are always 100% mathematically aligned
+    try {
+      const recalc = await recalculateCustomerKhata(customer._id);
+      if (recalc && recalc.customer) {
+        customer = recalc.customer;
+      }
+    } catch (recalcErr) {
+      console.warn(`[Customers] Khata auto-recalc warning for customer ${customer._id}:`, recalcErr.message);
     }
 
     const [bills, payments] = await Promise.all([
@@ -264,6 +275,38 @@ router.get('/:id', async (req, res) => {
         remainingDue: Math.max(0, (b.dueAmount || 0) - (b.dueSettledAmount || 0)),
       })),
       payments,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── 3b. Manual / Explicit Recalculation Endpoints ────────────────
+router.post('/:id/recalculate', async (req, res) => {
+  try {
+    const result = await recalculateCustomerKhata(req.params.id);
+    if (!result) {
+      return res.status(404).json({ message: 'Customer not found' });
+    }
+    res.json({
+      success: true,
+      message: `Khata recalculated successfully for ${result.customer.name}`,
+      customer: result.customer,
+      totalDue: result.totalDue,
+      totalOrders: result.totalOrders,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/recalculate-all', async (req, res) => {
+  try {
+    const summary = await recalculateAllCustomersKhata();
+    res.json({
+      success: true,
+      message: `Recalculated Khata for ${summary.processed} customers. Total outstanding due: ₹${summary.totalOutstandingDue}`,
+      ...summary,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

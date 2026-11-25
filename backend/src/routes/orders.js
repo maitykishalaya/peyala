@@ -14,6 +14,7 @@ const { ensureOrderBillNumber } = require('../utils/billingSequence');
 const { getNextOrderNumber } = require('../utils/orderSequence');
 const { getNextDailyKotNumber } = require('../utils/kotSequence');
 const { reconcileDailySales } = require('../utils/salesReconciler');
+const { recalculateCustomerKhata } = require('../utils/khataLedger');
 const realtimeHub = require('../services/realtimeHub');
 const inventoryConsumptionEngine = require('../services/inventoryConsumptionEngine');
 
@@ -2611,17 +2612,19 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
     const paymentMethod = (order.paymentMethod || 'other').toLowerCase();
 
     // Determine breakdown of amounts being reversed
-    let oldCash = 0, oldUpi = 0, oldCard = 0, oldOther = 0;
-    if (order.paymentBreakdown && (order.paymentBreakdown.cash || order.paymentBreakdown.upi || order.paymentBreakdown.card || order.paymentBreakdown.other)) {
+    let oldCash = 0, oldUpi = 0, oldCard = 0, oldOther = 0, oldDue = 0;
+    if (order.paymentBreakdown && (order.paymentBreakdown.cash || order.paymentBreakdown.upi || order.paymentBreakdown.card || order.paymentBreakdown.other || order.paymentBreakdown.due)) {
       oldCash = order.paymentBreakdown.cash || 0;
       oldUpi = order.paymentBreakdown.upi || 0;
       oldCard = order.paymentBreakdown.card || 0;
       oldOther = order.paymentBreakdown.other || 0;
+      oldDue = order.paymentBreakdown.due || 0;
     } else {
       const pm = paymentMethod;
       if (pm === 'cash') oldCash = settledAmt;
       else if (pm === 'upi') oldUpi = settledAmt;
       else if (pm === 'card') oldCard = settledAmt;
+      else if (pm === 'due') oldDue = settledAmt;
       else oldOther = settledAmt;
     }
 
@@ -2672,6 +2675,25 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
 
     // 3. Permanently remove the order document
     await Order.findByIdAndDelete(order._id);
+
+    // Also delete from Central Atlas DB if connected, preventing sync engine resurrection
+    try {
+      const syncEngine = require('../services/syncEngine');
+      const centralConn = await syncEngine.getCentralConnection();
+      if (centralConn && centralConn.readyState === 1) {
+        await centralConn.db.collection('orders').deleteOne({ _id: order._id });
+      }
+    } catch (_) {}
+
+    // Recalculate customer's Khata ledger if customer or due was associated
+    const targetCustId = order.customer || (order.customerPhone ? (await Customer.findOne({ phone: order.customerPhone }).select('_id'))?._id : null);
+    if (targetCustId) {
+      try {
+        await recalculateCustomerKhata(targetCustId);
+      } catch (custErr) {
+        console.error('[Orders] Customer Khata recalc error on delete:', custErr.message);
+      }
+    }
 
     // Automated inventory reversal trigger for deleted settled bill (safe & non-blocking)
     inventoryConsumptionEngine.reverseForSettledBillDeletion(order, req.user).catch((err) => {
@@ -2755,16 +2777,18 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
       : order.total;
     const oldMethod = (order.paymentMethod || 'other').toLowerCase();
 
-    let oldCash = 0, oldUpi = 0, oldCard = 0, oldOther = 0;
-    if (order.paymentBreakdown && (order.paymentBreakdown.cash || order.paymentBreakdown.upi || order.paymentBreakdown.card || order.paymentBreakdown.other)) {
+    let oldCash = 0, oldUpi = 0, oldCard = 0, oldOther = 0, oldDue = 0;
+    if (order.paymentBreakdown && (order.paymentBreakdown.cash || order.paymentBreakdown.upi || order.paymentBreakdown.card || order.paymentBreakdown.other || order.paymentBreakdown.due)) {
       oldCash = order.paymentBreakdown.cash || 0;
       oldUpi = order.paymentBreakdown.upi || 0;
       oldCard = order.paymentBreakdown.card || 0;
       oldOther = order.paymentBreakdown.other || 0;
+      oldDue = order.paymentBreakdown.due || 0;
     } else {
       if (oldMethod === 'cash') oldCash = oldSettled;
       else if (oldMethod === 'upi') oldUpi = oldSettled;
       else if (oldMethod === 'card') oldCard = oldSettled;
+      else if (oldMethod === 'due') oldDue = oldSettled;
       else oldOther = oldSettled;
     }
 
@@ -2902,7 +2926,22 @@ router.put('/:id/settled', adminOnly, async (req, res) => {
     order.waivedAmount = newWaived;
     order.paymentMethod = newMethod;
     order.paymentBreakdown = { cash: newCash, upi: newUpi, card: newCard, due: newDue, other: newOther };
+    order.dueAmount = newDue;
+    if (newDue <= 0) {
+      order.dueSettled = true;
+      order.dueSettledAmount = 0;
+    }
     await order.save();
+
+    // Recalculate customer Khata ledger if due or customer is associated
+    if (oldDue > 0 || newDue > 0 || order.customer || order.customerPhone) {
+      const targetCustId = order.customer || (order.customerPhone ? (await Customer.findOne({ phone: order.customerPhone }).select('_id'))?._id : null);
+      if (targetCustId) {
+        try {
+          await recalculateCustomerKhata(targetCustId);
+        } catch (_) {}
+      }
+    }
 
     // 7. Reconcile Daily Sales Register strictly from all settled orders for this IST day
     const orderDate = order.paidAt || order.createdAt || new Date();

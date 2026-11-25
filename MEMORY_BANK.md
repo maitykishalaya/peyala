@@ -642,6 +642,26 @@ Peyala v8 is a production-grade restaurant operations and management system buil
   - Safe compound key upsert pattern (`$set` + `$setOnInsert`) prevents `E11000 duplicate key` errors for collections with compound unique indices (`unitconversions` on `inventoryItem + purchaseUnit`, `attendances` on `staff + date`).
   - Resilient `dotenv` configuration path resolution (`path.join(__dirname, '../.env')`) guarantees environmental stability regardless of invocation working directory.
 
+### 3.32 Settled Bill Deletion Khata Recalculation & Sync Zombie Prevention Engine (`backend/src/routes/orders.js`, `backend/src/routes/customers.js`, `backend/src/utils/khataLedger.js`, `backend/src/services/syncEngine.js`)
+- **Operational Need & Problem Diagnosis**:
+  - When an admin deletes a settled bill (e.g. entered by mistake on DUE/KHATA) from Reports (`DELETE /api/orders/:id/settled`), the legacy deletion routine reversed cash and digital accounts but omitted adjusting `Customer.totalDue` and `Customer.totalOrders`.
+  - Furthermore, because `paymentMethod: 'due'` was not isolated from `oldOther`, legacy code erroneously deducted the bill amount from the bank Current Account even though no cash/bank receipt was ever collected for credit orders.
+  - Additionally, because the order document was only deleted locally, `syncEngine.js` (`pullFromCentral` and `reconcileTerminalOrders`) treated the order as missing on local and resurrected it from Central Atlas as a zombie order.
+- **Architectural Solution & Hardening**:
+  1. **Deterministic Khata Recalculation Engine (`backend/src/utils/khataLedger.js`)**:
+     - `recalculateCustomerKhata(customerId)` fetches all non-cancelled orders and payment receipts, executes strict FIFO settlement allocation across credit bills, calculates mathematically exact `totalDue` and `totalOrders`, updates the local Customer document, dual-writes to Central Atlas, and broadcasts `CUSTOMER_UPDATED` and `REALTIME_DUES_UPDATED`.
+     - `recalculateAllCustomersKhata()` recalculates all active customer ledgers for global ledger parity.
+  2. **Settled Bill Deletion Hardening (`backend/src/routes/orders.js` - `DELETE /:id/settled`)**:
+     - Explicitly separates `oldDue` from `oldCash` and `oldDigital` so credit bills never erroneously alter bank account balances.
+     - Deletes the order document from local DB and Central Atlas simultaneously.
+     - Triggers `recalculateCustomerKhata` immediately, removing unpaid due amounts and decrementing `totalOrders`.
+  3. **Settled Bill Modification (`backend/src/routes/orders.js` - `PUT /:id/settled`)**:
+     - Synchronizes `order.dueAmount = newDue` and triggers `recalculateCustomerKhata` whenever credit portions are modified.
+  4. **Self-Healing Khata Modal (`backend/src/routes/customers.js` - `GET /api/customers/:id`)**:
+     - Automatically runs `recalculateCustomerKhata` whenever a customer ledger modal is opened, guaranteeing that the modal header (`Current Balance`, `Lifetime Orders`) and the bill list are 100% mathematically aligned with zero drift.
+  5. **Sync Tombstone Guard (`backend/src/services/syncEngine.js`)**:
+     - In `reconcileTerminalOrders` and `pullFromCentral`, checks for delete mutations in `SyncOutbox` before upserting orders. Deleted orders are permanently pruned and never resurrected.
+
 ### 3.30 Recipe Management, Universal Unit Conversion & Automated Inventory Consumption Engine (`/recipes`)
 - **Operational Need**: Automatically deduct raw materials from inventory upon selling menu items, eliminate manual stock entry drift, and allow purchasing in bulk packaging (packets, cartons, bottles, boxes, kg) while maintaining canonical stock in usable kitchen units (grams, ml, pieces).
 - **Core Principles & Architecture**:
@@ -868,7 +888,8 @@ Whenever changes are made, run this validation suite before concluding:
 - **Backend Render Adaptations**:
   - ackend/src/server.js: Added root / and /health endpoints in addition to /api/health so Render health checks pass immediately on any path.
   - CORS middleware configured with { origin: true, credentials: true } to permit cross-origin requests from Vercel deployments.
-  - Added ender.yaml blueprint at repository root for 1-click Render web service deployment.
+  - Added 
+ender.yaml blueprint at repository root for 1-click Render web service deployment.
   - Added ackend/.env.example and rontend/.env.example templates.
 - **Installer & Shortcut Standardization**:
   - Added create-windows-desktop-app-shortcut.bat forwarding alias to create-windows-shortcut.bat ensuring backward and forward compatibility for INSTALL-PEYALA-POS.bat.

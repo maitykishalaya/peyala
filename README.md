@@ -26,7 +26,7 @@ Combines live table management, multi-round Kitchen Order Tickets (KOT), 80mm th
 | **Detailed Sales Report** | `/reports` | Comprehensive audit trail of individual customer orders, KOT history, bill numbers, payment modes, waived off tracking, 1-click thermal bill reprinting, and one-click Excel CSV export. |
 | **Sales Register** | `/sales` | Consolidated daily sales entries (Counter cash/UPI + Zomato/Swiggy net settlements after commission and platform deductions). |
 | **Sales Analytics** | `/analytics` | Business intelligence cockpit, daily revenue targets vs pace, Top 3 actions, delivery platform margin leakage, hourly/day demand patterns, and statutory GST filing registers. |
-| **Customer Dues** | `/dues` | Customer khata ledger, credit orders tracking, balance sheet asset reconciliation, payment receipts, and customer statement timeline. |
+| **Customer Dues** | `/dues` | Customer khata ledger, self-healing FIFO recalculation engine, credit orders tracking, balance sheet asset reconciliation, payment receipts, and customer statement timeline. |
 | **Dashboard** | `/dashboard` | Executive KPI overview (Revenue, Gross/Net Profit), yesterday's operational summary, live account balances, and low stock warnings. |
 | **Accounts** | `/accounts` | Multi-account tracking (Cash Counter, Current Account, Petty Cash, UPI) with internal fund transfers. |
 | **Inventory** | `/inventory` | Stock tracking with minimum thresholds, unit conversions, and automated weighted-average unit cost (WAC) recalculation. |
