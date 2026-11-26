@@ -245,13 +245,56 @@ class SyncEngine {
         const isCentralTerminal = cStatus === 'paid' || cStatus === 'cancelled';
 
         if (!isCentralTerminal) {
-          // Check if this local order was deleted via SyncOutbox
+          // Cross-Device Tombstone Check: Strictly prevent resurrecting orders deleted on website or another terminal
+          const tombstoneQuery = {
+            $or: [
+              { orderId: localOrd._id },
+              { _id: localOrd._id },
+              ...(localOrd.orderNumber ? [{ orderNumber: localOrd.orderNumber }] : []),
+              ...(localOrd.billNumber ? [{ billNumber: localOrd.billNumber }] : [])
+            ]
+          };
+
+          const isTombstonedLocally = await mongoose.connection.db.collection('deletedorders').findOne(tombstoneQuery).catch(() => null);
+          const isTombstonedCentral = await centralConn.db.collection('deletedorders').findOne(tombstoneQuery).catch(() => null);
+          const isDeletedInCentralOutbox = await centralConn.db.collection('syncoutboxes').findOne({
+            collectionName: 'Order',
+            documentId: localOrd._id,
+            operation: 'delete',
+          }).catch(() => null);
           const isDeletedLocally = await mongoose.connection.db.collection('syncoutboxes').findOne({
             collectionName: 'Order',
             documentId: localOrd._id,
             operation: 'delete',
           }).catch(() => null);
-          if (isDeletedLocally) {
+
+          if (isTombstonedLocally || isTombstonedCentral || isDeletedInCentralOutbox || isDeletedLocally) {
+            console.log(`[SyncEngine] Tombstone detected for Local Order #${localOrd.orderNumber || ''} (Bill #${localOrd.billNumber || ''}). Removing from local DB and aborting resurrection.`);
+            await localOrdersCol.deleteOne({ _id: localOrd._id }).catch(() => {});
+            if (!isTombstonedLocally) {
+              await mongoose.connection.db.collection('deletedorders').updateOne(
+                { orderId: localOrd._id },
+                {
+                  $set: {
+                    orderId: localOrd._id,
+                    orderNumber: localOrd.orderNumber,
+                    billNumber: localOrd.billNumber,
+                    customerId: localOrd.customer,
+                    total: localOrd.total,
+                    dueAmount: localOrd.dueAmount,
+                    deletedAt: new Date(),
+                    reason: 'reconcile_tombstone_purge'
+                  }
+                },
+                { upsert: true }
+              ).catch(() => {});
+            }
+            if (localOrd.customer) {
+              try {
+                const { recalculateCustomerKhata } = require('../utils/khataLedger');
+                await recalculateCustomerKhata(localOrd.customer);
+              } catch (_) {}
+            }
             continue;
           }
 
@@ -713,6 +756,7 @@ class SyncEngine {
         'transfers',
         'payments',
         'purchaseentries',
+        'deletedorders',
         'orders',
         'receipts',
         'suppliers',
@@ -807,6 +851,37 @@ class SyncEngine {
 
           const docs = await centralCol.find(query).toArray();
           if (docs.length > 0) {
+            // Inbound Tombstones Handling: Purge locally deleted orders immediately across all terminals
+            if (colName === 'deletedorders') {
+              for (const tomb of docs) {
+                const targetOrderId = tomb.orderId || tomb._id;
+                const tombFilter = {
+                  $or: [
+                    { _id: targetOrderId },
+                    ...(tomb.orderNumber ? [{ orderNumber: tomb.orderNumber }] : []),
+                    ...(tomb.billNumber ? [{ billNumber: tomb.billNumber }] : [])
+                  ]
+                };
+                const existingLocalOrd = await mongoose.connection.db.collection('orders').findOne(tombFilter);
+                if (existingLocalOrd) {
+                  console.log(`[SyncEngine] Inbound tombstone: Purging local Order #${existingLocalOrd.orderNumber} (Bill #${existingLocalOrd.billNumber})`);
+                  await mongoose.connection.db.collection('orders').deleteOne({ _id: existingLocalOrd._id });
+                  if (existingLocalOrd.customer) {
+                    try {
+                      const { recalculateCustomerKhata } = require('../utils/khataLedger');
+                      await recalculateCustomerKhata(existingLocalOrd.customer);
+                    } catch (_) {}
+                  }
+                }
+                await localCol.updateOne(
+                  { orderId: targetOrderId },
+                  { $set: { ...tomb, orderId: targetOrderId } },
+                  { upsert: true }
+                );
+              }
+              continue;
+            }
+
             // Special inbound handling for sequences (BillSequence and OrderSequence) — Maximum Wins
             if (colName === 'billsequences' || colName === 'ordersequences') {
               for (const centralSeqDoc of docs) {
@@ -934,16 +1009,29 @@ class SyncEngine {
             for (const doc of docs) {
               const localDoc = localMap.get(String(doc._id));
 
-              // If order is missing locally, check if it was deleted locally via SyncOutbox
-              if (colName === 'orders' && !localDoc) {
+              // If order is tombstoned or deleted locally/centrally, purge from both and never resurrect
+              if (colName === 'orders') {
+                const tombstoneQuery = {
+                  $or: [
+                    { orderId: doc._id },
+                    { _id: doc._id },
+                    ...(doc.orderNumber ? [{ orderNumber: doc.orderNumber }] : []),
+                    ...(doc.billNumber ? [{ billNumber: doc.billNumber }] : [])
+                  ]
+                };
+                const isTombstoned = await mongoose.connection.db.collection('deletedorders').findOne(tombstoneQuery).catch(() => null);
+                const isCentralTombstone = await centralConn.db.collection('deletedorders').findOne(tombstoneQuery).catch(() => null);
                 const isDeletedLocally = await mongoose.connection.db.collection('syncoutboxes').findOne({
                   collectionName: 'Order',
                   documentId: doc._id,
                   operation: 'delete',
                 }).catch(() => null);
-                if (isDeletedLocally) {
-                  // Propagate deletion to Central DB to prevent zombie resurrects
+
+                if (isTombstoned || isCentralTombstone || isDeletedLocally) {
                   await centralCol.deleteOne({ _id: doc._id }).catch(() => {});
+                  if (localDoc) {
+                    await localCol.deleteOne({ _id: doc._id }).catch(() => {});
+                  }
                   continue;
                 }
               }
@@ -1305,7 +1393,7 @@ class SyncEngine {
       const collections = await centralConn.db.listCollections().toArray();
       const PRIORITY_ORDER = [
         'users', 'possettings', 'menucategories', 'menuitems', 'tables',
-        'accounts', 'orders', 'orderitems', 'shifts', 'inventoryitems',
+        'accounts', 'deletedorders', 'orders', 'orderitems', 'shifts', 'inventoryitems',
         'inventorycategories', 'suppliers', 'expenses', 'customers',
         'reservations', 'kitchenstations', 'paymentmethods', 'printers',
         'taxsettings', 'recipes', 'unitconversions', 'inventorymovements'

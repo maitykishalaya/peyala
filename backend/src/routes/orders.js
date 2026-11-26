@@ -2676,13 +2676,39 @@ router.delete('/:id/settled', adminOnly, async (req, res) => {
     // 3. Permanently remove the order document
     await Order.findByIdAndDelete(order._id);
 
-    // Also delete from Central Atlas DB if connected, preventing sync engine resurrection
+    // Record persistent cross-device deletion tombstone to strictly prevent split-brain resurrects
+    const DeletedOrder = require('../models/DeletedOrder');
+    const tombstoneData = {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      billNumber: order.billNumber,
+      customerId: order.customer,
+      total: order.total,
+      dueAmount: order.dueAmount,
+      reason: 'settled_bill_deletion',
+      deletedBy: req.user?.name || req.user?._id || 'admin',
+      deletedAt: new Date(),
+    };
+    await DeletedOrder.findOneAndUpdate(
+      { orderId: order._id },
+      { $set: tombstoneData },
+      { upsert: true, new: true }
+    ).catch(() => {});
+
+    // Also delete from Central Atlas DB and record tombstone in Central DB if connected, preventing sync engine resurrection
     try {
       const syncEngine = require('../services/syncEngine');
       const centralConn = await syncEngine.getCentralConnection();
       if (centralConn && centralConn.readyState === 1) {
         await centralConn.db.collection('orders').deleteOne({ _id: order._id });
+        await centralConn.db.collection('deletedorders').updateOne(
+          { orderId: order._id },
+          { $set: tombstoneData },
+          { upsert: true }
+        );
       }
+      syncEngine.recordMutation('Order', order._id, 'delete').catch(() => {});
+      syncEngine.recordMutation('DeletedOrder', order._id, 'insert', tombstoneData).catch(() => {});
     } catch (_) {}
 
     // Recalculate customer's Khata ledger if customer or due was associated

@@ -1628,5 +1628,23 @@ ender.yaml blueprint at repository root for 1-click Render web service deploymen
     3. *All-In-One Installer Compilation*:
        - Built and packaged `INSTALL-PEYALA-ALL-IN-ONE.bat`, `Peyala-POS-AllInOne-Installer.exe`, and `Peyala-POS.apk`, mirrored to `C:\Desktop\Peyala_v8`.
 
+- **v12.1.5 Distributed Cross-Device Deletion Tombstone Architecture & Anti-Resurrection Shield (November 26, 2026)**:
+  - **Identified Operational Incident**:
+    1. Bill #1730 kept reappearing after being deleted from the website, home PC, or business laptop.
+    2. *Root Cause*: In a multi-station environment (home server, business laptop, cloud website), when a bill was deleted on Station A, Station B still had the order in its local MongoDB. In `syncEngine.js`, `reconcileTerminalOrders` inspected paid orders from the last 48 hours. Finding the order locally but missing in Central Atlas (with no local deletion in Station B's outbox), Station B considered Central Atlas to have accidentally lost the order, logging: `[SyncEngine] Proactive Healing: Local Order #6549 is "paid" but Central is "missing". Pushing to Central...` and resurrecting the order on Central Atlas! Station A then pulled it back down via inbound sync. When deleted on Station B, Station A resurrected it, creating an infinite cross-device ping-pong loop.
+  - **Architectural Safeguards Deployed (Zero Logic Changes)**:
+    1. *Dedicated Deletion Tombstones Model (`backend/src/models/DeletedOrder.js`)*:
+       - Structured persistent schema tracking `orderId`, `orderNumber`, `billNumber`, `customerId`, `total`, `dueAmount`, `reason`, `deletedBy`, and `deletedAt`.
+    2. *Settled Bill Deletion Integration (`backend/src/routes/orders.js`)*:
+       - In `DELETE /api/orders/:id/settled`, writes tombstone locally, writes to Central Atlas `deletedorders`, and queues mutation in `SyncOutbox`.
+    3. *Anti-Resurrection Cross-Device Reconciliation (`backend/src/services/syncEngine.js`)*:
+       - In `reconcileTerminalOrders`: inspects `deletedorders` (locally and on Central Atlas) as well as outbox tombstones. If a tombstone is found, purges the local order immediately, persists local tombstone, recalculates customer dues, and strictly aborts any push to Central Atlas.
+       - In `inboundSync`: adds `deletedorders` to `inboundCollections` and `PRIORITY_ORDER`, pulling tombstones to local stations, auto-purging local matching orders, and recalculating customer dues.
+       - In inbound order processing: rejects any incoming order from Central Atlas that matches a local or central tombstone, deleting from both.
+    4. *Immediate Database Alignment*:
+       - Tombstoned Order #1730 (`6b057d272b0c3713849aa79b`) in both Local DB and Central Atlas `deletedorders`.
+       - Purged Order #1730 from `orders` collection in both Local DB and Central Atlas.
+       - Recalculated Soumyadeep Dey's Khata: total due updated from ₹7,759 to exactly **₹7,591** across **144 lifetime orders** (factoring in the 2 new bills placed on 25 Nov: #1750 ₹143 and #1751 ₹147).
+
 ---
-*Last Updated: November 25, 2026 (v12.1.4 Customer Khata Recalculation on Bill Deletion & Multi-Device Sync Alignment) · Peyala v12.1 Engineering*
+*Last Updated: November 26, 2026 (v12.1.5 Distributed Deletion Tombstone Anti-Resurrection Shield) · Peyala v12.1 Engineering*

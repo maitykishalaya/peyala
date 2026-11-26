@@ -1212,3 +1212,13 @@ Peyala POS is fully configured for simultaneous cloud hosting (Frontend on **Ver
   2. Linked Order #6121 to Soumyadeep Dey with `dueSettled: true, dueSettledAmount: 202`.
   3. Directly cleansed Central MongoDB Atlas and Local DB: purged Order #1730, set tombstone in `syncoutboxes`, and updated Soumyadeep Dey to exactly **₹7,301** across **142 lifetime orders**.
   4. Generated production All-In-One installer package (`INSTALL-PEYALA-ALL-IN-ONE.bat`, `Peyala-POS-AllInOne-Installer.exe`, and `Peyala-POS.apk`).
+
+### 25. Distributed Cross-Device Deletion Tombstone Architecture & Anti-Resurrection Shield (November 26, 2026)
+- **Problem Resolved**: Bill #1730 kept reappearing after being deleted from the website or business laptop due to cross-terminal sync ping-pong.
+- **Root Cause**: When a bill was deleted on Station A, Station B still retained it locally. `reconcileTerminalOrders` in `syncEngine.js` detected the order was missing in Central Atlas and "proactively healed" it by pushing it back to Central Atlas. Station A then pulled it down via inbound sync, creating an infinite resurrection cycle.
+- **Architectural Safeguards Deployed (Zero Logic Changes)**:
+  1. Implemented persistent `DeletedOrder` tombstone model (`backend/src/models/DeletedOrder.js`).
+  2. Enhanced `DELETE /api/orders/:id/settled` to record tombstones locally, in Central Atlas `deletedorders`, and queue via `SyncOutbox`.
+  3. Added cross-device tombstone checks in `reconcileTerminalOrders`: if an order is tombstoned locally or centrally, it purges from local DB, persists the tombstone, recalculates customer Khata, and strictly aborts pushing to Central.
+  4. Added `deletedorders` to `inboundCollections` so all terminals pull tombstones and auto-purge deleted orders.
+  5. Purged Order #1730 and recorded tombstones across Local DB and Central Atlas, bringing Soumyadeep Dey's authoritative balance to **₹7,591** across **144 lifetime orders**.
